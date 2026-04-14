@@ -1,0 +1,27 @@
+[workspace]
+members = [
+    "borrower_reputation",
+    "escrow",
+    "lending",
+    "default_management",
+]
+resolver = "2"
+
+[workspace.dependencies]
+soroban-sdk = "22.0.4"
+
+# ─── Release profile (optimise WASM size) ────────────────────────────────────
+[profile.release]
+opt-level     = "z"
+overflow-checks = true
+debug         = 0
+strip         = "symbols"
+debug-assertions = false
+panic         = "abort"
+codegen-units = 1
+lto           = true
+
+# Same as release but keeps debug-assertions for log! events on testnet
+[profile.release-with-logs]
+inherits         = "release"
+debug-assertions = true

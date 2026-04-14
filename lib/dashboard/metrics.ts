@@ -80,7 +80,7 @@ export async function getBorrowerDashboardMetrics(userId: string): Promise<Borro
         .eq("borrower_id", userId),
     ]);
 
-    const reputation = snapshotRes.data?.score_total ?? 0;
+    const reputation = snapshotRes.data?.score_total ?? 250;
     const loans = loansRes.data ?? [];
 
     const activeLoans = loans.filter((loan) => ["approved", "funded", "active"].includes(loan.status)).length;
@@ -96,7 +96,7 @@ export async function getBorrowerDashboardMetrics(userId: string): Promise<Borro
       repaymentRate,
     };
   } catch {
-    return { reputationScore: 0, availableCredit: 0, activeLoans: 0, repaymentRate: 0 };
+    return { reputationScore: 250, availableCredit: 2500, activeLoans: 0, repaymentRate: 100 };
   }
 }
 

@@ -31,7 +31,11 @@ export default function AdminKYCClient({
     const result = await verifyKYCDocument(docId, true);
     if (result.success) {
       setMessage({ type: "success", text: "✅ Document approved" });
-      setSelectedDoc(null);
+      setTimeout(() => {
+        setSelectedDoc(null);
+        setMessage(null);
+        window.location.reload();
+      }, 1500);
     } else {
       setMessage({ type: "error", text: `❌ ${result.error}` });
     }
@@ -49,10 +53,14 @@ export default function AdminKYCClient({
     if (result.success) {
       setMessage({
         type: "success",
-        text: "✅ Document rejected with reason",
+        text: "✅ Document rejected",
       });
-      setSelectedDoc(null);
-      setRejectionReason("");
+      setTimeout(() => {
+        setSelectedDoc(null);
+        setRejectionReason("");
+        setMessage(null);
+        window.location.reload();
+      }, 1500);
     } else {
       setMessage({ type: "error", text: `❌ ${result.error}` });
     }
@@ -78,7 +86,11 @@ export default function AdminKYCClient({
               {documents.map((doc) => (
                 <div
                   key={doc.id}
-                  onClick={() => setSelectedDoc(doc)}
+                  onClick={() => {
+                    setSelectedDoc(doc);
+                    setMessage(null);
+                    setRejectionReason("");
+                  }}
                   style={{
                     padding: "1rem",
                     border:
@@ -95,7 +107,7 @@ export default function AdminKYCClient({
                   <div style={{ fontSize: "0.85rem", color: "#666" }}>
                     {doc.email}
                   </div>
-                  <div
+                    <div
                     style={{
                       fontSize: "0.75rem",
                       color: "#999",
@@ -103,7 +115,7 @@ export default function AdminKYCClient({
                     }}
                   >
                     Submitted:{" "}
-                    {new Date(doc.submitted_at).toLocaleDateString()}
+                    {doc.submitted_at ? new Date(doc.submitted_at).toISOString().split('T')[0] : "Unknown"}
                   </div>
                 </div>
               ))}
@@ -164,78 +176,84 @@ export default function AdminKYCClient({
                 </div>
 
                 <div style={{ marginBottom: "1rem" }}>
-                  <label
-                    style={{
-                      display: "block",
-                      fontSize: "0.85rem",
-                      fontWeight: 600,
-                      marginBottom: "0.5rem",
-                    }}
-                  >
-                    Reject Reason (optional)
-                  </label>
-                  <textarea
-                    value={rejectionReason}
-                    onChange={(e) => setRejectionReason(e.target.value)}
-                    placeholder="If rejecting, provide reason..."
-                    style={{
-                      width: "100%",
-                      minHeight: "80px",
-                      padding: "0.5rem",
-                      border: "1px solid #d3dcf1",
-                      borderRadius: "0.4rem",
-                      fontFamily: "inherit",
-                      fontSize: "0.85rem",
-                    }}
-                  />
-                </div>
+                  {message && (
+                    <div
+                      style={{
+                        padding: "0.5rem 0.75rem",
+                        marginBottom: "1rem",
+                        borderRadius: "0.4rem",
+                        backgroundColor:
+                          message.type === "success" ? "#dcf5e3" : "#f5dcdc",
+                        color:
+                          message.type === "success" ? "#22863a" : "#cb2431",
+                        fontSize: "0.85rem",
+                      }}
+                    >
+                      {message.text}
+                    </div>
+                  )}
 
-                {message && (
-                  <div
-                    style={{
-                      padding: "0.5rem 0.75rem",
-                      marginBottom: "1rem",
-                      borderRadius: "0.4rem",
-                      backgroundColor:
-                        message.type === "success" ? "#dcf5e3" : "#f5dcdc",
-                      color:
-                        message.type === "success" ? "#22863a" : "#cb2431",
-                      fontSize: "0.85rem",
-                    }}
-                  >
-                    {message.text}
-                  </div>
-                )}
+                  {message?.type === "success" ? null : (
+                    <>
+                      <div style={{ marginBottom: "1rem" }}>
+                        <label
+                          style={{
+                            display: "block",
+                            fontSize: "0.85rem",
+                            fontWeight: 600,
+                            marginBottom: "0.5rem",
+                          }}
+                        >
+                          Reject Reason (optional)
+                        </label>
+                        <textarea
+                          value={rejectionReason}
+                          onChange={(e) => setRejectionReason(e.target.value)}
+                          placeholder="If rejecting, provide reason..."
+                          style={{
+                            width: "100%",
+                            minHeight: "80px",
+                            padding: "0.5rem",
+                            border: "1px solid #d3dcf1",
+                            borderRadius: "0.4rem",
+                            fontFamily: "inherit",
+                            fontSize: "0.85rem",
+                          }}
+                        />
+                      </div>
 
-                <div style={{ display: "grid", gap: "0.5rem" }}>
-                  <Button
-                    onClick={() => handleApprove(selectedDoc.id)}
-                    disabled={loading}
-                    style={{
-                      backgroundColor: "#10b981",
-                      color: "white",
-                      padding: "0.5rem 1rem",
-                      border: "none",
-                      borderRadius: "0.4rem",
-                      cursor: "pointer",
-                    }}
-                  >
-                    {loading ? "Processing..." : "✅ Approve"}
-                  </Button>
-                  <Button
-                    onClick={() => handleReject(selectedDoc.id)}
-                    disabled={loading}
-                    style={{
-                      backgroundColor: "#ef4444",
-                      color: "white",
-                      padding: "0.5rem 1rem",
-                      border: "none",
-                      borderRadius: "0.4rem",
-                      cursor: "pointer",
-                    }}
-                  >
-                    {loading ? "Processing..." : "❌ Reject"}
-                  </Button>
+                      <div style={{ display: "grid", gap: "0.5rem" }}>
+                        <Button
+                          onClick={() => handleApprove(selectedDoc.id)}
+                          disabled={loading}
+                          style={{
+                            backgroundColor: "#10b981",
+                            color: "white",
+                            padding: "0.5rem 1rem",
+                            border: "none",
+                            borderRadius: "0.4rem",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {loading ? "Processing..." : "✅ Approve"}
+                        </Button>
+                        <Button
+                          onClick={() => handleReject(selectedDoc.id)}
+                          disabled={loading}
+                          style={{
+                            backgroundColor: "#ef4444",
+                            color: "white",
+                            padding: "0.5rem 1rem",
+                            border: "none",
+                            borderRadius: "0.4rem",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {loading ? "Processing..." : "❌ Reject"}
+                        </Button>
+                      </div>
+                    </>
+                  )}
                 </div>
               </>
             ) : (

@@ -233,7 +233,6 @@ export default async function BorrowerProfilePage() {
                 borderRadius: "0.75rem",
                 background: kycInfo.bg,
                 border: `1px solid ${kycInfo.color}30`,
-                marginBottom: "1rem",
               }}
             >
               <span style={{ fontSize: "1.4rem", lineHeight: 1 }}>{kycInfo.icon}</span>
@@ -264,6 +263,13 @@ export default async function BorrowerProfilePage() {
                   </p>
                 )}
               </div>
+            </div>
+
+            <div style={{ marginTop: "1rem", padding: "0.85rem", borderRadius: "0.5rem", background: "rgba(126, 47, 208, 0.04)", border: "1px dashed rgba(126, 47, 208, 0.3)", marginBottom: "1rem" }}>
+              <p style={{ fontSize: "0.75rem", fontWeight: 700, color: "#7e2fd0", textTransform: "uppercase", marginBottom: "0.2rem" }}>🚀 Upcoming Security Feature</p>
+              <p style={{ fontSize: "0.78rem", color: "#64719a", lineHeight: 1.5 }}>
+                <strong>Live Facial Recognition</strong> is coming soon. Once deployed, biometric hashes will strictly enforce a "one person, one account" rule to dramatically harden network security and prevent identity fraud.
+              </p>
             </div>
 
             {/* Risk Profile */}

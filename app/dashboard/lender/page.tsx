@@ -78,12 +78,14 @@ export default async function LenderDashboardPage() {
       )
     : [];
 
+  const isKycVerified = profile?.kyc_status === "verified";
+  const isKycSubmitted = profile?.kyc_status === "submitted" || isKycVerified;
+
   const securityChecklist = [
     { label: "Email confirmed", done: Boolean(user.email_confirmed_at) },
     { label: "Legal name provided", done: Boolean(profile?.full_name) },
     { label: "Phone verified", done: Boolean(profile?.phone) },
-    { label: "Government ID", done: verificationMap.get("government_id") === "verified" },
-    { label: "Bank verification", done: verificationMap.get("bank_data") === "verified" },
+    { label: "Government ID verified", done: isKycVerified },
   ];
 
   const lenderProfileCompletion = Math.round(
@@ -120,19 +122,19 @@ export default async function LenderDashboardPage() {
       )}
       currentPath="/dashboard/lender"
       profilePath="/dashboard/lender/profile"
-      profileSummary={{
+      profileSummary={lenderProfileCompletion === 100 ? undefined : {
         completion: lenderProfileCompletion,
         kycStatus: String(profile?.kyc_status ?? "pending"),
-        warningText: lenderProfileCompletion < 100
-          ? "Incomplete profile increases funding risk. Finish KYC to grant loans safely."
-          : "Profile and KYC checks are complete.",
+        warningText: isKycSubmitted && !isKycVerified
+          ? "Your documents are currently under admin review."
+          : "Incomplete profile increases funding risk. Finish KYC to grant loans safely.",
         requiredItems: securityChecklist.filter((item) => !item.done).length > 0
           ? securityChecklist
               .filter((item) => !item.done)
               .map((item) => item.label)
-              .slice(0, 4)
-          : ["2FA enabled", "KYC documents verified"],
+          : [],
       }}
+      showProfileAlert={lenderProfileCompletion !== 100}
       links={[
         { href: "/dashboard/lender", label: "Home" },
         { href: "/dashboard/lender/pools", label: "Pools" },
@@ -161,11 +163,9 @@ export default async function LenderDashboardPage() {
             <h2 className="workspace-card-title">Security Details Needed</h2>
             <p className="workspace-card-copy">Complete these details before granting more loans:</p>
             <ul className="workspace-list workspace-list--compact">
-              <li><span>Government ID verification</span></li>
-              <li><span>Beneficiary bank account proof</span></li>
-              <li><span>Phone and country confirmation</span></li>
-              <li><span>Enable 2FA for account</span></li>
-              <li><span>Set withdrawal security PIN</span></li>
+              {securityChecklist.map((item) => (
+                <li key={item.label}><span>{item.done ? "✓ " : "○ "}{item.label}</span></li>
+              ))}
             </ul>
           </article>
         </section>

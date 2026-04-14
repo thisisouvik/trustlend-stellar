@@ -52,21 +52,14 @@ export default async function BorrowerDashboardPage() {
   const loans = loansRes.data ?? [];
   const verifications = verificationRes.data ?? [];
 
-  const verificationMap = new Map(
-    verifications.map((item) => [String(item.verification_type), String(item.status)]),
-  );
-
-  const monitoringDays = daysSince(user.created_at);
-  const monitoringComplete = monitoringDays >= 30;
+  const isKycVerified = profile?.kyc_status === "verified";
+  const isKycSubmitted = profile?.kyc_status === "submitted" || isKycVerified;
 
   const verificationItems = [
-    { label: "Email Verified", done: Boolean(user.email_confirmed_at), day: "Day 1" },
-    { label: "Phone Verified", done: Boolean(profile?.phone), day: "Day 2" },
-    { label: "Government ID Verified", done: verificationMap.get("government_id") === "verified", day: "Day 3" },
-    { label: "Facial Recognition OK", done: verificationMap.get("facial_recognition") === "verified", day: "Day 3" },
-    { label: "Employment Verified", done: verificationMap.get("employment") === "verified", day: "Day 5" },
-    { label: "Bank Data Verified", done: verificationMap.get("bank_data") === "verified", day: "Day 7" },
-    { label: "Monitoring Period", done: monitoringComplete, day: `Day ${Math.min(monitoringDays, 30)}/30` },
+    { label: "Email Verified", done: Boolean(user.email_confirmed_at), day: "Initial" },
+    { label: "Legal Name Set", done: Boolean(profile?.full_name), day: "Profile" },
+    { label: "Phone Number Verified", done: Boolean(profile?.phone), day: "Profile" },
+    { label: "Government ID Verified", done: isKycVerified, day: "Admin Review" },
   ];
 
   const verificationCompleted = verificationItems.filter((item) => item.done).length;
@@ -84,12 +77,11 @@ export default async function BorrowerDashboardPage() {
     ? Math.max(0, Number(selectedRepaymentLoan.principal_amount ?? 0) - Number(selectedRepaymentLoan.repaid_amount ?? 0))
     : 0;
 
-  const canApplyLoan = verificationProgress >= 90 && monitoringComplete;
+  const canApplyLoan = verificationProgress === 100;
   const maxLoanAmount = canApplyLoan ? metrics.availableCredit : 0;
   const missingSecurityItems = verificationItems
     .filter((item) => !item.done)
-    .map((item) => item.label)
-    .slice(0, 4);
+    .map((item) => item.label);
 
   const borrowerChartPoints = ["Mar", "Apr", "May", "Jun", "Jul", "Aug"].map((month, index) => {
     const borrowed = Number(loans[index]?.principal_amount ?? 0);
@@ -121,16 +113,17 @@ export default async function BorrowerDashboardPage() {
       )}
       currentPath="/dashboard/borrower"
       profilePath="/dashboard/borrower/profile"
-      profileSummary={{
+      profileSummary={canApplyLoan ? undefined : {
         completion: verificationProgress,
         kycStatus: String(profile?.kyc_status ?? "pending"),
-        warningText: canApplyLoan
-          ? "Profile is strong. Keep security details up to date."
+        warningText: isKycSubmitted && !isKycVerified
+          ? "Your documents are currently under admin review."
           : "Profile is incomplete. Complete security details to unlock borrowing.",
         requiredItems: missingSecurityItems.length > 0
           ? missingSecurityItems
-          : ["Enable 2FA", "Keep employment and bank details updated"],
+          : [],
       }}
+      showProfileAlert={!canApplyLoan}
       links={[
         { href: "/dashboard/borrower", label: "Home" },
         { href: "/dashboard/borrower/loans", label: "My loans" },
@@ -158,11 +151,9 @@ export default async function BorrowerDashboardPage() {
             <h2 className="workspace-card-title">Security Details Needed</h2>
             <p className="workspace-card-copy">Please complete these details to receive loans safely.</p>
             <ul className="workspace-list workspace-list--compact" style={{ marginTop: "0.75rem" }}>
-              <li><span>Legal full name</span></li>
-              <li><span>Primary phone number</span></li>
-              <li><span>Government-issued ID</span></li>
-              <li><span>Selfie and facial verification</span></li>
-              <li><span>Bank statement verification</span></li>
+                {verificationItems.map((item) => (
+                  <li key={item.label}><span>{item.label}</span></li>
+                ))}
             </ul>
           </article>
         </section>
@@ -183,7 +174,7 @@ export default async function BorrowerDashboardPage() {
               <div style={{ height: "0.4rem", borderRadius: "0.25rem", background: "#e5e7eb", overflow: "hidden" }}>
                 <div style={{ height: "100%", width: `${verificationProgress}%`, background: "linear-gradient(90deg, #7e2fd0 0%, #22cf9d 100%)", transition: "width 0.3s ease" }} />
               </div>
-              <p style={{ fontSize: "0.85rem", marginTop: "0.5rem", opacity: 0.6 }}>Estimated completion: {Math.max(0, 30 - monitoringDays)} days</p>
+              <p style={{ fontSize: "0.85rem", marginTop: "0.5rem", opacity: 0.6 }}>{Math.max(0, verificationItems.length - verificationCompleted)} items remaining</p>
             </div>
           </article>
 

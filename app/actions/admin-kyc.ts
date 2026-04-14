@@ -5,7 +5,18 @@
  * Only admins can verify/reject user identity documents
  */
 
+import { createClient } from "@supabase/supabase-js";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
+
+/** Service-role client that bypasses RLS */
+function getServiceRoleClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
 
 export async function verifyKYCDocument(
   userId: string,
@@ -93,10 +104,13 @@ export async function getPendingKYCDocuments(): Promise<
 
     if (adminProfile?.role !== "admin") return null;
 
-    // Fetch pending KYC documents
-    const { data, error } = await supabase
+    // Fetch pending KYC documents using admin client
+    const admin = getServiceRoleClient();
+    if (!admin) return null;
+
+    const { data, error } = await admin
       .from("profiles")
-      .select("id, full_name, kyc_status, government_id_url, kyc_submitted_at")
+      .select("id, full_name, kyc_status, government_id_ipfs_hash, government_id_url, kyc_submitted_at")
       .in("kyc_status", ["submitted"])
       .order("kyc_submitted_at", { ascending: true });
 
@@ -105,14 +119,28 @@ export async function getPendingKYCDocuments(): Promise<
       return null;
     }
 
-    // Get email for each profile
+    // Get email and generate signed URLs for each profile
     const docsWithEmail = await Promise.all(
       (data || []).map(async (doc) => {
-        const { data: authData } = await supabase.auth.admin.getUserById(doc.id);
+        const { data: authData } = await admin.auth.admin.getUserById(doc.id);
+        
+        let viewUrl = doc.government_id_url;
+        // Generate a 1-hour signed URL if we have the file path
+        if (doc.government_id_ipfs_hash) {
+           const { data: signedData } = await admin.storage
+             .from("kyc-documents")
+             .createSignedUrl(doc.government_id_ipfs_hash, 3600);
+           
+           if (signedData?.signedUrl) {
+             viewUrl = signedData.signedUrl;
+           }
+        }
+
         return {
-          ...doc,
-          email: authData?.user?.email || "unknown",
-          submitted_at: doc.kyc_submitted_at || "",
+           ...doc,
+           email: authData?.user?.email || "unknown",
+           submitted_at: doc.kyc_submitted_at || "",
+           government_id_url: viewUrl || "",
         };
       })
     );

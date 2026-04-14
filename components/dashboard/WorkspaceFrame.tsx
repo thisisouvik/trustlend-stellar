@@ -52,17 +52,9 @@ export function WorkspaceFrame({
   const resolvedProfilePath = profilePath ?? links.find((item) => /profile|settings/i.test(item.label))?.href ?? links[0]?.href ?? "/dashboard";
   const displayName = userName && userName.trim() !== "" ? userName.trim() : "User";
   
-  const resolvedProfileSummary: ProfileSummary = profileSummary ?? {
-    completion: 40,
-    kycStatus: "pending",
-    warningText: "Complete your profile and KYC details to unlock all dashboard actions.",
-    requiredItems: [
-      "Upload government ID",
-      "Verify phone number",
-      "Add bank account details",
-      "Enable 2FA",
-    ],
-  };
+  // Only use provided profileSummary - don't fall back to dummy data.
+  // If no summary is provided, the alert section is suppressed entirely.
+  const resolvedProfileSummary = profileSummary ?? null;
 
   const normalizedLinks = (() => {
     const seen = new Set<string>();
@@ -100,7 +92,7 @@ export function WorkspaceFrame({
               ))}
             </nav>
 
-            {showProfileAlert ? (
+            {showProfileAlert && resolvedProfileSummary ? (
               <section className="premium-alert" aria-live="polite">
                 <p className="premium-alert-badge">Action Required</p>
                 <div className="premium-alert-header">
@@ -109,12 +101,23 @@ export function WorkspaceFrame({
                   </span>
                   <p className="premium-alert-title">Profile & KYC</p>
                 </div>
-                <p className="workspace-profile-warning">High warning: complete profile to receive or grant loans.</p>
+                <p className="workspace-profile-warning">Complete your profile to unlock all dashboard actions.</p>
                 <p className="workspace-profile-copy">{resolvedProfileSummary.warningText}</p>
 
-                <div className="workspace-progress" style={{ margin: "0.8rem 0" }} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={resolvedProfileSummary.completion}>
+                <div
+                  className="workspace-progress"
+                  style={{ margin: "0.8rem 0" }}
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={resolvedProfileSummary.completion}
+                  aria-label={`Profile ${resolvedProfileSummary.completion}% complete`}
+                >
                   <span style={{ width: `${resolvedProfileSummary.completion}%` }} />
                 </div>
+                <p style={{ fontSize: "0.72rem", opacity: 0.65, marginBottom: "0.5rem" }}>
+                  {resolvedProfileSummary.completion}% complete
+                </p>
 
                 {resolvedProfileSummary.requiredItems.length > 0 && (
                   <ul className="workspace-checklist">

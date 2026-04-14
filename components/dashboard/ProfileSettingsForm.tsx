@@ -2,19 +2,23 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { getBrowserSupabaseClient } from "@/lib/supabase/client";
+import { updateUserProfile } from "@/app/actions/update-profile";
 import { uploadKYCDocument } from "@/app/actions/kyc-upload";
 
 interface ProfileSettingsFormProps {
   initialName?: string;
   initialPhone?: string;
-  initialCountry?: string;
+  initialDob?: string;
+  kycStatus?: string;
+  hasGovId?: boolean;
 }
 
 export function ProfileSettingsForm({
   initialName = "",
   initialPhone = "",
-  initialCountry = "",
+  initialDob = "",
+  kycStatus = "pending",
+  hasGovId = false,
 }: ProfileSettingsFormProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -25,30 +29,16 @@ export function ProfileSettingsForm({
   const [formData, setFormData] = useState({
     full_name: initialName,
     phone: initialPhone,
-    country_code: initialCountry,
+    date_of_birth: initialDob,
   });
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
-  function getReadableError(err: unknown): string {
-    if (err instanceof Error) {
-      return err.message;
-    }
-    if (err && typeof err === "object" && "message" in err) {
-      const message = (err as { message?: unknown }).message;
-      if (typeof message === "string" && message.trim().length > 0) {
-        return message;
-      }
-    }
-    return "Failed to update profile.";
-  }
-
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, files } = e.target;
-    
+
     if (name === "government_id" && files?.[0]) {
       setSelectedFile(files[0]);
-      console.log(`📄 File selected: ${files[0].name} (${files[0].size} bytes)`);
     } else {
       setFormData((prev) => ({ ...prev, [name]: value }));
     }
@@ -62,38 +52,19 @@ export function ProfileSettingsForm({
     setUploadProgress(null);
 
     try {
-      const supabase = getBrowserSupabaseClient();
-      if (!supabase) throw new Error("Supabase client not found");
-
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError || !userData?.user) {
-        throw new Error("You must be logged in to update your profile.");
-      }
-
-      // Step 1: Update basic profile info (RLS allows update on own row)
-      console.log("📝 Updating profile info...");
-      const updates = {
+      // Step 1: Update profile fields via server action (uses service-role → no RLS issues)
+      const result = await updateUserProfile({
         full_name: formData.full_name,
         phone: formData.phone,
-        country_code: formData.country_code.toUpperCase(),
-      };
+        date_of_birth: formData.date_of_birth || undefined,
+      });
 
-      const { data: updatedRows, error: updateError } = await supabase
-        .from("profiles")
-        .update(updates)
-        .eq("id", userData.user.id)
-        .select("id");
-
-      if (updateError) throw updateError;
-      if (!updatedRows || updatedRows.length === 0) {
-        throw new Error(
-          "Profile record not found. Please sign out and sign in again, then retry."
-        );
+      if (!result.success) {
+        throw new Error(result.error ?? "Failed to update profile.");
       }
 
-      // Step 2: Upload government ID if file selected
+      // Step 2: Upload government ID if selected
       if (selectedFile) {
-        console.log("📤 Uploading government ID...");
         setUploadProgress(30);
 
         const formDataWithFile = new FormData();
@@ -102,36 +73,68 @@ export function ProfileSettingsForm({
         const uploadResult = await uploadKYCDocument(formDataWithFile);
 
         if (!uploadResult.success) {
-          throw new Error(uploadResult.error || "Failed to upload document");
+          throw new Error(uploadResult.error ?? "Failed to upload document.");
         }
 
-        console.log(`✅ Document uploaded to Supabase: ${uploadResult.path}`);
         setUploadProgress(100);
       }
 
       setSuccess(true);
       setUploadProgress(null);
-      setTimeout(() => router.refresh(), 500);
+      // Refresh server-rendered data after a short delay
+      setTimeout(() => router.refresh(), 600);
     } catch (err: unknown) {
-      setError(getReadableError(err));
+      setError(err instanceof Error ? err.message : "An unexpected error occurred.");
       setUploadProgress(null);
     } finally {
       setLoading(false);
     }
   };
 
+  const docLocked = hasGovId && kycStatus !== "pending";
+
   return (
     <form className="settings-form-group" onSubmit={handleSubmit}>
-      {error && <p className="auth-page-error">{error}</p>}
-      {success && (
-        <p className="form-success-message">
-          Profile details saved successfully. Document uploaded for admin review.
-        </p>
+      {error && (
+        <div
+          style={{
+            padding: "0.85rem 1rem",
+            borderRadius: "0.6rem",
+            background: "rgba(220,38,38,0.06)",
+            border: "1px solid rgba(220,38,38,0.25)",
+            color: "#dc2626",
+            fontSize: "0.875rem",
+            marginBottom: "0.25rem",
+          }}
+        >
+          {error}
+        </div>
       )}
 
+      {success && (
+        <div
+          style={{
+            padding: "0.85rem 1rem",
+            borderRadius: "0.6rem",
+            background: "rgba(34,207,157,0.08)",
+            border: "1px solid rgba(34,207,157,0.3)",
+            color: "#16a07a",
+            fontSize: "0.875rem",
+            fontWeight: 500,
+          }}
+        >
+          ✓ Profile details saved successfully.
+          {selectedFile ? " Document submitted for admin review." : ""}
+        </div>
+      )}
+
+      {/* Legal Identity Fields */}
       <div className="settings-grid">
-        <div className="settings-field">
-          <label htmlFor="full_name" className="settings-label">Full Legal Name</label>
+        <div className="settings-field settings-field--full">
+          <label htmlFor="full_name" className="settings-label">
+            Full Legal Name
+            <span style={{ color: "#ff6b6b", marginLeft: "0.2rem" }}>*</span>
+          </label>
           <input
             id="full_name"
             name="full_name"
@@ -139,13 +142,20 @@ export function ProfileSettingsForm({
             className="settings-input"
             value={formData.full_name}
             onChange={handleChange}
-            placeholder="e.g. Satoshi Nakamoto"
+            placeholder="As it appears on your government ID"
             required
+            autoComplete="name"
           />
+          <p className="settings-help-text" style={{ marginTop: "0.25rem" }}>
+            Must match your government-issued identification exactly.
+          </p>
         </div>
 
         <div className="settings-field">
-          <label htmlFor="phone" className="settings-label">Phone Number</label>
+          <label htmlFor="phone" className="settings-label">
+            Phone Number
+            <span style={{ color: "#ff6b6b", marginLeft: "0.2rem" }}>*</span>
+          </label>
           <input
             id="phone"
             name="phone"
@@ -153,58 +163,102 @@ export function ProfileSettingsForm({
             className="settings-input"
             value={formData.phone}
             onChange={handleChange}
-            placeholder="+1 (555) 000-0000"
+            placeholder="+91 98765 43210"
             required
+            autoComplete="tel"
           />
         </div>
 
-        <div className="settings-field settings-field--narrow">
-          <label htmlFor="country_code" className="settings-label">Country Code</label>
+        <div className="settings-field">
+          <label htmlFor="date_of_birth" className="settings-label">
+            Date of Birth
+            <span style={{ color: "#ff6b6b", marginLeft: "0.2rem" }}>*</span>
+          </label>
           <input
-            id="country_code"
-            name="country_code"
-            type="text"
+            id="date_of_birth"
+            name="date_of_birth"
+            type="date"
             className="settings-input"
-            value={formData.country_code}
+            value={formData.date_of_birth}
             onChange={handleChange}
-            placeholder="US"
-            maxLength={2}
+            max={
+              new Date(Date.now() - 18 * 365.25 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0]
+            }
             required
           />
+          <p className="settings-help-text" style={{ marginTop: "0.25rem" }}>
+            Must be 18+.
+          </p>
         </div>
       </div>
 
-      <fieldset className="settings-upload-panel">
-        <legend className="settings-label settings-upload-legend">Government ID Verification</legend>
-        <p className="settings-help-text">
-          Upload an official government ID. It is stored in secure Supabase Storage and reviewed by admins only.
-        </p>
-        <p className="settings-disclaimer settings-disclaimer--rules">
-          Accepted files: JPG, PNG, WEBP, or PDF. Maximum size: 10 MB.
-        </p>
-        <p className="settings-disclaimer settings-disclaimer--warning">
-          Important: once submitted, this document cannot be changed from your dashboard.
-        </p>
-        <input
-          type="file"
-          name="government_id"
-          id="government_id"
-          className="settings-input settings-input--file"
-          accept="image/jpeg,image/png,image/webp,application/pdf"
-          onChange={handleChange}
-        />
-        {selectedFile && (
-          <p className="settings-file-note">
-            File selected: {selectedFile.name} ({(selectedFile.size / 1024).toFixed(0)} KB)
+      {/* Government ID Upload */}
+      <fieldset className="settings-upload-panel" disabled={docLocked}>
+        <legend className="settings-label settings-upload-legend">
+          Government ID Verification
+          {docLocked && (
+            <span
+              style={{
+                marginLeft: "0.6rem",
+                fontSize: "0.72rem",
+                background: "rgba(34,207,157,0.1)",
+                color: "#16a07a",
+                padding: "0.15rem 0.5rem",
+                borderRadius: "0.3rem",
+                fontWeight: 700,
+                letterSpacing: "0.04em",
+              }}
+            >
+              SUBMITTED
+            </span>
+          )}
+        </legend>
+
+        {docLocked ? (
+          <p className="settings-help-text" style={{ color: "#16a07a", marginBottom: 0 }}>
+            ✓ Your government ID has been submitted and is under admin review.
+            Contact support if you need to update it.
           </p>
-        )}
-        {uploadProgress !== null && (
-          <div className="settings-progress-track">
-            <div
-              className="settings-progress-fill"
-              style={{ width: `${uploadProgress}%` }}
+        ) : (
+          <>
+            <p className="settings-help-text">
+              Upload an official government ID (passport, national ID, or
+              driver&apos;s license). Stored securely and reviewed by admins only.
+            </p>
+            <p className="settings-disclaimer settings-disclaimer--rules">
+              Accepted: JPG, PNG, WEBP, or PDF · Max size: 10 MB
+            </p>
+            <p className="settings-disclaimer settings-disclaimer--warning">
+              Important: once submitted, this document cannot be changed from your dashboard.
+            </p>
+            <input
+              type="file"
+              name="government_id"
+              id="government_id"
+              className="settings-input settings-input--file"
+              accept="image/jpeg,image/png,image/webp,application/pdf"
+              onChange={handleChange}
             />
-          </div>
+            {selectedFile && (
+              <p className="settings-file-note">
+                Selected: {selectedFile.name} (
+                {(selectedFile.size / 1024).toFixed(0)} KB)
+              </p>
+            )}
+            {uploadProgress !== null && (
+              <div
+                className="settings-progress-track"
+                style={{ marginTop: "0.75rem" }}
+              >
+                <div
+                  className="settings-progress-fill"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            )}
+          </>
         )}
       </fieldset>
 
@@ -213,7 +267,7 @@ export function ProfileSettingsForm({
         disabled={loading}
         className="workspace-button workspace-button--primary settings-submit-btn"
       >
-        {loading ? "Verifying..." : "Save & Verify Identity"}
+        {loading ? "Saving…" : "Save & Verify Identity"}
       </button>
     </form>
   );

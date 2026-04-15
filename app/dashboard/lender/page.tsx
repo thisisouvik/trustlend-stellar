@@ -18,7 +18,7 @@ export default async function LenderDashboardPage() {
 
   const supabase = await getServerSupabaseClient();
 
-  const [positionsRes, poolsRes, loansRes, repaymentRes, profileRes, verificationRes] = supabase
+  const [positionsRes, poolsRes, loansRes, repaymentRes, profileRes] = supabase
     ? await Promise.all([
         supabase
           .from("pool_positions")
@@ -46,23 +46,14 @@ export default async function LenderDashboardPage() {
           .select("full_name, phone, country_code, kyc_status")
           .eq("id", user.id)
           .maybeSingle(),
-        supabase
-          .from("external_verifications")
-          .select("verification_type, status")
-          .eq("user_id", user.id),
       ])
-    : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: null }, { data: [] }];
+    : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: null }];
 
   const positions = positionsRes.data ?? [];
   const pools = poolsRes.data ?? [];
   const loans = loansRes.data ?? [];
   const repayments = repaymentRes.data ?? [];
   const profile = profileRes.data;
-  const verifications = verificationRes.data ?? [];
-
-  const verificationMap = new Map(
-    verifications.map((item) => [String(item.verification_type), String(item.status)]),
-  );
 
   const insurancePaid = metrics.deployedCapital * 0.005;
   const netEarnings = metrics.totalEarnings - insurancePaid;

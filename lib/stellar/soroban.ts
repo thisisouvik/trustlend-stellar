@@ -133,20 +133,33 @@ export async function callContract({
     throw new Error(`Freighter signing failed: ${freighterResult.error}`);
   }
 
-  const signedTx = TransactionBuilder.fromXDR(
-    freighterResult.signedTxXdr,
-    NETWORK_PASSPHRASE
-  ) as Transaction;
+  // Bypass Server.sendTransaction to avoid `instanceof Transaction` NPM resolution bugs
+  // Send raw XDR directly to the JSON-RPC interface
+  const rpcResponse = await fetch(SOROBAN_RPC_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "sendTransaction",
+      params: { transaction: freighterResult.signedTxXdr },
+    }),
+  });
 
-  // Submit
-  const sendResult = await sorobanServer.sendTransaction(signedTx);
-  if (sendResult.status === "ERROR") {
-    throw new Error(
-      `Transaction submission failed: ${JSON.stringify(sendResult.errorResult)}`
-    );
+  if (!rpcResponse.ok) {
+    throw new Error(`RPC HTTP transport failed: ${rpcResponse.statusText}`);
   }
 
-  // Poll up to 30 seconds for finality
+  const rpcJson = await rpcResponse.json();
+  if (rpcJson.error) {
+    throw new Error(`Transaction submission failed: ${JSON.stringify(rpcJson.error)}`);
+  }
+
+  const sendResult = rpcJson.result;
+  if (sendResult.status === "ERROR") {
+    throw new Error(`Transaction logic failed: ${JSON.stringify(sendResult.errorResult)}`);
+  }
+
   const hash = sendResult.hash;
   for (let i = 0; i < 30; i++) {
     await sleep(1000);

@@ -83,7 +83,7 @@ export async function uploadKYCDocument(formData: FormData): Promise<{
     console.log(`📤 Uploading ${file.name} to Supabase Storage: ${filepath}`);
 
     // Upload file to Supabase Storage using admin client
-    const { data, error: uploadError } = await admin.storage
+    const { error: uploadError } = await admin.storage
       .from("kyc-documents")
       .upload(filepath, file, {
         cacheControl: "3600",

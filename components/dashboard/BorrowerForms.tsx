@@ -216,7 +216,7 @@ export function BorrowerForms({
 }: BorrowerFormsProps) {
   const router = useRouter();
   const [monitoringDays] = useState(0);
-  const [_sorobanLoading, setSorobanLoading] = useState(false);
+  const [, setSorobanLoading] = useState(false);
 
   const handleLoanApplication = async (amount: number, duration: number) => {
     setSorobanLoading(true);
@@ -233,7 +233,7 @@ export function BorrowerForms({
         throw new Error(error.error || "Failed to apply for loan");
       }
 
-      const _loan = await response.json();
+      await response.json();
 
       // 2. Soroban application (On-chain record)
       // Check if wallet is connected (this is a client component)

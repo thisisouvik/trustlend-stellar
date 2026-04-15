@@ -9,7 +9,6 @@ import { getBrowserSupabaseClient } from "@/lib/supabase/client";
 import {
   PENDING_ROLE_KEY,
   getDashboardPath,
-  isUserRole,
   normalizeUserRole,
   type UserRole,
 } from "@/lib/auth/roles";

@@ -161,6 +161,7 @@ export default function AdminKYCClient({
                       </a>
                     </div>
                   ) : (
+                    // eslint-disable-next-line @next/next/no-img-element 
                     <img
                       src={selectedDoc.government_id_url}
                       alt="Government ID"

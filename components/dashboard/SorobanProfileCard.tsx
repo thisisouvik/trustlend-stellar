@@ -12,7 +12,6 @@ export function SorobanProfileCard({ walletAddress }: SorobanProfileCardProps) {
   const [profileExists, setProfileExists] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [txSuccess, setTxSuccess] = useState(false);
 
   const checkProfile = useCallback(async () => {
     if (!walletAddress) return;
@@ -37,7 +36,6 @@ export function SorobanProfileCard({ walletAddress }: SorobanProfileCardProps) {
     setError(null);
     try {
       await ReputationContract.initBorrowerProfile(walletAddress);
-      setTxSuccess(true);
       setProfileExists(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to initialize profile");

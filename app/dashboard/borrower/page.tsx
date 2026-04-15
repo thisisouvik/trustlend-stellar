@@ -14,13 +14,6 @@ import { SorobanProfileCard } from "@/components/dashboard/SorobanProfileCard";
 import { formatCurrency } from "@/lib/utils/formatting";
 import { STELLAR_VERIFY_PORTAL } from "@/lib/stellar/explorer";
 
-function daysSince(value: string | null | undefined) {
-  if (!value) return 0;
-  const start = new Date(value).getTime();
-  const diff = Date.now() - start;
-  return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
-}
-
 export default async function BorrowerDashboardPage() {
   const { user } = await requireAuthenticatedUser("borrower");
   const walletAddress = String(user.user_metadata?.wallet_address ?? "") || null;
@@ -28,7 +21,7 @@ export default async function BorrowerDashboardPage() {
 
   const supabase = await getServerSupabaseClient();
 
-  const [profileRes, loansRes, verificationRes] = supabase
+  const [profileRes, loansRes] = supabase
     ? await Promise.all([
         supabase
           .from("profiles")
@@ -41,16 +34,11 @@ export default async function BorrowerDashboardPage() {
           .eq("borrower_id", user.id)
           .order("requested_at", { ascending: false })
           .limit(10),
-        supabase
-          .from("external_verifications")
-          .select("verification_type, status")
-          .eq("user_id", user.id),
       ])
-    : [{ data: null }, { data: [] }, { data: [] }];
+    : [{ data: null }, { data: [] }];
 
   const profile = profileRes.data;
   const loans = loansRes.data ?? [];
-  const verifications = verificationRes.data ?? [];
 
   const isKycVerified = profile?.kyc_status === "verified";
   const isKycSubmitted = profile?.kyc_status === "submitted" || isKycVerified;
@@ -131,6 +119,23 @@ export default async function BorrowerDashboardPage() {
         { href: "/dashboard/borrower/profile", label: "Profile & Settings" },
       ]}
     >
+      <style dangerouslySetInnerHTML={{ __html: `
+        .workspace-tooltip { position: relative; cursor: help; }
+        .workspace-tooltip .workspace-tooltip-content {
+          position: absolute; bottom: calc(100% + 5px); left: 50%; transform: translateX(-50%) translateY(4px) scale(0.96);
+          opacity: 0; visibility: hidden; background: #1d254a; color: #fff; padding: 0.75rem 0.9rem;
+          border-radius: 0.65rem; font-size: 0.8rem; line-height: 1.5; width: max-content; max-width: 260px;
+          text-align: left; box-shadow: 0 10px 25px rgba(29, 37, 74, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.08);
+          transition: opacity 200ms ease, transform 200ms ease, visibility 200ms; z-index: 100; pointer-events: none;
+        }
+        .workspace-tooltip:hover .workspace-tooltip-content { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0) scale(1); }
+        .workspace-tooltip .workspace-tooltip-content::after {
+          content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+          border-width: 5px; border-style: solid; border-color: #1d254a transparent transparent transparent;
+        }
+        .workspace-tooltip-title { display: block; font-weight: 700; color: #22cf9d; margin-bottom: 0.25rem; font-size: 0.82rem; }
+        .workspace-tooltip-text { display: block; color: rgba(255, 255, 255, 0.85); font-weight: 400; font-size: 0.78rem; font-family: sans-serif; }
+      `}} />
       <div className="workspace-stack">
         {!walletAddress ? (
           <article className="workspace-card workspace-card--full">
@@ -181,29 +186,53 @@ export default async function BorrowerDashboardPage() {
           <article className="workspace-card workspace-card--full">
             <h2 className="workspace-card-title">Your Loan Profile</h2>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.8rem", marginTop: "1rem" }}>
-              <div className="workspace-mini-stat">
-                <span className="workspace-mini-stat-label">Verified Income</span>
-                <p className="workspace-mini-stat-value">{formatCurrency(1200)}/mo</p>
+              <div className="workspace-mini-stat workspace-tooltip">
+                <span className="workspace-mini-stat-label">Risk Level</span>
+                <p className="workspace-mini-stat-value" style={{ textTransform: "capitalize" }}>{profile?.risk_status || "Medium"}</p>
+                <div className="workspace-tooltip-content">
+                  <span className="workspace-tooltip-title">Risk Level</span>
+                  <span className="workspace-tooltip-text">Your internal security and compliance risk classification, determined during KYC review.</span>
+                </div>
               </div>
-              <div className="workspace-mini-stat">
+              <div className="workspace-mini-stat workspace-tooltip">
                 <span className="workspace-mini-stat-label">Credit Score</span>
                 <p className="workspace-mini-stat-value">{metrics.reputationScore}</p>
+                <div className="workspace-tooltip-content">
+                  <span className="workspace-tooltip-title">Credit Score</span>
+                  <span className="workspace-tooltip-text">Your decentralized Credit Score, calculated transparently by TrustLend&apos;s Soroban smart contract based on your Stellar on-chain repayment history.</span>
+                </div>
               </div>
-              <div className="workspace-mini-stat">
+              <div className="workspace-mini-stat workspace-tooltip">
                 <span className="workspace-mini-stat-label">Max Loan</span>
                 <p className="workspace-mini-stat-value">{formatCurrency(maxLoanAmount)}</p>
+                <div className="workspace-tooltip-content">
+                  <span className="workspace-tooltip-title">Max Loan</span>
+                  <span className="workspace-tooltip-text">The dynamically calculated maximum loan you are eligible for, which scales up to 10x your Credit Score.</span>
+                </div>
               </div>
-              <div className="workspace-mini-stat">
+              <div className="workspace-mini-stat workspace-tooltip">
                 <span className="workspace-mini-stat-label">Active Loans</span>
                 <p className="workspace-mini-stat-value">{activeLoans.length}</p>
+                <div className="workspace-tooltip-content">
+                  <span className="workspace-tooltip-title">Active Loans</span>
+                  <span className="workspace-tooltip-text">The number of loans you are currently borrowing and paying down.</span>
+                </div>
               </div>
-              <div className="workspace-mini-stat">
+              <div className="workspace-mini-stat workspace-tooltip">
                 <span className="workspace-mini-stat-label">Closed Loans</span>
                 <p className="workspace-mini-stat-value">{closedLoans.length}</p>
+                <div className="workspace-tooltip-content">
+                  <span className="workspace-tooltip-title">Closed Loans</span>
+                  <span className="workspace-tooltip-text">Loans that have been fully paid off or historically completely closed out.</span>
+                </div>
               </div>
-              <div className="workspace-mini-stat">
+              <div className="workspace-mini-stat workspace-tooltip">
                 <span className="workspace-mini-stat-label">Default History</span>
                 <p className="workspace-mini-stat-value">{closedLoans.some((loan) => loan.status === "defaulted") ? "Has defaults" : "None"}</p>
+                <div className="workspace-tooltip-content">
+                  <span className="workspace-tooltip-title">Default History</span>
+                  <span className="workspace-tooltip-text">If you have previously defaulted on a loan, it leaves a permanent flag on your Stellar on-chain history.</span>
+                </div>
               </div>
             </div>
           </article>

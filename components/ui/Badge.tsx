@@ -3,14 +3,15 @@ import { clsx } from "clsx";
 
 interface BadgeProps {
   children: ReactNode;
-  variant?: "green" | "gold" | "blue";
+  variant?: "green" | "gold" | "blue" | "yellow";
   className?: string;
 }
 
 const variantMap = {
-  green: "badge",
-  gold: "badge" + " !text-amber-400 !border-amber-400/30 !bg-amber-400/10",
-  blue: "badge" + " !text-sky-400 !border-sky-400/30 !bg-sky-400/10",
+  green:  "badge",
+  gold:   "badge" + " !text-amber-400 !border-amber-400/30 !bg-amber-400/10",
+  blue:   "badge" + " !text-sky-400 !border-sky-400/30 !bg-sky-400/10",
+  yellow: "badge" + " !text-yellow-400 !border-yellow-400/30 !bg-yellow-400/10",
 };
 
 export function Badge({ children, variant = "green", className }: BadgeProps) {

@@ -60,6 +60,7 @@ export function presentAdminMetrics(metrics: AdminDashboardMetrics) {
   ];
 }
 
+
 export async function getBorrowerDashboardMetrics(userId: string): Promise<BorrowerDashboardMetrics> {
   const supabase = await getServerSupabaseClient();
 
@@ -96,7 +97,7 @@ export async function getBorrowerDashboardMetrics(userId: string): Promise<Borro
       repaymentRate,
     };
   } catch {
-    return { reputationScore: 250, availableCredit: 2500, activeLoans: 0, repaymentRate: 100 };
+    return { reputationScore: 250, availableCredit: 2500, activeLoans: 0, repaymentRate: 0 };
   }
 }
 

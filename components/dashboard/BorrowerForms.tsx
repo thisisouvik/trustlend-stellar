@@ -52,6 +52,7 @@ export function LoanApplicationForm({ maxAmount, onSubmit }: LoanApplicationForm
           max={maxAmount}
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
+          onWheel={(e) => (e.target as HTMLInputElement).blur()}
           placeholder="Enter amount"
           className="workspace-input"
           disabled={loading}
@@ -152,6 +153,7 @@ export function RepaymentForm({ loanAmount, repaidAmount, onSubmit }: RepaymentF
           max={maxRepayment}
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
+          onWheel={(e) => (e.target as HTMLInputElement).blur()}
           placeholder="Enter payment amount"
           className="workspace-input"
           disabled={loading}
@@ -235,21 +237,26 @@ export function BorrowerForms({
 
       await response.json();
 
-      // 2. Soroban application (On-chain record)
-      // Check if wallet is connected (this is a client component)
+      // 2. Soroban application (On-chain record) — best-effort, never blocks
       const walletAddress = window.localStorage.getItem("wallet_address") || "";
       if (walletAddress) {
+        // 5-second timeout: testnet RPC is optional, don't freeze the UI
+        const timeout = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Soroban RPC timeout")), 5000)
+        );
         try {
           console.log("[TrustLend] Initiating Soroban loan request...");
-          
-          // Fetch current reputation-based limits from contract
-          const [onChainRate, onChainMax] = await Promise.all([
-            ReputationContract.getInterestRate(walletAddress, walletAddress),
-            ReputationContract.getMaxLoan(walletAddress, walletAddress)
+
+          const [onChainRate, onChainMax] = await Promise.race([
+            Promise.all([
+              ReputationContract.getInterestRate(walletAddress, walletAddress),
+              ReputationContract.getMaxLoan(walletAddress, walletAddress),
+            ]),
+            timeout,
           ]);
 
           const amountStroops = xlmToStroops(amount);
-          
+
           await LendingContract.createLoanRequest(
             walletAddress,
             amountStroops,
@@ -257,12 +264,11 @@ export function BorrowerForms({
             onChainRate,
             onChainMax
           );
-          
+
           console.log("[TrustLend] Soroban loan request recorded.");
         } catch (sorobanErr) {
-          console.error("[TrustLend] Soroban sync failed:", sorobanErr);
-          // We don't block the UI if Soroban fails, but we log it.
-          // In a real app, we'd show a "Retry Sync" button.
+          // Non-fatal: Soroban sync is optional on testnet
+          console.warn("[TrustLend] Soroban sync skipped:", (sorobanErr as Error).message);
         }
       }
 

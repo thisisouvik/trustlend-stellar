@@ -78,6 +78,7 @@ export function DepositForm({ pools, onSubmit }: DepositFormProps) {
           min="1"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
+          onWheel={(e) => (e.target as HTMLInputElement).blur()}
           placeholder="Enter amount"
           className="workspace-input"
           disabled={loading}
@@ -177,6 +178,7 @@ export function WithdrawForm({ positions, onSubmit }: WithdrawFormProps) {
             max={availableWithdraw}
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
+            onWheel={(e) => (e.target as HTMLInputElement).blur()}
             placeholder="Enter amount"
             className="workspace-input"
             disabled={loading}

@@ -1,44 +1,58 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
-import { isRedirectError } from "next/dist/client/components/redirect-error";
 
 export async function POST(request: NextRequest) {
   try {
-    const { user } = await requireAuthenticatedUser("borrower");
-    const { amount, durationDays } = await request.json();
+    const supabase = await getServerSupabaseClient();
+    if (!supabase) {
+      return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
+    }
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // ── 2. Parse request body ─────────────────────────────────────────────────
+    const body = await request.json();
+    const amount: number = body.amount;
+    // Accept both camelCase and snake_case from the frontend
+    const durationDays: number = body.durationDays ?? body.duration_days;
 
     if (!amount || amount <= 0) {
       return NextResponse.json({ error: "Invalid amount" }, { status: 400 });
     }
 
-    if (!durationDays || ![30, 60, 90].includes(durationDays)) {
-      return NextResponse.json({ error: "Invalid duration" }, { status: 400 });
+    if (!durationDays || ![30, 60, 90].includes(Number(durationDays))) {
+      return NextResponse.json(
+        { error: `Invalid duration: received "${durationDays}", must be 30, 60 or 90` },
+        { status: 400 }
+      );
     }
 
-    const supabase = await getServerSupabaseClient();
-    if (!supabase) {
-      return NextResponse.json({ error: "Database unavailable" }, { status: 500 });
-    }
-
-    // Get user reputation
+    // ── 3. Check reputation-based loan limit ─────────────────────────────────
+    // Score is seeded on KYC approval; 250 is the starting fallback
+    // so new users can borrow immediately while their snapshot is being set up.
     const { data: reputation } = await supabase
       .from("reputation_snapshots")
       .select("score_total")
       .eq("user_id", user.id)
       .maybeSingle();
 
-    const reputationScore = reputation?.score_total ?? 0;
+    const reputationScore: number = reputation?.score_total ?? 250;
     const maxLoan = reputationScore * 10;
 
     if (amount > maxLoan) {
       return NextResponse.json(
-        { error: `Exceeds max loan amount: ${maxLoan}` },
+        { error: `Exceeds your credit limit of ${maxLoan} XLM (score: ${reputationScore}).` },
         { status: 400 }
       );
     }
 
-    // Get a default pool (or first available)
+    // ── 4. Find an active lending pool ────────────────────────────────────────
     const { data: pools } = await supabase
       .from("lending_pools")
       .select("id")
@@ -51,12 +65,12 @@ export async function POST(request: NextRequest) {
 
     const poolId = pools[0].id;
 
-    // Calculate APR based on amount
+    // ── 5. Calculate APR based on loan amount ─────────────────────────────────
     let aprBps = 1500; // 15% default
     if (amount > 2000) aprBps = 1000; // 10%
     else if (amount > 1000) aprBps = 1200; // 12%
 
-    // Create loan
+    // ── 6. Create the loan record ─────────────────────────────────────────────
     const { data: loan, error: loanError } = await supabase
       .from("loans")
       .insert({
@@ -64,7 +78,7 @@ export async function POST(request: NextRequest) {
         pool_id: poolId,
         principal_amount: amount,
         apr_bps: aprBps,
-        duration_days: durationDays,
+        duration_days: Number(durationDays),
         status: "requested",
       })
       .select()
@@ -76,9 +90,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ loan }, { status: 201 });
   } catch (error) {
-    if (isRedirectError(error)) {
-      throw error;
-    }
     console.error("Loan application error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

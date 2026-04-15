@@ -65,6 +65,46 @@ export async function verifyKYCDocument(
 
     if (updateError) throw updateError;
 
+    // When KYC is APPROVED: seed a real initial reputation score based on
+    // what the user has actually completed. Nothing is hardcoded — the score
+    // is computed from real profile fields at the time of approval.
+    if (approved) {
+      const admin = getServiceRoleClient();
+      if (admin) {
+        // Fetch the user's actual profile data to compute a fair starting score
+        const { data: userProfile } = await admin
+          .from("profiles")
+          .select("full_name, phone, country_code")
+          .eq("id", userId)
+          .maybeSingle();
+
+        const { data: authUser } = await admin.auth.admin.getUserById(userId);
+
+        // Real-time score calculation — each completed field contributes
+        let initialScore = 0;
+        if (authUser?.user?.email_confirmed_at) initialScore += 20; // Email verified
+        if (userProfile?.full_name?.trim())       initialScore += 15; // Legal name set
+        if (userProfile?.phone?.trim())            initialScore += 15; // Phone verified
+        if (userProfile?.country_code?.trim())     initialScore += 10; // Country set
+        initialScore += 50; // KYC government ID approved (the primary event)
+        // Total: 50–110 depending on profile completeness → Beginner–Silver tier
+
+        await admin.from("reputation_snapshots").upsert(
+          {
+            user_id: userId,
+            score_total: initialScore,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "user_id" }
+        );
+
+        console.log(
+          `[TrustLend] Reputation snapshot seeded for ${userId}: score=${initialScore}`
+        );
+      }
+    }
+
+
     console.log(
       `✅ KYC ${approved ? "approved" : "rejected"} for user ${userId}`
     );

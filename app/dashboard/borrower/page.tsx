@@ -53,8 +53,11 @@ export default async function BorrowerDashboardPage() {
   const verificationCompleted = verificationItems.filter((item) => item.done).length;
   const verificationProgress = Math.round((verificationCompleted / verificationItems.length) * 100);
 
+  // Loans eligible for repayment (disbursed and active)
   const activeLoans = loans.filter((loan) => ["approved", "funded", "active"].includes(String(loan.status)));
   const closedLoans = loans.filter((loan) => ["repaid", "defaulted", "cancelled"].includes(String(loan.status)));
+  // All in-progress loans shown in the dashboard table (includes pending 'requested' loans)
+  const currentLoans = loans.filter((loan) => !["repaid", "defaulted", "cancelled"].includes(String(loan.status)));
   const inLoansXlm = activeLoans.reduce((sum, loan) => sum + Number(loan.principal_amount ?? 0), 0);
   const pendingXlm = loans
     .filter((loan) => String(loan.status) === "requested")
@@ -241,15 +244,15 @@ export default async function BorrowerDashboardPage() {
         <SorobanProfileCard walletAddress={walletAddress} />
 
         <article className="workspace-card workspace-card--full">
-          <h2 className="workspace-card-title">Your Active Loans</h2>
-          {activeLoans.length === 0 ? (
+          <h2 className="workspace-card-title">Your Loans</h2>
+          {currentLoans.length === 0 ? (
             <p className="workspace-card-copy" style={{ marginTop: "0.75rem" }}>
-              You have no active loans yet. Complete verification milestones to unlock loan eligibility.
+              You have no loans yet. Apply below to get started.
             </p>
           ) : (
             <div style={{ marginTop: "1rem" }}>
               <TableWrap>
-                <Table aria-label="Active borrower loans">
+                <Table aria-label="Borrower loans">
                   <TableHead>
                     <tr>
                       <TableTh>Loan ID</TableTh>
@@ -261,16 +264,28 @@ export default async function BorrowerDashboardPage() {
                     </tr>
                   </TableHead>
                   <TableBody>
-                    {activeLoans.map((loan) => (
-                      <tr key={String(loan.id)}>
-                        <TableTd>{String(loan.id).slice(0, 8)}</TableTd>
-                        <TableTd>{formatCurrency(Number(loan.principal_amount ?? 0))}</TableTd>
-                        <TableTd><Badge variant="blue">{String(loan.status).toUpperCase()}</Badge></TableTd>
-                        <TableTd>{(Number(loan.apr_bps ?? 0) / 100).toFixed(2)}%</TableTd>
-                        <TableTd>{loan.due_at ? new Date(String(loan.due_at)).toLocaleDateString() : "-"}</TableTd>
-                        <TableTd><button className="workspace-button workspace-button--secondary" style={{ fontSize: "0.75rem", padding: "0.4rem 0.6rem", height: "auto" }}>Make Payment</button></TableTd>
-                      </tr>
-                    ))}
+                    {currentLoans.map((loan) => {
+                      const status = String(loan.status);
+                      const badgeVariant =
+                        status === "requested" ? "yellow" :
+                        status === "active"    ? "green"  : "blue";
+                      return (
+                        <tr key={String(loan.id)}>
+                          <TableTd>{String(loan.id).slice(0, 8)}</TableTd>
+                          <TableTd>{formatCurrency(Number(loan.principal_amount ?? 0))}</TableTd>
+                          <TableTd><Badge variant={badgeVariant}>{status.toUpperCase()}</Badge></TableTd>
+                          <TableTd>{(Number(loan.apr_bps ?? 0) / 100).toFixed(2)}%</TableTd>
+                          <TableTd>{loan.due_at ? new Date(String(loan.due_at)).toLocaleDateString() : "Pending"}</TableTd>
+                          <TableTd>
+                            {status === "requested" ? (
+                              <span style={{ fontSize: "0.75rem", opacity: 0.6 }}>Awaiting approval</span>
+                            ) : (
+                              <button className="workspace-button workspace-button--secondary" style={{ fontSize: "0.75rem", padding: "0.4rem 0.6rem", height: "auto" }}>Make Payment</button>
+                            )}
+                          </TableTd>
+                        </tr>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </TableWrap>

@@ -13,6 +13,7 @@ const sora = Sora({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"),
   title: "TrustLend — Reputation-Based Micro-Lending for Everyone",
   description:
     "TrustLend is a decentralized micro-lending marketplace that empowers unbanked gig workers and freelancers in emerging markets to access credit based on real financial behavior — not collateral or credit history.",

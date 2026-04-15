@@ -9,10 +9,8 @@ export * as EscrowContract from "./escrow";
 export * as LendingContract from "./lending";
 export * as DefaultContract from "./default";
 
-// Re-export the soroban core helpers for convenience
-export { sorobanServer, SOROBAN_RPC_URL, NETWORK_PASSPHRASE } from "@/lib/stellar/soroban";
+export { SOROBAN_RPC_URL, NETWORK_PASSPHRASE } from "@/lib/stellar/soroban";
 
-// Re-export contract types & utilities
 export {
   stroopsToXlm,
   xlmToStroops,

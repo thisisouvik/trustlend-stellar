@@ -104,6 +104,35 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // Emit notifications
+    const { createNotification } = await import("@/lib/notifications");
+    // Notify Borrower
+    await createNotification({
+      userId: user.id,
+      title: "Repayment Successful",
+      message: `You have successfully repaid ${amount} XLM towards your loan. Status: ${newStatus}`,
+      type: "loan_repaid",
+    });
+
+    if (sr) {
+      // Find the lender (if this was a direct loan, lender info is in ledger_transactions)
+      const { data: fundTx } = await sr
+        .from("ledger_transactions")
+        .select("user_id")
+        .eq("ref_id", loanId)
+        .eq("category", "loan_fund")
+        .maybeSingle();
+      
+      if (fundTx && fundTx.user_id) {
+        await createNotification({
+          userId: fundTx.user_id,
+          title: "Loan Repayment Received",
+          message: `The borrower has repaid ${amount} XLM towards their loan!`,
+          type: "loan_repaid",
+        });
+      }
+    }
+
     return NextResponse.json({ repayment, loanStatus: newStatus }, { status: 201 });
   } catch (error) {
     if (isRedirectError(error)) {

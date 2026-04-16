@@ -290,7 +290,7 @@ export function BorrowerForms({
       const response = await fetch("/api/loans/repay", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ loan_id: selectedRepaymentLoan.id, amount }),
+        body: JSON.stringify({ loanId: selectedRepaymentLoan.id, amount }),
       });
 
       if (!response.ok) {

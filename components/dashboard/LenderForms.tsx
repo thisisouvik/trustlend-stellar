@@ -221,29 +221,122 @@ interface PositionOption {
 interface LenderFormsProps {
   pools: PoolOption[];
   positions: PositionOption[];
+  /** Platform Stellar wallet address that receives the lender's deposit */
+  platformAddress?: string;
 }
 
-export function LenderForms({ pools, positions }: LenderFormsProps) {
+export function LenderForms({ pools, positions, platformAddress }: LenderFormsProps) {
   const router = useRouter();
+  const PLATFORM_WALLET =
+    platformAddress ??
+    process.env.NEXT_PUBLIC_PLATFORM_STELLAR_ADDRESS ??
+    "";
 
+  // ── Real Stellar deposit via Freighter ──────────────────────────────────────
   const handleDeposit = async (poolId: string, amount: number) => {
-    try {
-      const response = await fetch("/api/pools/deposit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pool_id: poolId, amount }),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Failed to deposit");
-      }
-
-      router.refresh();
-      alert("Deposit successful!");
-    } catch (error) {
-      throw error;
+    if (!PLATFORM_WALLET) {
+      throw new Error(
+        "Platform wallet not configured. Set NEXT_PUBLIC_PLATFORM_STELLAR_ADDRESS."
+      );
     }
+
+    // Step 1: Get lender wallet address from Freighter
+    const { isConnected, getAddress, signTransaction } = await import(
+      "@stellar/freighter-api"
+    );
+    const connected = await isConnected();
+    if (!connected.isConnected) {
+      throw new Error("Freighter is not connected. Open Freighter and try again.");
+    }
+
+    const addressResult = await getAddress();
+    if (addressResult.error || !addressResult.address) {
+      throw new Error("Could not get wallet address from Freighter.");
+    }
+    const lenderAddress = addressResult.address;
+
+    // Step 2: Build the Stellar payment transaction
+    const {
+      TransactionBuilder,
+      Networks,
+      Operation,
+      Asset,
+      Memo,
+    } = await import("@stellar/stellar-sdk");
+
+    const horizonUrl =
+      process.env.NEXT_PUBLIC_STELLAR_HORIZON_URL ??
+      "https://horizon-testnet.stellar.org";
+
+    // Fetch lender account sequence number from Horizon
+    const accountRes = await fetch(`${horizonUrl}/accounts/${lenderAddress}`);
+    if (!accountRes.ok) {
+      throw new Error(
+        `Lender account not found on Stellar. Fund it at https://friendbot.stellar.org?addr=${lenderAddress}`
+      );
+    }
+    const accountData = await accountRes.json();
+
+    const { Account } = await import("@stellar/stellar-sdk");
+    const account = new Account(lenderAddress, accountData.sequence);
+
+    const tx = new TransactionBuilder(account, {
+      fee: "1000000", // 0.1 XLM max fee
+      networkPassphrase: Networks.TESTNET,
+    })
+      .addOperation(
+        Operation.payment({
+          destination: PLATFORM_WALLET,
+          asset: Asset.native(),
+          amount: amount.toFixed(7),
+        })
+      )
+      .addMemo(Memo.text(`TL-DEPOSIT:${poolId.slice(0, 12)}`))
+      .setTimeout(120)
+      .build();
+
+    const txXdr = tx.toXDR();
+
+    // Step 3: Sign with Freighter
+    const signResult = await signTransaction(txXdr, {
+      networkPassphrase: Networks.TESTNET,
+    });
+
+    if (signResult.error || !signResult.signedTxXdr) {
+      throw new Error(signResult.error?.message ?? "User rejected the transaction in Freighter.");
+    }
+
+    // Step 4: Submit to Stellar network
+    const submitRes = await fetch(`${horizonUrl}/transactions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: `tx=${encodeURIComponent(signResult.signedTxXdr)}`,
+    });
+
+    const submitData = await submitRes.json();
+    if (!submitRes.ok || !submitData.hash) {
+      const detail =
+        submitData?.extras?.result_codes?.transaction ??
+        submitData?.detail ??
+        JSON.stringify(submitData);
+      throw new Error(`Stellar submission failed: ${detail}`);
+    }
+
+    const txHash: string = submitData.hash;
+
+    // Step 5: Record confirmed deposit on TrustLend backend
+    const apiRes = await fetch("/api/pools/deposit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ poolId, amount, txHash, lenderAddress }),
+    });
+
+    if (!apiRes.ok) {
+      const apiErr = await apiRes.json();
+      throw new Error(apiErr.error ?? "Backend recording failed");
+    }
+
+    router.refresh();
   };
 
   const handleWithdraw = async (positionId: string, amount: number) => {
@@ -260,7 +353,7 @@ export function LenderForms({ pools, positions }: LenderFormsProps) {
       }
 
       router.refresh();
-      alert("Withdrawal successful!");
+      alert("Withdrawal request submitted!");
     } catch (error) {
       throw error;
     }
@@ -273,6 +366,10 @@ export function LenderForms({ pools, positions }: LenderFormsProps) {
         <div className="workspace-grid workspace-grid--two">
           <div>
             <h3 className="workspace-subheading">Deposit to Pool</h3>
+            <p className="workspace-card-copy" style={{ fontSize: "0.82rem", opacity: 0.7, marginBottom: "0.75rem" }}>
+              Your XLM will be sent directly to TrustLend&apos;s Stellar escrow via Freighter.
+              A real on-chain transaction is required — no mock deposits.
+            </p>
             <DepositForm pools={pools} onSubmit={handleDeposit} />
           </div>
           <div>

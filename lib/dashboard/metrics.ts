@@ -4,6 +4,7 @@ export interface BorrowerDashboardMetrics {
   reputationScore: number;
   availableCredit: number;
   activeLoans: number;
+  pendingLoans: number;
   repaymentRate: number;
 }
 
@@ -37,7 +38,10 @@ export function presentBorrowerMetrics(metrics: BorrowerDashboardMetrics) {
   return [
     { label: "Trust score", value: String(metrics.reputationScore) },
     { label: "Available credit", value: toCurrency(metrics.availableCredit) },
-    { label: "Active loans", value: String(metrics.activeLoans) },
+    // Show pending requests when there are no active loans yet
+    metrics.activeLoans > 0
+      ? { label: "Active loans", value: String(metrics.activeLoans) }
+      : { label: "Loan requests", value: String(metrics.pendingLoans) },
     { label: "Repayment rate", value: toPercentage(metrics.repaymentRate) },
   ];
 }
@@ -65,7 +69,7 @@ export async function getBorrowerDashboardMetrics(userId: string): Promise<Borro
   const supabase = await getServerSupabaseClient();
 
   if (!supabase) {
-    return { reputationScore: 0, availableCredit: 0, activeLoans: 0, repaymentRate: 0 };
+    return { reputationScore: 0, availableCredit: 0, activeLoans: 0, pendingLoans: 0, repaymentRate: 0 };
   }
 
   try {
@@ -84,8 +88,9 @@ export async function getBorrowerDashboardMetrics(userId: string): Promise<Borro
     const reputation = snapshotRes.data?.score_total ?? 250;
     const loans = loansRes.data ?? [];
 
-    const activeLoans = loans.filter((loan) => ["approved", "funded", "active"].includes(loan.status)).length;
-    const repaidLoans = loans.filter((loan) => loan.status === "repaid").length;
+    const pendingLoans  = loans.filter((loan) => loan.status === "requested").length;
+    const activeLoans   = loans.filter((loan) => ["approved", "funded", "active"].includes(loan.status)).length;
+    const repaidLoans   = loans.filter((loan) => loan.status === "repaid").length;
     const defaultedLoans = loans.filter((loan) => loan.status === "defaulted").length;
     const repaymentBase = repaidLoans + defaultedLoans;
     const repaymentRate = repaymentBase > 0 ? (repaidLoans / repaymentBase) * 100 : 100;
@@ -94,10 +99,11 @@ export async function getBorrowerDashboardMetrics(userId: string): Promise<Borro
       reputationScore: reputation,
       availableCredit: reputation * 10,
       activeLoans,
+      pendingLoans,
       repaymentRate,
     };
   } catch {
-    return { reputationScore: 250, availableCredit: 2500, activeLoans: 0, repaymentRate: 0 };
+    return { reputationScore: 250, availableCredit: 2500, activeLoans: 0, pendingLoans: 0, repaymentRate: 0 };
   }
 }
 

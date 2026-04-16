@@ -90,7 +90,7 @@ export default async function LenderHistoryPage() {
           <h2 className="workspace-card-title" style={{ marginBottom: "1rem" }}>Funded Loans</h2>
           {txs.length === 0 ? (
             <div style={{ textAlign: "center", padding: "2rem", opacity: 0.5 }}>
-              <p>You haven't funded any loans yet.</p>
+              <p>You haven&apos;t funded any loans yet.</p>
               <a href="/dashboard/lender/marketplace" style={{ display: "inline-block", marginTop: "0.75rem", fontSize: "0.85rem", color: "#7e2fd0", fontWeight: 600 }}>
                 Browse Loan Marketplace →
               </a>

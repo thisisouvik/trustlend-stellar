@@ -96,7 +96,7 @@ export default async function LenderHomePage() {
               <h2 className="workspace-card-title">Loan Marketplace</h2>
               <p className="workspace-card-copy" style={{ opacity: 0.65, fontSize: "0.875rem" }}>
                 Browse open borrower requests. Fund directly via Freighter — XLM goes
-                straight to the borrower's Stellar wallet. Earn interest on repayment.
+                straight to the borrower&apos;s Stellar wallet. Earn interest on repayment.
               </p>
               <p style={{ marginTop: "1rem", fontSize: "0.85rem", color: "#7e2fd0", fontWeight: 600 }}>
                 Go to Marketplace →

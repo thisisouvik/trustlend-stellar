@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useRouter } from "next/navigation";
 
 interface Notification {
   id: string;
@@ -15,7 +14,6 @@ export function NotificationWidget() {
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const router = useRouter();
 
   // Fetch notifications on mount
   useEffect(() => {
@@ -56,8 +54,6 @@ export function NotificationWidget() {
       console.error("Clear failed", err);
     }
   };
-
-  const unreadCount = notifications.filter((n) => !n.read).length;
 
   return (
     <div ref={dropdownRef} style={{ position: "relative", display: "inline-block" }}>

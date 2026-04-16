@@ -53,7 +53,7 @@ function TrustBadge({ score }: { score: number }) {
   );
 }
 
-export function LoanMarketplace({ loans, lenderWallet }: LoanMarketplaceProps) {
+export function LoanMarketplace({ loans, lenderWallet: _lenderWallet }: LoanMarketplaceProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   if (loans.length === 0) {

@@ -65,7 +65,6 @@ export default async function BorrowerDashboardPage() {
   ];
   const verificationProgress = Math.round((verificationItems.filter((i) => i.done).length / verificationItems.length) * 100);
   const canApplyLoan = verificationProgress === 100;
-  const maxLoanAmount = canApplyLoan ? metrics.availableCredit : 0;
 
   const activeLoans = loans.filter((l) => l.status === "active");
   const pendingLoans = loans.filter((l) => ["requested", "approved"].includes(String(l.status)));

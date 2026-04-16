@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
 
-export async function POST(request: NextRequest) {
+export async function POST(_request: NextRequest) {
   try {
     const supabase = await getServerSupabaseClient();
     if (!supabase) {
@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ success: true }, { status: 200 });
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }

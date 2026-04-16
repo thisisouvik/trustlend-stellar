@@ -16,6 +16,19 @@ const eslintConfig = defineConfig([
     "lib/contracts/generated/**",
     "contracts/target/**",
   ]),
+  // Allow intentionally unused variables when prefixed with underscore (standard TS convention)
+  {
+    rules: {
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+        },
+      ],
+    },
+  },
 ]);
 
 export default eslintConfig;

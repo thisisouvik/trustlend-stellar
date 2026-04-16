@@ -1,80 +1,84 @@
 import { WorkspaceFrame } from "@/components/dashboard/WorkspaceFrame";
+import { BorrowerForms } from "@/components/dashboard/BorrowerForms";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
-import {
-  getBorrowerDashboardMetrics,
-  presentBorrowerMetrics,
-} from "@/lib/dashboard/metrics";
+import { getBorrowerDashboardMetrics, presentBorrowerMetrics } from "@/lib/dashboard/metrics";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
 
 export default async function BorrowerLoansPage() {
   const { user } = await requireAuthenticatedUser("borrower");
-  const metrics = await getBorrowerDashboardMetrics(user.id);
+  const metrics  = await getBorrowerDashboardMetrics(user.id);
 
   const supabase = await getServerSupabaseClient();
   const [loansRes, profileRes] = supabase
     ? await Promise.all([
         supabase
           .from("loans")
-          .select("id, status, principal_amount, apr_bps, duration_days, requested_at, due_at")
+          .select("id, status, principal_amount, apr_bps, duration_days, repaid_amount, due_at, created_at")
           .eq("borrower_id", user.id)
-          .order("requested_at", { ascending: false })
-          .limit(8),
+          .order("created_at", { ascending: false })
+          .limit(20),
         supabase
           .from("profiles")
-          .select("full_name")
+          .select("full_name, kyc_status")
           .eq("id", user.id)
           .maybeSingle(),
       ])
     : [{ data: [] }, { data: null }];
 
-  const loans = loansRes.data ?? [];
+  const loans   = loansRes.data ?? [];
   const profile = profileRes.data;
+
+  const isKycVerified = profile?.kyc_status === "verified";
+  const canApplyLoan  = isKycVerified;
+  const maxLoanAmount = canApplyLoan ? metrics.availableCredit : 0;
+
+  const activeLoans = loans.filter((l) => l.status === "active");
+  const repayableLoan = activeLoans[0] ?? null;
+  const dueAmount = repayableLoan
+    ? Math.max(0, Number(repayableLoan.principal_amount ?? 0) - Number(repayableLoan.repaid_amount ?? 0))
+    : 0;
+
+  const borrowerLinks = [
+    { href: "/dashboard/borrower",         label: "Home" },
+    { href: "/dashboard/borrower/loans",   label: "Apply for Loan" },
+    { href: "/dashboard/borrower/repay",   label: "Repay Loan" },
+    { href: "/dashboard/borrower/tasks",   label: "Trust Tasks" },
+    { href: "/dashboard/borrower/profile", label: "Profile & Settings" },
+  ];
 
   return (
     <WorkspaceFrame
       roleLabel="Borrower Dashboard"
-      heading="My Loans"
-      description="View requested, active, and completed loans with repayment context."
+      heading="Apply for a Loan"
+      description="Submit a new loan request or make a repayment on your active loan."
       email={user.email ?? null}
       userName={String(user.user_metadata?.full_name ?? profile?.full_name ?? "")}
       metrics={presentBorrowerMetrics(metrics)}
       currentPath="/dashboard/borrower/loans"
-      links={[
-        { href: "/dashboard/borrower", label: "Home" },
-        { href: "/dashboard/borrower/loans", label: "My loans" },
-        { href: "/dashboard/borrower/tasks", label: "Tasks" },
-        { href: "/dashboard/borrower/profile", label: "Profile & Settings" },
-      ]}
+      links={borrowerLinks}
     >
-      <div className="workspace-table-wrap">
-        <table className="workspace-table" aria-label="Borrower loans table">
-          <thead>
-            <tr>
-              <th>Loan</th>
-              <th>Status</th>
-              <th>Principal</th>
-              <th>APR</th>
-              <th>Duration</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(loans ?? []).length === 0 ? (
-              <tr>
-                <td colSpan={5} className="workspace-empty-row">No loan records yet.</td>
-              </tr>
-            ) : (
-              (loans ?? []).map((loan) => (
-                <tr key={String(loan.id)}>
-                  <td>{String(loan.id).slice(0, 8)}</td>
-                  <td>{String(loan.status)}</td>
-                  <td>{Number(loan.principal_amount ?? 0).toFixed(2)}</td>
-                  <td>{(Number(loan.apr_bps ?? 0) / 100).toFixed(2)}%</td>
-                  <td>{String(loan.duration_days)} days</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+      <div className="workspace-stack">
+        {!canApplyLoan && (
+          <article className="workspace-card workspace-card--full" style={{ background: "rgba(245,166,35,0.04)", borderColor: "rgba(245,166,35,0.25)" }}>
+            <h2 className="workspace-card-title">⚠️ KYC Required</h2>
+            <p className="workspace-card-copy" style={{ marginTop: "0.4rem" }}>
+              Your KYC status is currently <strong>{profile?.kyc_status ?? "pending"}</strong>.{" "}
+              {profile?.kyc_status === "submitted"
+                ? "Your documents are under admin review. You'll be notified once approved."
+                : "Please complete your profile and submit government ID to apply for loans."}
+            </p>
+            <a href="/dashboard/borrower/profile" style={{ display: "inline-block", marginTop: "0.75rem", fontSize: "0.82rem", color: "#7e2fd0", fontWeight: 600 }}>
+              Go to Profile →
+            </a>
+          </article>
+        )}
+
+        <BorrowerForms
+          canApplyLoan={canApplyLoan}
+          maxLoanAmount={maxLoanAmount}
+          selectedRepaymentLoan={repayableLoan as { id: string; due_at: string | null; principal_amount: number; repaid_amount: number } | null}
+          dueAmount={dueAmount}
+        />
       </div>
     </WorkspaceFrame>
   );

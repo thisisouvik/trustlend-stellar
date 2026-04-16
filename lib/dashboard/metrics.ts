@@ -1,4 +1,4 @@
-import { getServerSupabaseClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
 
 export interface BorrowerDashboardMetrics {
   reputationScore: number;
@@ -88,8 +88,8 @@ export async function getBorrowerDashboardMetrics(userId: string): Promise<Borro
     const reputation = snapshotRes.data?.score_total ?? 250;
     const loans = loansRes.data ?? [];
 
-    const pendingLoans  = loans.filter((loan) => loan.status === "requested").length;
-    const activeLoans   = loans.filter((loan) => ["approved", "funded", "active"].includes(loan.status)).length;
+    const pendingLoans  = loans.filter((loan) => ["requested", "approved"].includes(loan.status)).length;
+    const activeLoans   = loans.filter((loan) => loan.status === "active").length;
     const repaidLoans   = loans.filter((loan) => loan.status === "repaid").length;
     const defaultedLoans = loans.filter((loan) => loan.status === "defaulted").length;
     const repaymentBase = repaidLoans + defaultedLoans;
@@ -115,63 +115,54 @@ export async function getLenderDashboardMetrics(userId: string): Promise<LenderD
   }
 
   try {
-    const [positionsRes, loansRes] = await Promise.all([
-      supabase
-        .from("pool_positions")
-        .select("status, principal_amount, earned_interest")
-        .eq("lender_id", userId),
-      supabase
-        .from("loans")
-        .select("status"),
-    ]);
+    // Own positions — session-bound is fine (filters by lender_id)
+    const positionsRes = await supabase
+      .from("pool_positions")
+      .select("status, principal_amount, earned_interest")
+      .eq("lender_id", userId);
 
     const positions = positionsRes.data ?? [];
-    const loans = loansRes.data ?? [];
+    const deployedCapital  = positions.reduce((s, r) => s + Number(r.principal_amount ?? 0), 0);
+    const totalEarnings    = positions.reduce((s, r) => s + Number(r.earned_interest   ?? 0), 0);
+    const activePositions  = positions.filter((r) => r.status === "active").length;
 
-    const deployedCapital = positions.reduce((sum, row) => sum + Number(row.principal_amount ?? 0), 0);
-    const totalEarnings = positions.reduce((sum, row) => sum + Number(row.earned_interest ?? 0), 0);
-    const activePositions = positions.filter((row) => row.status === "active").length;
+    // Global default rate — needs service role to see all loans across all users
+    const sr = getServiceRoleClient();
+    let defaultRate = 0;
+    if (sr) {
+      const { data: allLoans } = await sr
+        .from("loans")
+        .select("status");
+      const all    = allLoans ?? [];
+      const bad    = all.filter((l) => l.status === "defaulted").length;
+      const closed = all.filter((l) => ["repaid","defaulted"].includes(l.status)).length;
+      defaultRate  = closed > 0 ? (bad / closed) * 100 : 0;
+    }
 
-    const defaultedLoans = loans.filter((loan) => loan.status === "defaulted").length;
-    const maturedLoans = loans.filter((loan) => loan.status === "repaid" || loan.status === "defaulted").length;
-    const defaultRate = maturedLoans > 0 ? (defaultedLoans / maturedLoans) * 100 : 0;
-
-    return {
-      deployedCapital,
-      totalEarnings,
-      activePositions,
-      defaultRate,
-    };
+    return { deployedCapital, totalEarnings, activePositions, defaultRate };
   } catch {
     return { deployedCapital: 0, totalEarnings: 0, activePositions: 0, defaultRate: 0 };
   }
 }
 
 export async function getAdminDashboardMetrics(): Promise<AdminDashboardMetrics> {
-  const supabase = await getServerSupabaseClient();
-
-  if (!supabase) {
-    return { totalUsers: 0, totalLoans: 0, activeLoans: 0, highRiskUsers: 0 };
-  }
+  // Admin metrics need service role to see counts across ALL users
+  const sr = getServiceRoleClient();
+  if (!sr) return { totalUsers: 0, totalLoans: 0, activeLoans: 0, highRiskUsers: 0 };
 
   try {
     const [usersRes, totalLoansRes, activeLoansRes, highRiskRes] = await Promise.all([
-      supabase.from("profiles").select("id", { count: "exact", head: true }),
-      supabase.from("loans").select("id", { count: "exact", head: true }),
-      supabase
-        .from("loans")
-        .select("id", { count: "exact", head: true })
-        .in("status", ["approved", "funded", "active"]),
-      supabase
-        .from("profiles")
-        .select("id", { count: "exact", head: true })
+      sr.from("profiles").select("id", { count: "exact", head: true }),
+      sr.from("loans").select("id", { count: "exact", head: true }),
+      sr.from("loans").select("id", { count: "exact", head: true })
+        .in("status", ["approved", "funded", "active", "requested"]),
+      sr.from("profiles").select("id", { count: "exact", head: true })
         .in("risk_status", ["high", "blocked"]),
     ]);
-
     return {
-      totalUsers: usersRes.count ?? 0,
-      totalLoans: totalLoansRes.count ?? 0,
-      activeLoans: activeLoansRes.count ?? 0,
+      totalUsers:    usersRes.count    ?? 0,
+      totalLoans:    totalLoansRes.count ?? 0,
+      activeLoans:   activeLoansRes.count ?? 0,
       highRiskUsers: highRiskRes.count ?? 0,
     };
   } catch {

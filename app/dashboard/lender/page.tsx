@@ -1,103 +1,56 @@
 import { WorkspaceFrame } from "@/components/dashboard/WorkspaceFrame";
-import { LenderForms } from "@/components/dashboard/LenderForms";
-import { FinanceChart } from "@/components/dashboard/FinanceChart";
 import { WalletCard } from "@/components/dashboard/WalletCard";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
-import {
-  getLenderDashboardMetrics,
-  presentLenderMetrics,
-} from "@/lib/dashboard/metrics";
-import { getServerSupabaseClient } from "@/lib/supabase/server";
+import { getLenderDashboardMetrics, presentLenderMetrics } from "@/lib/dashboard/metrics";
+import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
 import { formatCurrency } from "@/lib/utils/formatting";
-import { buildStellarTxVerificationUrl, isLikelyTxHash, STELLAR_VERIFY_PORTAL } from "@/lib/stellar/explorer";
+import { lenderNavLinks } from "@/lib/dashboard/lender-links";
+import Link from "next/link";
 
-export default async function LenderDashboardPage() {
+export default async function LenderHomePage() {
   const { user } = await requireAuthenticatedUser("lender");
   const walletAddress = String(user.user_metadata?.wallet_address ?? "") || null;
   const metrics = await getLenderDashboardMetrics(user.id);
-
   const supabase = await getServerSupabaseClient();
+  const srClient = getServiceRoleClient();
 
-  const [positionsRes, poolsRes, loansRes, repaymentRes, profileRes] = supabase
+  const [positionsRes, profileRes] = supabase
     ? await Promise.all([
         supabase
           .from("pool_positions")
-          .select("id, pool_id, status, principal_amount, earned_interest, opened_at")
+          .select("id, pool_id, status, principal_amount, earned_interest")
           .eq("lender_id", user.id)
-          .order("opened_at", { ascending: false })
-          .limit(12),
-        supabase
-          .from("lending_pools")
-          .select("id, name, status, apr_bps, total_liquidity, available_liquidity")
           .order("created_at", { ascending: false })
-          .limit(8),
-        supabase
-          .from("loans")
-          .select("id, pool_id, status, principal_amount, apr_bps, duration_days, due_at")
-          .order("requested_at", { ascending: false })
-          .limit(20),
-        supabase
-          .from("loan_repayments")
-          .select("id, loan_id, amount, paid_at, tx_ref")
-          .order("paid_at", { ascending: false })
-          .limit(10),
+          .limit(5),
         supabase
           .from("profiles")
-          .select("full_name, phone, country_code, kyc_status")
+          .select("full_name, kyc_status")
           .eq("id", user.id)
           .maybeSingle(),
       ])
-    : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: null }];
+    : [{ data: [] }, { data: null }];
 
-  const positions = positionsRes.data ?? [];
-  const pools = poolsRes.data ?? [];
-  const loans = loansRes.data ?? [];
-  const repayments = repaymentRes.data ?? [];
-  const profile = profileRes.data;
+  // Open loan count — service role to bypass RLS
+  const openLoanCountRes = srClient
+    ? await srClient
+        .from("loans")
+        .select("id", { count: "exact", head: true })
+        .in("status", ["requested", "approved"])
+    : { count: 0 };
+
+  const positions     = positionsRes.data ?? [];
+  const profile       = profileRes.data;
+  const openLoanCount = openLoanCountRes.count ?? 0;
+  const isKycVerified = profile?.kyc_status === "verified";
 
   const insurancePaid = metrics.deployedCapital * 0.005;
-  const netEarnings = metrics.totalEarnings - insurancePaid;
-  const annualProjection = netEarnings > 0 ? netEarnings * 12 : 0;
-
-  const totalCurrent = loans.filter((loan) => String(loan.status) === "active").length;
-  const totalLate = loans.filter((loan) => String(loan.status) === "funded").length;
-  const totalDefaulted = loans.filter((loan) => String(loan.status) === "defaulted").length;
-
-  const portfolioLoans = positions.length > 0
-    ? loans.filter((loan) =>
-        positions.some((position) => String(position.pool_id) === String(loan.pool_id)),
-      )
-    : [];
-
-  const isKycVerified = profile?.kyc_status === "verified";
-  const isKycSubmitted = profile?.kyc_status === "submitted" || isKycVerified;
-
-  const securityChecklist = [
-    { label: "Email confirmed", done: Boolean(user.email_confirmed_at) },
-    { label: "Legal name provided", done: Boolean(profile?.full_name) },
-    { label: "Phone verified", done: Boolean(profile?.phone) },
-    { label: "Government ID verified", done: isKycVerified },
-  ];
-
-  const lenderProfileCompletion = Math.round(
-    (securityChecklist.filter((item) => item.done).length / securityChecklist.length) * 100,
-  );
-
-  const lenderChartPoints = ["Mar", "Apr", "May", "Jun", "Jul", "Aug"].map((month, index) => {
-    const inflow = Number(repayments[index]?.amount ?? 0);
-    const outflow = Number(positions[index]?.principal_amount ?? 0);
-    return {
-      label: month,
-      valueA: inflow,
-      valueB: outflow,
-    };
-  });
+  const netEarnings   = metrics.totalEarnings - insurancePaid;
 
   return (
     <WorkspaceFrame
       roleLabel="Lender Dashboard"
-      heading="Lender Home"
-      description="Data-driven lending operations with transparent pool performance, risk signals, and earnings visibility."
+      heading="Welcome back 👋"
+      description="Your lending overview at a glance. Use the navigation to fund loans or manage your pool investments."
       email={user.email ?? null}
       userName={String(user.user_metadata?.full_name ?? profile?.full_name ?? "")}
       metrics={presentLenderMetrics(metrics)}
@@ -107,184 +60,160 @@ export default async function LenderDashboardPage() {
           available={0}
           inLoansOrPools={metrics.deployedCapital}
           pending={0}
-          inLoansLabel="In Pools"
+          inLoansLabel="Deployed"
           compact
         />
       )}
       currentPath="/dashboard/lender"
       profilePath="/dashboard/lender/profile"
-      profileSummary={lenderProfileCompletion === 100 ? undefined : {
-        completion: lenderProfileCompletion,
-        kycStatus: String(profile?.kyc_status ?? "pending"),
-        warningText: isKycSubmitted && !isKycVerified
-          ? "Your documents are currently under admin review."
-          : "Incomplete profile increases funding risk. Finish KYC to grant loans safely.",
-        requiredItems: securityChecklist.filter((item) => !item.done).length > 0
-          ? securityChecklist
-              .filter((item) => !item.done)
-              .map((item) => item.label)
-          : [],
-      }}
-      showProfileAlert={lenderProfileCompletion !== 100}
-      links={[
-        { href: "/dashboard/lender", label: "Home" },
-        { href: "/dashboard/lender/pools", label: "Pools" },
-        { href: "/dashboard/lender/portfolio", label: "Portfolio" },
-        { href: "/dashboard/lender/risk", label: "Risk" },
-        { href: "/dashboard/lender/profile", label: "Profile & Settings" },
-      ]}
+      showProfileAlert={false}
+      links={lenderNavLinks}
     >
       <div className="workspace-stack">
-        {!walletAddress ? (
-          <article className="workspace-card workspace-card--full">
-            <h2 className="workspace-card-title">Wallet connection required</h2>
-            <p className="workspace-card-copy">Connect wallet first to unlock lending operations and portfolio data.</p>
-          </article>
-        ) : (
-          <>
-        <section className="workspace-grid workspace-grid--three">
-          <FinanceChart
-            title="Cashflow Analytics"
-            legendA="Repayment Inflow"
-            legendB="Deployed Capital"
-            points={lenderChartPoints}
-          />
 
-          <article className="workspace-card">
-            <h2 className="workspace-card-title">Security Details Needed</h2>
-            <p className="workspace-card-copy">Complete these details before granting more loans:</p>
-            <ul className="workspace-list workspace-list--compact">
-              {securityChecklist.map((item) => (
-                <li key={item.label}><span>{item.done ? "✓ " : "○ "}{item.label}</span></li>
-              ))}
-            </ul>
-          </article>
-        </section>
-
+        {/* ── Quick action cards ──────────────────────────────────── */}
         <section className="workspace-grid workspace-grid--two">
-          <article className="workspace-card">
-            <h2 className="workspace-card-title">Your Total Earnings</h2>
-            <p className="workspace-card-copy">Total Deposited: {formatCurrency(metrics.deployedCapital)}</p>
-            <p className="workspace-card-copy">Interest Earned: {formatCurrency(metrics.totalEarnings)}</p>
-            <p className="workspace-card-copy">Insurance Paid (0.5%): -{formatCurrency(insurancePaid)}</p>
-            <p className="workspace-card-copy">Net Earnings: {formatCurrency(netEarnings)}</p>
-            <p className="workspace-card-copy">Annual Projection: {formatCurrency(annualProjection)}</p>
-          </article>
 
-          <article className="workspace-card">
-            <h2 className="workspace-card-title">Portfolio Summary</h2>
-            <p className="workspace-card-copy">Active Loans: {portfolioLoans.length}</p>
-            <p className="workspace-card-copy">Current: {totalCurrent}</p>
-            <p className="workspace-card-copy">Late: {totalLate}</p>
-            <p className="workspace-card-copy">Defaulted: {totalDefaulted}</p>
-            <p className="workspace-card-copy">Default Rate: {metrics.defaultRate.toFixed(2)}%</p>
-          </article>
-        </section>
-
-        <section className="workspace-card">
-          <h2 className="workspace-card-title">Available Lending Pools</h2>
-          <div className="workspace-table-wrap">
-            <table className="workspace-table" aria-label="Available lending pools table">
-              <thead>
-                <tr>
-                  <th>Pool</th>
-                  <th>Status</th>
-                  <th>APR</th>
-                  <th>Current Size</th>
-                  <th>Available</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pools.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="workspace-empty-row">No pools available yet.</td>
-                  </tr>
-                ) : (
-                  pools.map((pool) => (
-                    <tr key={String(pool.id)}>
-                      <td>{String(pool.name)}</td>
-                      <td>{String(pool.status)}</td>
-                      <td>{(Number(pool.apr_bps ?? 0) / 100).toFixed(2)}%</td>
-                      <td>{formatCurrency(Number(pool.total_liquidity ?? 0))}</td>
-                      <td>{formatCurrency(Number(pool.available_liquidity ?? 0))}</td>
-                    </tr>
-                  ))
+          {/* P2P Marketplace CTA */}
+          <Link href="/dashboard/lender/marketplace" style={{ textDecoration: "none" }}>
+            <article
+              className="workspace-card"
+              style={{
+                cursor: "pointer",
+                border: "1px solid rgba(126,47,208,0.35)",
+                transition: "border-color 0.2s, transform 0.15s",
+                height: "100%",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.75rem" }}>
+                <span style={{ fontSize: "2rem" }}>🏪</span>
+                {openLoanCount > 0 && (
+                  <span style={{ background: "rgba(255,107,107,0.15)", color: "#ff9966", borderRadius: "9999px", padding: "0.2rem 0.7rem", fontSize: "0.75rem", fontWeight: 700 }}>
+                    {openLoanCount} open
+                  </span>
                 )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="workspace-grid workspace-grid--two">
-          <LenderForms pools={pools} positions={positions} />
-
-          <article className="workspace-card">
-            <h2 className="workspace-card-title">Individual Loans You Funded</h2>
-            <ul className="workspace-list workspace-list--compact">
-              {portfolioLoans.length === 0 ? (
-                <li>No individual loans mapped yet.</li>
-              ) : (
-                portfolioLoans.slice(0, 6).map((loan) => (
-                  <li key={String(loan.id)}>
-                    Loan {String(loan.id).slice(0, 8)} | {String(loan.status)} | {formatCurrency(Number(loan.principal_amount ?? 0))}
-                  </li>
-                ))
-              )}
-            </ul>
-          </article>
-
-          <article className="workspace-card">
-            <h2 className="workspace-card-title">Recent Activity</h2>
-            <ul className="workspace-list workspace-list--compact">
-              {repayments.length === 0 ? (
-                <li>No repayment activity yet.</li>
-              ) : (
-                repayments.slice(0, 6).map((item) => (
-                  <li key={String(item.id)}>
-                    Repayment {formatCurrency(Number(item.amount ?? 0))} on {item.paid_at ? new Date(String(item.paid_at)).toLocaleDateString() : "-"}
-                    {isLikelyTxHash(String(item.tx_ref ?? "")) ? (
-                      <a
-                        href={buildStellarTxVerificationUrl(String(item.tx_ref))}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="workspace-nav-link"
-                        style={{ marginLeft: "0.5rem" }}
-                      >
-                        Verify tx
-                      </a>
-                    ) : null}
-                  </li>
-                ))
-              )}
-            </ul>
-            <p className="workspace-card-copy">Verification portal: {STELLAR_VERIFY_PORTAL}</p>
-          </article>
-        </section>
-
-        <section className="workspace-card">
-          <h2 className="workspace-card-title">Lender Preferences & Support</h2>
-          <div className="workspace-grid workspace-grid--two">
-            <div>
-              <p className="workspace-card-copy">Risk tolerance: Moderate</p>
-              <p className="workspace-card-copy">Auto-reinvest: Enabled</p>
-              <p className="workspace-card-copy">Notifications: Payment due, repayment received, monthly report</p>
-              <div className="workspace-inline-actions">
-                <button type="button" className="workspace-nav-link" suppressHydrationWarning>Save Preferences</button>
               </div>
-            </div>
-            <div>
-              <p className="workspace-card-copy">Support: support@trustlend.com</p>
-              <p className="workspace-card-copy">Live Chat: 9AM-6PM UTC</p>
-              <div className="workspace-inline-actions">
-                <button type="button" className="workspace-nav-link" suppressHydrationWarning>FAQ</button>
-                <button type="button" className="workspace-nav-link" suppressHydrationWarning>Create Ticket</button>
-                <button type="button" className="workspace-nav-link" suppressHydrationWarning>Export Data</button>
+              <h2 className="workspace-card-title">Loan Marketplace</h2>
+              <p className="workspace-card-copy" style={{ opacity: 0.65, fontSize: "0.875rem" }}>
+                Browse open borrower requests. Fund directly via Freighter — XLM goes
+                straight to the borrower's Stellar wallet. Earn interest on repayment.
+              </p>
+              <p style={{ marginTop: "1rem", fontSize: "0.85rem", color: "#7e2fd0", fontWeight: 600 }}>
+                Go to Marketplace →
+              </p>
+            </article>
+          </Link>
+
+          {/* Pool Investment CTA */}
+          <Link href="/dashboard/lender/pools" style={{ textDecoration: "none" }}>
+            <article
+              className="workspace-card"
+              style={{
+                cursor: "pointer",
+                border: "1px solid rgba(34,207,157,0.25)",
+                transition: "border-color 0.2s, transform 0.15s",
+                height: "100%",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.75rem" }}>
+                <span style={{ fontSize: "2rem" }}>🏦</span>
+                {positions.length > 0 && (
+                  <span style={{ background: "rgba(34,207,157,0.12)", color: "#22cf9d", borderRadius: "9999px", padding: "0.2rem 0.7rem", fontSize: "0.75rem", fontWeight: 700 }}>
+                    {positions.length} position{positions.length !== 1 ? "s" : ""}
+                  </span>
+                )}
               </div>
-            </div>
-          </div>
+              <h2 className="workspace-card-title">Pool Investment</h2>
+              <p className="workspace-card-copy" style={{ opacity: 0.65, fontSize: "0.875rem" }}>
+                Deposit XLM into a lending pool and earn passive APR. The pool automatically
+                funds matching borrower requests — no action needed from your side.
+              </p>
+              <p style={{ marginTop: "1rem", fontSize: "0.85rem", color: "#22cf9d", fontWeight: 600 }}>
+                Manage Pools →
+              </p>
+            </article>
+          </Link>
         </section>
-          </>
+
+        {/* ── Summary stats row ───────────────────────────────────── */}
+        <section className="workspace-grid workspace-grid--three">
+          {[
+            {
+              label: "Total Deployed",
+              value: `${metrics.deployedCapital.toFixed(2)} XLM`,
+              sub: `${metrics.activePositions} active pool position${metrics.activePositions !== 1 ? "s" : ""}`,
+            },
+            {
+              label: "Net Earnings",
+              value: formatCurrency(netEarnings),
+              sub: `${metrics.totalEarnings.toFixed(4)} XLM gross interest`,
+              highlight: true,
+              positive: netEarnings >= 0,
+            },
+            {
+              label: "Platform Default Rate",
+              value: `${metrics.defaultRate.toFixed(2)}%`,
+              sub: "Across all funded loans",
+            },
+          ].map((stat) => (
+            <article key={stat.label} className="workspace-card">
+              <p style={{ fontSize: "0.78rem", opacity: 0.55, marginBottom: "0.35rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                {stat.label}
+              </p>
+              <p style={{ fontSize: "1.6rem", fontWeight: 700, color: stat.highlight ? (stat.positive ? "#22cf9d" : "#ff6b6b") : "inherit", lineHeight: 1.1 }}>
+                {stat.value}
+              </p>
+              <p style={{ fontSize: "0.78rem", opacity: 0.45, marginTop: "0.3rem" }}>{stat.sub}</p>
+            </article>
+          ))}
+        </section>
+
+        {/* ── Recent positions ────────────────────────────────────── */}
+        {positions.length > 0 && (
+          <article className="workspace-card workspace-card--full">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+              <h2 className="workspace-card-title" style={{ margin: 0 }}>Recent Pool Deposits</h2>
+              <Link href="/dashboard/lender/pools" className="workspace-nav-link" style={{ fontSize: "0.83rem" }}>
+                View all →
+              </Link>
+            </div>
+            <div className="workspace-table-wrap">
+              <table className="workspace-table">
+                <thead>
+                  <tr><th>Pool ID</th><th>Status</th><th>Your Capital</th><th>Earned</th></tr>
+                </thead>
+                <tbody>
+                  {positions.map((pos) => (
+                    <tr key={String(pos.id)}>
+                      <td style={{ fontFamily: "monospace", fontSize: "0.82rem" }}>{String(pos.pool_id).slice(0, 8)}</td>
+                      <td>
+                        <span style={{ padding: "0.15rem 0.5rem", borderRadius: "9999px", fontSize: "0.75rem", fontWeight: 600, background: pos.status === "active" ? "rgba(34,207,157,0.12)" : "rgba(255,107,107,0.12)", color: pos.status === "active" ? "#22cf9d" : "#ff6b6b" }}>
+                          {String(pos.status ?? "active").toUpperCase()}
+                        </span>
+                      </td>
+                      <td><strong>{Number(pos.principal_amount ?? 0).toFixed(2)} XLM</strong></td>
+                      <td style={{ color: "#22cf9d" }}>{Number(pos.earned_interest ?? 0).toFixed(4)} XLM</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </article>
         )}
+
+        {/* ── KYC warning ─────────────────────────────────────────── */}
+        {!isKycVerified && (
+          <article className="workspace-card workspace-card--full" style={{ border: "1px solid rgba(245,166,35,0.3)", background: "rgba(245,166,35,0.05)" }}>
+            <h2 className="workspace-card-title">⚠️ KYC Not Verified</h2>
+            <p className="workspace-card-copy">
+              Complete your KYC verification to unlock loan funding. Lenders must be verified before deploying capital.
+            </p>
+            <Link href="/dashboard/lender/profile" className="workspace-nav-link" style={{ display: "inline-block", marginTop: "0.75rem" }}>
+              Complete KYC →
+            </Link>
+          </article>
+        )}
+
       </div>
     </WorkspaceFrame>
   );

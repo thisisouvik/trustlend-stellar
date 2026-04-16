@@ -101,6 +101,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: loanError.message }, { status: 500 });
     }
 
+    // ── Emit notification ──
+    const { createNotification } = await import("@/lib/notifications");
+    await createNotification({
+      userId: user.id,
+      title: "Loan Request Submitted",
+      message: `Your request for ${amount} XLM has been submitted and is pending review.`,
+      type: "loan_requested",
+    });
+
     return NextResponse.json(
       {
         loan,

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSupabaseClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
 
 /**
  * POST /api/loans/fund
@@ -58,8 +58,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Use service role for cross-user loan operations (lender updating borrower's loan)
+    const srClient = getServiceRoleClient();
+    if (!srClient) {
+      return NextResponse.json({ error: "Service configuration error" }, { status: 500 });
+    }
+
     // ── Fetch the loan ───────────────────────────────────────────────────────
-    const { data: loan, error: fetchErr } = await supabase
+    const { data: loan, error: fetchErr } = await srClient
       .from("loans")
       .select("id, status, principal_amount, borrower_id, pool_id, apr_bps, duration_days")
       .eq("id", loanId)
@@ -92,7 +98,7 @@ export async function POST(request: NextRequest) {
     dueDate.setDate(dueDate.getDate() + Number(loan.duration_days ?? 30));
 
     // ── Activate the loan ────────────────────────────────────────────────────
-    const { error: updateErr } = await supabase
+    const { error: updateErr } = await srClient
       .from("loans")
       .update({
         status: "active",
@@ -126,6 +132,23 @@ export async function POST(request: NextRequest) {
         durationDays: loan.duration_days,
         fundedAt: now,
       }),
+    });
+
+    // ── Emit notifications ──
+    const { createNotification } = await import("@/lib/notifications");
+    // Notify Borrower
+    await createNotification({
+      userId: String(loan.borrower_id),
+      title: "Loan Funded!",
+      message: `Great news! A lender has funded your loan of ${loan.principal_amount} XLM. The funds have been sent to your wallet.`,
+      type: "loan_funded",
+    });
+    // Notify Lender
+    await createNotification({
+      userId: user.id,
+      title: "Funding Successful",
+      message: `You successfully funded a ${loan.principal_amount} XLM loan. View 'Loans You Funded' for details.`,
+      type: "investment_made",
     });
 
     return NextResponse.json(

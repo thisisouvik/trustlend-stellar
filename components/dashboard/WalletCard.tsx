@@ -54,28 +54,29 @@ export function WalletCard({
 
   const persistWalletAddress = async (nextAddress: string | null) => {
     const supabase = getBrowserSupabaseClient();
-    if (!supabase) {
-      return;
-    }
+    if (!supabase) return;
 
     const { data } = await supabase.auth.getSession();
     const session = data.session;
+    if (!session) return;
 
-    if (!session) {
-      return;
-    }
-
+    // 1. Save to auth user metadata (used by server components for current user)
     const nextMetadata = {
       ...session.user.user_metadata,
       wallet_address: nextAddress,
       wallet_network: "stellar-testnet",
     };
+    const { error: authErr } = await supabase.auth.updateUser({ data: nextMetadata });
+    if (authErr) throw new Error(authErr.message);
 
-    const { error } = await supabase.auth.updateUser({ data: nextMetadata });
-
-    if (error) {
-      throw new Error(error.message);
-    }
+    // 2. ALSO save to profiles table — this is what the lender marketplace reads
+    //    via the service role client when showing borrower wallet addresses.
+    const { error: profileErr } = await supabase
+      .from("profiles")
+      .upsert({ id: session.user.id, wallet_address: nextAddress })
+      .eq("id", session.user.id);
+    // Non-fatal: log but don't throw (auth metadata is the source of truth for current user)
+    if (profileErr) console.warn("profiles wallet_address sync failed:", profileErr.message);
   };
 
   const connectWallet = async () => {

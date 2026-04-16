@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
-import { getServerSupabaseClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 
 export async function POST(request: NextRequest) {
@@ -79,13 +79,30 @@ export async function POST(request: NextRequest) {
     }
 
     // Add reputation points for repayment
+    const repayPoints = newStatus === "repaid" ? 20 : 5;
     await supabase.from("reputation_events").insert({
-      user_id: user.id,
-      source_type: "loan_repayment",
-      source_id: loanId,
-      points_delta: newStatus === "repaid" ? 20 : 5,
-      reason: `Repaid ${amount} XLM towards loan`,
+      user_id:      user.id,
+      source_type:  "loan_repayment",
+      source_id:    loanId,
+      points_delta: repayPoints,
+      reason:       `Repaid ${amount} XLM towards loan`,
     });
+
+    // Also upsert the snapshot so the trust score is immediately reflected
+    const sr = getServiceRoleClient();
+    if (sr) {
+      const { data: snap } = await sr
+        .from("reputation_snapshots")
+        .select("score_total")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      const newScore = Math.min(750, (snap?.score_total ?? 250) + repayPoints);
+      await sr.from("reputation_snapshots").upsert({
+        user_id:     user.id,
+        score_total: newScore,
+        updated_at:  new Date().toISOString(),
+      });
+    }
 
     return NextResponse.json({ repayment, loanStatus: newStatus }, { status: 201 });
   } catch (error) {

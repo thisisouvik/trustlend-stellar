@@ -8,18 +8,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
     }
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // ── 2. Parse request body ─────────────────────────────────────────────────
+    // ── Parse body ──────────────────────────────────────────────────────────
     const body = await request.json();
     const amount: number = body.amount;
-    // Accept both camelCase and snake_case from the frontend
     const durationDays: number = body.durationDays ?? body.duration_days;
 
     if (!amount || amount <= 0) {
@@ -28,14 +24,30 @@ export async function POST(request: NextRequest) {
 
     if (!durationDays || ![30, 60, 90].includes(Number(durationDays))) {
       return NextResponse.json(
-        { error: `Invalid duration: received "${durationDays}", must be 30, 60 or 90` },
+        { error: `Invalid duration: must be 30, 60, or 90 days` },
         { status: 400 }
       );
     }
 
-    // ── 3. Check reputation-based loan limit ─────────────────────────────────
-    // Score is seeded on KYC approval; 250 is the starting fallback
-    // so new users can borrow immediately while their snapshot is being set up.
+    // ── 1. Anti-scam: only ONE active loan at a time ─────────────────────────
+    const { data: existingLoans } = await supabase
+      .from("loans")
+      .select("id, status")
+      .eq("borrower_id", user.id)
+      .not("status", "in", '("repaid","defaulted","cancelled")')
+      .limit(1);
+
+    if (existingLoans && existingLoans.length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            "You already have an active or pending loan. Repay or close it before applying for a new one.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // ── 2. Reputation / credit limit check ───────────────────────────────────
     const { data: reputation } = await supabase
       .from("reputation_snapshots")
       .select("score_total")
@@ -47,35 +59,36 @@ export async function POST(request: NextRequest) {
 
     if (amount > maxLoan) {
       return NextResponse.json(
-        { error: `Exceeds your credit limit of ${maxLoan} XLM (score: ${reputationScore}).` },
+        { error: `Exceeds your credit limit of ${maxLoan} XLM (trust score: ${reputationScore}).` },
         { status: 400 }
       );
     }
 
-    // ── 4. Find an active lending pool ────────────────────────────────────────
-    const { data: pools } = await supabase
+    // ── 3. Calculate APR ─────────────────────────────────────────────────────
+    let aprBps = 1500; // 15% default
+    if (amount > 2000) aprBps = 1000;       // 10%
+    else if (amount > 1000) aprBps = 1200;  // 12%
+
+    // ── 4. Try to auto-assign a pool with enough liquidity ───────────────────
+    // This is optional — loan is still created without a pool (direct P2P path)
+    const { data: availablePools } = await supabase
       .from("lending_pools")
-      .select("id")
+      .select("id, available_liquidity")
       .eq("status", "active")
+      .gte("available_liquidity", amount)
+      .order("available_liquidity", { ascending: false })
       .limit(1);
 
-    if (!pools || pools.length === 0) {
-      return NextResponse.json({ error: "No active lending pools" }, { status: 400 });
-    }
+    const poolId = availablePools && availablePools.length > 0
+      ? availablePools[0].id
+      : null; // loan will be funded directly by a lender
 
-    const poolId = pools[0].id;
-
-    // ── 5. Calculate APR based on loan amount ─────────────────────────────────
-    let aprBps = 1500; // 15% default
-    if (amount > 2000) aprBps = 1000; // 10%
-    else if (amount > 1000) aprBps = 1200; // 12%
-
-    // ── 6. Create the loan record ─────────────────────────────────────────────
+    // ── 5. Create the loan ───────────────────────────────────────────────────
     const { data: loan, error: loanError } = await supabase
       .from("loans")
       .insert({
         borrower_id: user.id,
-        pool_id: poolId,
+        ...(poolId ? { pool_id: poolId } : {}),
         principal_amount: amount,
         apr_bps: aprBps,
         duration_days: Number(durationDays),
@@ -88,7 +101,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: loanError.message }, { status: 500 });
     }
 
-    return NextResponse.json({ loan }, { status: 201 });
+    return NextResponse.json(
+      {
+        loan,
+        fundingPath: poolId ? "pool" : "direct",
+        message: poolId
+          ? "Your loan request has been submitted. A lending pool has been assigned — it will be processed shortly."
+          : "Your loan request is now open. A lender will fund it directly. You'll receive XLM in your wallet once funded.",
+      },
+      { status: 201 }
+    );
   } catch (error) {
     console.error("Loan application error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

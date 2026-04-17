@@ -29,8 +29,11 @@ export default async function BorrowerRepayPage() {
   const loans   = loansRes.data ?? [];
   const profile = profileRes.data;
 
-  const activeLoans  = loans.filter((l) => l.status === "active");
-  const repayableLoan = activeLoans[0] ?? null;
+  // Repayable = any loan that has been funded/disbursed (not yet repaid or defaulted)
+  // Statuses: "funded" (just funded by lender), "approved" (admin-approved), "active" (repayment in progress)
+  const REPAYABLE_STATUSES = ["active", "funded", "approved"];
+  const repayableLoans = loans.filter((l) => REPAYABLE_STATUSES.includes(String(l.status)));
+  const repayableLoan  = repayableLoans[0] ?? null;
   const dueAmount = repayableLoan
     ? Math.max(0, Number(repayableLoan.principal_amount ?? 0) - Number(repayableLoan.repaid_amount ?? 0))
     : 0;
@@ -39,6 +42,7 @@ export default async function BorrowerRepayPage() {
     { href: "/dashboard/borrower",         label: "Home" },
     { href: "/dashboard/borrower/loans",   label: "Apply for Loan" },
     { href: "/dashboard/borrower/repay",   label: "Repay Loan" },
+    { href: "/dashboard/borrower/history", label: "Loan History" },
     { href: "/dashboard/borrower/tasks",   label: "Trust Tasks" },
     { href: "/dashboard/borrower/profile", label: "Profile & Settings" },
   ];
@@ -60,8 +64,8 @@ export default async function BorrowerRepayPage() {
             <div style={{ fontSize: "2rem", marginBottom: "0.75rem" }}>✅</div>
             <h2 className="workspace-card-title">No Active Loans</h2>
             <p className="workspace-card-copy" style={{ marginTop: "0.4rem" }}>
-              {loans.some((l) => ["requested", "approved"].includes(String(l.status)))
-                ? "Your loan request is pending. Repayment will be available once a lender funds it."
+              {loans.some((l) => ["requested"].includes(String(l.status)))
+                ? "Your loan request is pending approval. Repayment will be available once a lender funds it."
                 : "You have no loans to repay. Apply for a new loan using the 'Apply for Loan' section."}
             </p>
             <a href="/dashboard/borrower/loans" style={{ display: "inline-block", marginTop: "1rem", padding: "0.6rem 1.5rem", background: "#7e2fd0", color: "#fff", borderRadius: "0.5rem", fontSize: "0.875rem", fontWeight: 700, textDecoration: "none" }}>
@@ -107,7 +111,7 @@ export default async function BorrowerRepayPage() {
                           <td style={{ padding: "0.75rem", fontWeight: 700 }}>{Number(loan.principal_amount).toFixed(2)} XLM</td>
                           <td style={{ padding: "0.75rem" }}>
                             <Badge variant={
-                              loan.status === "active"    ? "green"  :
+                              (loan.status === "active" || loan.status === "funded") ? "green"  :
                               loan.status === "repaid"    ? "gold"   :
                               loan.status === "requested" ? "yellow" : "blue"
                             }>

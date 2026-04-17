@@ -66,21 +66,23 @@ export default async function BorrowerDashboardPage() {
   const verificationProgress = Math.round((verificationItems.filter((i) => i.done).length / verificationItems.length) * 100);
   const canApplyLoan = verificationProgress === 100;
 
-  const activeLoans = loans.filter((l) => l.status === "active");
-  const pendingLoans = loans.filter((l) => ["requested", "approved"].includes(String(l.status)));
-  const inLoansXlm = activeLoans.reduce((sum, l) => sum + Number(l.principal_amount ?? 0), 0);
-  const pendingXlm = pendingLoans.reduce((sum, l) => sum + Number(l.principal_amount ?? 0), 0);
+  // Active = any loan with money disbursed that still needs repayment
+  const REPAYABLE_STATUSES = ["active", "funded", "approved"];
+  const activeLoans  = loans.filter((l) => REPAYABLE_STATUSES.includes(String(l.status)));
+  const pendingLoans = loans.filter((l) => l.status === "requested");
+  const inLoansXlm   = activeLoans.reduce((sum, l) => sum + Math.max(0, Number(l.principal_amount ?? 0) - Number(l.repaid_amount ?? 0)), 0);
+  const pendingXlm   = pendingLoans.reduce((sum, l) => sum + Number(l.principal_amount ?? 0), 0);
 
-  // Active loan for repayment widget
+  // Pick first repayable loan for the quick repayment widget on home
   const repayableLoan = activeLoans[0] ?? null;
   const dueAmount = repayableLoan
     ? Math.max(0, Number(repayableLoan.principal_amount ?? 0) - Number(repayableLoan.repaid_amount ?? 0))
     : 0;
 
   const statusBadge = (s: string): "yellow" | "blue" | "green" | "gold" => {
-    if (s === "requested") return "yellow";
-    if (s === "approved")  return "blue";
-    if (s === "active")    return "green";
+    if (s === "requested")                    return "yellow";
+    if (s === "approved")                     return "blue";
+    if (s === "active" || s === "funded")     return "green";
     return "gold";
   };
 

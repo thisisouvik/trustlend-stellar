@@ -1,5 +1,6 @@
 import { WorkspaceFrame } from "@/components/dashboard/WorkspaceFrame";
 import { LenderForms } from "@/components/dashboard/LenderForms";
+import { InteractiveLineChart } from "@/components/dashboard/InteractiveLineChart";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { getLenderDashboardMetrics, presentLenderMetrics } from "@/lib/dashboard/metrics";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
@@ -20,9 +21,9 @@ export default async function LenderPoolsPage() {
           .limit(8),
         supabase
           .from("pool_positions")
-          .select("id, pool_id, status, principal_amount, earned_interest")
+          .select("id, pool_id, status, principal_amount, earned_interest, opened_at")
           .eq("lender_id", user.id)
-          .order("created_at", { ascending: false }),
+          .order("opened_at", { ascending: true }),
         supabase
           .from("profiles")
           .select("full_name, kyc_status")
@@ -37,6 +38,28 @@ export default async function LenderPoolsPage() {
 
   const totalDeployed = positions.reduce((s, p) => s + Number(p.principal_amount ?? 0), 0);
   const totalEarned   = positions.reduce((s, p) => s + Number(p.earned_interest   ?? 0), 0);
+
+  // Generate cumulative portfolio growth data for the interactive chart based on pool positions
+  let cumulativeValue = 0;
+  const chartData = positions.length > 0 
+    ? positions.map(p => {
+        cumulativeValue += (Number(p.principal_amount) + Number(p.earned_interest));
+        return {
+           label: `Account Value on ${p.opened_at ? new Date(String(p.opened_at)).toLocaleDateString() : "Active"}`,
+           value: cumulativeValue
+        };
+      })
+    : [
+       { label: 'Jan Growth Projection', value: 100 },
+       { label: 'Feb Growth Projection', value: 250 },
+       { label: 'Mar Growth Projection', value: 400 },
+       { label: 'Apr Growth Projection', value: 850 }
+      ];
+
+  if (chartData.length === 1) {
+    // Inject a starting zero-point if there is only one position so the graph spans out
+    chartData.unshift({ label: 'Initial Deposit', value: 0 });
+  }
 
   return (
     <WorkspaceFrame
@@ -54,21 +77,28 @@ export default async function LenderPoolsPage() {
       <div className="workspace-stack">
 
         {/* ── My positions summary ──────────────────────────────── */}
-        <section className="workspace-grid workspace-grid--three">
-          {[
-            { label: "Your Total Deployed", value: `${totalDeployed.toFixed(2)} XLM` },
-            { label: "Total Interest Earned", value: `${totalEarned.toFixed(4)} XLM`, green: true },
-            { label: "Active Positions", value: String(positions.filter((p) => p.status === "active").length) },
-          ].map((stat) => (
-            <article key={stat.label} className="workspace-card">
-              <p style={{ fontSize: "0.78rem", opacity: 0.55, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.35rem" }}>
-                {stat.label}
-              </p>
-              <p style={{ fontSize: "1.6rem", fontWeight: 700, color: stat.green ? "#22cf9d" : "inherit" }}>
-                {stat.value}
-              </p>
-            </article>
-          ))}
+        <section className="workspace-grid workspace-grid--two" style={{ gridTemplateColumns: "1fr 2fr" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+            {[
+              { label: "Your Total Deployed", value: `${totalDeployed.toFixed(2)} XLM` },
+              { label: "Total Interest Earned", value: `${totalEarned.toFixed(4)} XLM`, green: true },
+              { label: "Active Positions", value: String(positions.filter((p) => p.status === "active").length) },
+            ].map((stat) => (
+              <article key={stat.label} className="workspace-card" style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                <p style={{ fontSize: "0.78rem", opacity: 0.55, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.35rem" }}>
+                  {stat.label}
+                </p>
+                <p style={{ fontSize: "1.6rem", fontWeight: 700, color: stat.green ? "#22cf9d" : "inherit" }}>
+                  {stat.value}
+                </p>
+              </article>
+            ))}
+          </div>
+
+          <article className="workspace-card" style={{ display: "flex", flexDirection: "column", justifyContent: "center", padding: "2rem" }}>
+             <h3 style={{ fontSize: "0.85rem", opacity: 0.6, marginBottom: "1rem", marginTop: 0, textTransform: "uppercase", letterSpacing: "0.05em" }}>Cumulative Pool Portfolio Growth</h3>
+             <InteractiveLineChart points={chartData} color="#22cf9d" />
+          </article>
         </section>
 
         {/* ── Available pools table ─────────────────────────────── */}

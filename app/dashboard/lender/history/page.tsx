@@ -11,156 +11,171 @@ export default async function LenderHistoryPage() {
   const supabase  = await getServerSupabaseClient();
   const srClient  = getServiceRoleClient();
 
-  const [profileRes, fundedTxsRes] = supabase
-    ? await Promise.all([
-        supabase
-          .from("profiles")
-          .select("full_name")
-          .eq("id", user.id)
-          .maybeSingle(),
-        supabase
-          .from("ledger_transactions")
-          .select("id, ref_id, amount, currency, status, metadata, created_at")
-          .eq("user_id", user.id)
-          .eq("ref_type", "loan_fund")
-          .order("created_at", { ascending: false })
-          .limit(50),
-      ])
-    : [{ data: null }, { data: [] }];
+  // Profile data
+  const { data: profile } = supabase 
+    ? await supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle()
+    : { data: null };
 
-  const txs = fundedTxsRes.data ?? [];
-
-  // Enrich with loan status from service role
-  const loanIds = txs.map((t) => String(t.ref_id));
-  const loansRes = srClient && loanIds.length > 0
+  // Fetch all transactions this lender initiated
+  const { data: userTxs } = srClient
     ? await srClient
-        .from("loans")
-        .select("id, status, principal_amount, repaid_amount, apr_bps, duration_days, due_at")
-        .in("id", loanIds)
+        .from("ledger_transactions")
+        .select("id, category, ref_type, ref_id, amount, currency, status, metadata, created_at")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(100)
     : { data: [] };
 
-  const loanMap = Object.fromEntries(
-    (loansRes.data ?? []).map((l) => [String(l.id), l])
+  // Fetch incoming payments (repayments to this lender, where the borrower initiated it)
+  // We use the same filter we built in metrics.ts
+  const { data: allRepays } = srClient
+    ? await srClient
+        .from("ledger_transactions")
+        .select("id, category, ref_type, ref_id, amount, currency, status, metadata, created_at")
+        .eq("ref_type", "loan_repay")
+        .order("created_at", { ascending: false })
+        .limit(200)
+    : { data: [] };
+
+  const incomingRepays = (allRepays ?? []).filter(tx => {
+     try {
+       const meta = JSON.parse(String(tx.metadata || "{}"));
+       return String(meta.lenderUserId) === String(user.id) || String(meta.lenderAddress) === String(user.id);
+     } catch { return false; }
+  });
+
+  // Merge, dedup, sort
+  const txMap = new Map();
+  for (const t of (userTxs ?? [])) txMap.set(t.id, t);
+  for (const t of incomingRepays) txMap.set(t.id, t);
+
+  const transactions = Array.from(txMap.values()).sort((a, b) => 
+    new Date(String(b.created_at)).getTime() - new Date(String(a.created_at)).getTime()
   );
-
-  // Summary
-  const totalDeployed = txs.reduce((s, t) => s + Number(t.amount ?? 0), 0);
-  const activeCount   = txs.filter((t) => {
-    const loan = loanMap[String(t.ref_id)];
-    return loan?.status === "active";
-  }).length;
-  const repaidCount   = txs.filter((t) => {
-    const loan = loanMap[String(t.ref_id)];
-    return loan?.status === "repaid";
-  }).length;
-
-  const loanStatusColor = (s: string) =>
-    s === "active" ? "#22cf9d" : s === "repaid" ? "#9b6fe0" : s === "defaulted" ? "#ef4444" : "#f5a623";
 
   return (
     <WorkspaceFrame
       roleLabel="Lender Dashboard"
       heading="Transaction History"
-      description="A full record of every loan you have funded, with on-chain verification links."
+      description="A full chronological record of every investment, pool deposit, and repayment — fully verifiable on-chain."
       email={user.email ?? null}
-      userName={String(user.user_metadata?.full_name ?? profileRes.data?.full_name ?? "")}
+      userName={String(user.user_metadata?.full_name ?? profile?.full_name ?? "")}
       metrics={presentLenderMetrics(metrics)}
       currentPath="/dashboard/lender/history"
       links={lenderNavLinks}
     >
       <div className="workspace-stack">
 
-        {/* Summary strip */}
-        <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "1rem" }}>
-          {[
-            { label: "Total Deployed",    value: `${totalDeployed.toFixed(2)} XLM` },
-            { label: "Loans Funded",      value: String(txs.length) },
-            { label: "Currently Active",  value: String(activeCount) },
-            { label: "Fully Repaid",      value: String(repaidCount) },
-          ].map((s) => (
-            <article key={s.label} className="role-metric-card" style={{ padding: "1.1rem 1.25rem" }}>
-              <p className="role-metric-value font-display" style={{ fontSize: "1.3rem" }}>{s.value}</p>
-              <p className="role-metric-label">{s.label}</p>
-            </article>
-          ))}
-        </section>
-
-        {/* Transaction table */}
+        {/* Transaction stream */}
         <article className="workspace-card workspace-card--full">
-          <h2 className="workspace-card-title" style={{ marginBottom: "1rem" }}>Funded Loans</h2>
-          {txs.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "2rem", opacity: 0.5 }}>
-              <p>You haven&apos;t funded any loans yet.</p>
-              <a href="/dashboard/lender/marketplace" style={{ display: "inline-block", marginTop: "0.75rem", fontSize: "0.85rem", color: "#7e2fd0", fontWeight: 600 }}>
-                Browse Loan Marketplace →
-              </a>
+          <h2 className="workspace-card-title" style={{ marginBottom: "1.25rem" }}>All Transactions</h2>
+
+          {transactions.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "2.5rem", opacity: 0.5 }}>
+              <div style={{ fontSize: "2.5rem", marginBottom: "0.75rem" }}>📋</div>
+              <p>No transactions yet.</p>
             </div>
           ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
-                <thead>
-                  <tr style={{ borderBottom: "2px solid #eef0f8" }}>
-                    {["Date", "Loan ID", "Amount Sent", "Loan Status", "APR", "Due Date", "Repaid", "Stellar TX"].map((h) => (
-                      <th key={h} style={{ textAlign: "left", padding: "0.6rem 0.75rem", fontSize: "0.72rem", fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {txs.map((tx) => {
-                    const loanId = String(tx.ref_id);
-                    const loan   = loanMap[loanId];
-                    let txHash   = "";
-                    try {
-                      const meta = JSON.parse(String(tx.metadata ?? "{}"));
-                      txHash = String(meta.txHash ?? "");
-                    } catch { /* ok */ }
-                    const hasTx = isLikelyTxHash(txHash);
-                    const status = loan?.status ?? "unknown";
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+              {transactions.map((tx) => {
+                let txHash = "";
+                let subLabel = "";
+                try {
+                  const meta = JSON.parse(String(tx.metadata ?? "{}"));
+                  txHash = String(meta.txHash ?? "");
+                  if (meta.loanId) subLabel = `Loan #${String(meta.loanId).slice(0,8)}`;
+                  else if (tx.ref_id) subLabel = `Ref #${String(tx.ref_id).slice(0,8)}`;
+                } catch { /* ok */ }
+                
+                const hasTx = isLikelyTxHash(txHash);
 
-                    return (
-                      <tr key={String(tx.id)} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                        <td style={{ padding: "0.75rem", fontSize: "0.8rem", color: "#6b7280", whiteSpace: "nowrap" }}>
-                          {tx.created_at ? new Date(String(tx.created_at)).toLocaleDateString() : "—"}
-                        </td>
-                        <td style={{ padding: "0.75rem", fontFamily: "monospace", fontSize: "0.8rem", color: "#6b7280" }}>
-                          {loanId.slice(0, 8)}
-                        </td>
-                        <td style={{ padding: "0.75rem", fontWeight: 700 }}>
-                          {Number(tx.amount).toFixed(2)} {tx.currency ?? "XLM"}
-                        </td>
-                        <td style={{ padding: "0.75rem" }}>
-                          <span style={{ fontSize: "0.78rem", fontWeight: 700, color: loanStatusColor(status), background: `${loanStatusColor(status)}15`, padding: "0.15rem 0.6rem", borderRadius: "9999px", border: `1px solid ${loanStatusColor(status)}33` }}>
-                            {status.toUpperCase()}
-                          </span>
-                        </td>
-                        <td style={{ padding: "0.75rem" }}>
-                          {loan ? `${(Number(loan.apr_bps ?? 0) / 100).toFixed(2)}%` : "—"}
-                        </td>
-                        <td style={{ padding: "0.75rem", whiteSpace: "nowrap" }}>
-                          {loan?.due_at ? new Date(String(loan.due_at)).toLocaleDateString() : "—"}
-                        </td>
-                        <td style={{ padding: "0.75rem", color: "#22cf9d", fontWeight: 600 }}>
-                          {loan ? `${Number(loan.repaid_amount ?? 0).toFixed(2)} XLM` : "—"}
-                        </td>
-                        <td style={{ padding: "0.75rem" }}>
-                          {hasTx ? (
-                            <a
-                              href={buildStellarTxVerificationUrl(txHash)}
-                              target="_blank"
-                              rel="noreferrer"
-                              style={{ fontSize: "0.78rem", color: "#22cf9d", fontWeight: 600, whiteSpace: "nowrap" }}
-                            >
-                              ✅ Verify ↗
-                            </a>
-                          ) : (
-                            <span style={{ fontSize: "0.75rem", opacity: 0.4 }}>—</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                let label = "Transaction";
+                let icon = "📝";
+                let colorClass = "gray"; // will map to styles
+                let sign = "";
+
+                if (tx.ref_type === "loan_fund") {
+                   label = "P2P Loan Deployed"; icon = "🏦"; colorClass = "purple"; sign = "-";
+                } else if (tx.ref_type === "loan_repay") {
+                   label = "Repayment Received"; icon = "📥"; colorClass = "green"; sign = "+";
+                } else if (tx.category === "pool_deposit") {
+                   label = "Pool Deposit"; icon = "🌊"; colorClass = "blue"; sign = "-";
+                } else if (tx.category === "pool_withdraw") {
+                   label = "Pool Withdrawal"; icon = "💸"; colorClass = "green"; sign = "+";
+                }
+
+                const colors = {
+                   "purple": { bg: "rgba(126,47,208,0.04)", border: "rgba(126,47,208,0.12)", iconBg: "rgba(126,47,208,0.1)", text: "#7e2fd0" },
+                   "green": { bg: "rgba(34,207,157,0.04)", border: "rgba(34,207,157,0.12)", iconBg: "rgba(34,207,157,0.1)", text: "#22cf9d" },
+                   "blue": { bg: "rgba(59,130,246,0.04)", border: "rgba(59,130,246,0.12)", iconBg: "rgba(59,130,246,0.1)", text: "#3b82f6" },
+                   "gray": { bg: "rgba(107,114,128,0.04)", border: "rgba(107,114,128,0.12)", iconBg: "rgba(107,114,128,0.1)", text: "#6b7280" }
+                };
+                const c = colors[colorClass as keyof typeof colors];
+
+                return (
+                  <div key={tx.id} style={{
+                    display: "flex", alignItems: "center", gap: "1rem",
+                    padding: "0.9rem 1rem", borderRadius: "0.65rem",
+                    background: c.bg, border: `1px solid ${c.border}`,
+                    flexWrap: "wrap",
+                  }}>
+                    {/* Icon */}
+                    <div style={{
+                      width: "38px", height: "38px", borderRadius: "50%", flexShrink: 0,
+                      background: c.iconBg, display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: "1.1rem",
+                    }}>
+                      {icon}
+                    </div>
+
+                    {/* Details */}
+                    <div style={{ flex: 1, minWidth: "200px" }}>
+                      <p style={{ margin: 0, fontWeight: 700, fontSize: "0.88rem", color: "#111827" }}>
+                        {label}
+                      </p>
+                      <p style={{ margin: "0.15rem 0 0", fontSize: "0.75rem", color: "#9ca3af", fontFamily: "monospace" }}>
+                        {subLabel}
+                        {subLabel && " · "}
+                        {tx.created_at ? new Date(String(tx.created_at)).toLocaleString() : "—"}
+                      </p>
+                    </div>
+
+                    {/* Amount */}
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <p style={{ margin: 0, fontWeight: 800, fontSize: "0.95rem", color: c.text }}>
+                        {sign}{Number(tx.amount).toFixed(2)} XLM
+                      </p>
+                    </div>
+
+                    {/* Verify link */}
+                    {hasTx ? (
+                      <a
+                        href={buildStellarTxVerificationUrl(txHash)}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          display: "inline-flex", alignItems: "center", gap: "0.3rem",
+                          padding: "0.35rem 0.75rem", borderRadius: "0.4rem",
+                          background: c.bg, border: `1px solid ${c.border}`,
+                          fontSize: "0.75rem", fontWeight: 700, color: c.text,
+                          textDecoration: "none", whiteSpace: "nowrap", flexShrink: 0,
+                        }}
+                      >
+                        ✅ Verify on Stellar ↗
+                      </a>
+                    ) : (
+                      <span style={{
+                        display: "inline-flex", alignItems: "center", gap: "0.3rem",
+                        padding: "0.35rem 0.75rem", borderRadius: "0.4rem",
+                        background: colors.gray.bg, border: `1px solid ${colors.gray.border}`,
+                        fontSize: "0.72rem", color: colors.gray.text, whiteSpace: "nowrap", flexShrink: 0,
+                      }}>
+                        📋 Off-chain record
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </article>

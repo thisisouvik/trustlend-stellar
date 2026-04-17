@@ -14,7 +14,7 @@ export default async function LenderHomePage() {
   const supabase = await getServerSupabaseClient();
   const srClient = getServiceRoleClient();
 
-  const [positionsRes, profileRes] = supabase
+  const [positionsRes, profileRes, p2pRes, openLoanCountRes, allLoansRes, repaysRes] = supabase && srClient
     ? await Promise.all([
         supabase
           .from("pool_positions")
@@ -27,24 +27,45 @@ export default async function LenderHomePage() {
           .select("full_name, kyc_status")
           .eq("id", user.id)
           .maybeSingle(),
+        srClient
+          .from("ledger_transactions")
+          .select("id, ref_id, amount, status, metadata, created_at")
+          .eq("user_id", user.id)
+          .eq("ref_type", "loan_fund")
+          .order("created_at", { ascending: false })
+          .limit(5),
+        srClient
+          .from("loans")
+          .select("id", { count: "exact", head: true })
+          .in("status", ["requested", "approved"]),
+        srClient
+          .from("loans")
+          .select("id, status, repaid_amount, principal_amount"),
+        srClient
+          .from("ledger_transactions")
+          .select("ref_id, metadata")
+          .eq("ref_type", "loan_repay")
       ])
-    : [{ data: [] }, { data: null }];
-
-  // Open loan count — service role to bypass RLS
-  const openLoanCountRes = srClient
-    ? await srClient
-        .from("loans")
-        .select("id", { count: "exact", head: true })
-        .in("status", ["requested", "approved"])
-    : { count: 0 };
+    : [{ data: [] }, { data: null }, { data: [] }, { count: 0 }, { data: [] }, { data: [] }];
 
   const positions     = positionsRes.data ?? [];
+  const p2pInvestments = p2pRes.data ?? [];
   const profile       = profileRes.data;
   const openLoanCount = openLoanCountRes.count ?? 0;
   const isKycVerified = profile?.kyc_status === "verified";
+  
+  const allLoansArray = allLoansRes.data ?? [];
+  const loanMap = Object.fromEntries(allLoansArray.map(l => [String(l.id), l]));
 
-  const insurancePaid = metrics.deployedCapital * 0.005;
-  const netEarnings   = metrics.totalEarnings - insurancePaid;
+  const repayMap: Record<string, string> = {};
+  for (const r of (repaysRes.data ?? [])) {
+     try {
+       const m = JSON.parse(String(r.metadata || "{}"));
+       if (m.txHash) repayMap[String(r.ref_id)] = m.txHash;
+     } catch {}
+  }
+
+  const netEarnings = metrics.totalEarnings;
 
   return (
     <WorkspaceFrame
@@ -59,8 +80,9 @@ export default async function LenderHomePage() {
           address={walletAddress}
           available={0}
           inLoansOrPools={metrics.deployedCapital}
-          pending={0}
+          pending={metrics.totalEarnings}
           inLoansLabel="Deployed"
+          pendingLabel="Total Profit Earned"
           compact
         />
       )}
@@ -136,7 +158,7 @@ export default async function LenderHomePage() {
         </section>
 
         {/* ── Summary stats row ───────────────────────────────────── */}
-        <section className="workspace-grid workspace-grid--three">
+        <section className="workspace-grid workspace-grid--two">
           {[
             {
               label: "Total Deployed",
@@ -146,14 +168,9 @@ export default async function LenderHomePage() {
             {
               label: "Net Earnings",
               value: formatCurrency(netEarnings),
-              sub: `${metrics.totalEarnings.toFixed(4)} XLM gross interest`,
+              sub: "Total accumulated interest",
               highlight: true,
               positive: netEarnings >= 0,
-            },
-            {
-              label: "Platform Default Rate",
-              value: `${metrics.defaultRate.toFixed(2)}%`,
-              sub: "Across all funded loans",
             },
           ].map((stat) => (
             <article key={stat.label} className="workspace-card">
@@ -169,37 +186,115 @@ export default async function LenderHomePage() {
         </section>
 
         {/* ── Recent positions ────────────────────────────────────── */}
-        {positions.length > 0 && (
-          <article className="workspace-card workspace-card--full">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
-              <h2 className="workspace-card-title" style={{ margin: 0 }}>Recent Pool Deposits</h2>
-              <Link href="/dashboard/lender/pools" className="workspace-nav-link" style={{ fontSize: "0.83rem" }}>
-                View all →
-              </Link>
-            </div>
-            <div className="workspace-table-wrap">
-              <table className="workspace-table">
-                <thead>
-                  <tr><th>Pool ID</th><th>Status</th><th>Your Capital</th><th>Earned</th></tr>
-                </thead>
-                <tbody>
-                  {positions.map((pos) => (
-                    <tr key={String(pos.id)}>
-                      <td style={{ fontFamily: "monospace", fontSize: "0.82rem" }}>{String(pos.pool_id).slice(0, 8)}</td>
-                      <td>
-                        <span style={{ padding: "0.15rem 0.5rem", borderRadius: "9999px", fontSize: "0.75rem", fontWeight: 600, background: pos.status === "active" ? "rgba(34,207,157,0.12)" : "rgba(255,107,107,0.12)", color: pos.status === "active" ? "#22cf9d" : "#ff6b6b" }}>
-                          {String(pos.status ?? "active").toUpperCase()}
-                        </span>
-                      </td>
-                      <td><strong>{Number(pos.principal_amount ?? 0).toFixed(2)} XLM</strong></td>
-                      <td style={{ color: "#22cf9d" }}>{Number(pos.earned_interest ?? 0).toFixed(4)} XLM</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </article>
-        )}
+        <section style={{ display: "grid", gap: "1.5rem" }}>
+          {positions.length > 0 && (
+            <article className="workspace-card workspace-card--full">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+                <h2 className="workspace-card-title" style={{ margin: 0 }}>Recent Pool Deposits</h2>
+                <Link href="/dashboard/lender/pools" className="workspace-nav-link" style={{ fontSize: "0.83rem" }}>
+                  View all →
+                </Link>
+              </div>
+              <div className="workspace-table-wrap">
+                <table className="workspace-table">
+                  <thead>
+                    <tr><th>Pool ID</th><th>Status</th><th>Your Capital</th><th>Earned</th></tr>
+                  </thead>
+                  <tbody>
+                    {positions.map((pos) => (
+                      <tr key={String(pos.id)}>
+                        <td style={{ fontFamily: "monospace", fontSize: "0.82rem" }}>{String(pos.pool_id).slice(0, 8)}</td>
+                        <td>
+                          <span style={{ padding: "0.15rem 0.5rem", borderRadius: "9999px", fontSize: "0.75rem", fontWeight: 600, background: pos.status === "active" ? "rgba(34,207,157,0.12)" : "rgba(255,107,107,0.12)", color: pos.status === "active" ? "#22cf9d" : "#ff6b6b" }}>
+                            {String(pos.status ?? "active").toUpperCase()}
+                          </span>
+                        </td>
+                        <td><strong>{Number(pos.principal_amount ?? 0).toFixed(2)} XLM</strong></td>
+                        <td style={{ color: "#22cf9d" }}>{Number(pos.earned_interest ?? 0).toFixed(4)} XLM</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          )}
+
+          {p2pInvestments.length > 0 && (
+            <article className="workspace-card workspace-card--full">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+                <h2 className="workspace-card-title" style={{ margin: 0 }}>Recent Direct P2P Loans</h2>
+                <Link href="/dashboard/lender/history" className="workspace-nav-link" style={{ fontSize: "0.83rem" }}>
+                  View history →
+                </Link>
+              </div>
+              <div className="workspace-table-wrap">
+                <table className="workspace-table">
+                  <thead>
+                    <tr><th>Loan ID</th><th>Deployed</th><th>Status</th><th>Profit Earned</th><th>Verification</th></tr>
+                  </thead>
+                  <tbody>
+                    {p2pInvestments.map((tx) => {
+                       let fundTxHash = "";
+                       try {
+                         const meta = JSON.parse(String(tx.metadata || "{}"));
+                         fundTxHash = meta.txHash ?? "";
+                       } catch {}
+
+                       // Find actual loan data
+                       const actualLoan = loanMap[String(tx.ref_id)];
+                       const rawStatus = actualLoan?.status ?? "funded";
+
+
+                       const repaid = Number(actualLoan?.repaid_amount ?? 0);
+                       const profit = Math.max(0, repaid - Number(tx.amount));
+                       const isRepaid = rawStatus === "repaid";
+                       const stColor = isRepaid ? "#9b6fe0" : rawStatus === "defaulted" ? "#ff6b6b" : "#22cf9d";
+                       const stBg = isRepaid ? "rgba(155,111,224,0.12)" : rawStatus === "defaulted" ? "rgba(255,107,107,0.12)" : "rgba(34,207,157,0.12)";
+
+                       // Use repayment hash if it's repaid, otherwise fallback to funding hash
+                       const finalTxHash = (isRepaid && repayMap[String(tx.ref_id)]) ? repayMap[String(tx.ref_id)] : fundTxHash;
+
+                       return (
+                        <tr key={String(tx.id)}>
+                          <td style={{ fontFamily: "monospace", fontSize: "0.82rem" }}>{String(tx.ref_id).slice(0, 8)}</td>
+                          <td><strong>{Number(tx.amount ?? 0).toFixed(2)} XLM</strong></td>
+                          <td>
+                            <span style={{ padding: "0.15rem 0.5rem", borderRadius: "9999px", fontSize: "0.75rem", fontWeight: 600, background: stBg, color: stColor }}>
+                              {String(rawStatus).toUpperCase()}
+                            </span>
+                          </td>
+                          <td style={{ color: profit > 0 ? "#22cf9d" : "#9ca3af", fontWeight: profit > 0 ? 700 : 400 }}>
+                            {profit > 0 ? `+${profit.toFixed(4)} XLM` : "0.00 XLM"}
+                          </td>
+                          <td>
+                            {finalTxHash ? (
+                              <a
+                                href={`https://stellar.expert/explorer/testnet/tx/${finalTxHash}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{
+                                  display: "inline-flex", alignItems: "center", gap: "0.3rem",
+                                  padding: "0.25rem 0.6rem", borderRadius: "0.4rem",
+                                  background: "rgba(126,47,208,0.1)", border: "1px solid rgba(126,47,208,0.25)",
+                                  fontSize: "0.72rem", fontWeight: 700, color: "#7e2fd0",
+                                  textDecoration: "none", whiteSpace: "nowrap"
+                                }}
+                              >
+                                ✅ Verify {isRepaid ? "Repayment" : "Funding"} ↗
+                              </a>
+                            ) : (
+                              <span style={{ fontSize: "0.7rem", color: "#9ca3af" }}>Off-chain</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          )}
+        </section>
 
         {/* ── KYC warning ─────────────────────────────────────────── */}
         {!isKycVerified && (

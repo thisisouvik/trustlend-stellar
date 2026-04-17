@@ -151,8 +151,8 @@ export async function getPendingKYCDocuments(): Promise<
     const { data, error } = await admin
       .from("profiles")
       .select("id, full_name, kyc_status, government_id_ipfs_hash, government_id_url, kyc_submitted_at")
-      .in("kyc_status", ["submitted"])
-      .order("kyc_submitted_at", { ascending: true });
+      .in("kyc_status", ["submitted", "verified", "rejected"])
+      .order("kyc_submitted_at", { ascending: false });
 
     if (error) {
       console.error("Error fetching KYC documents:", error);

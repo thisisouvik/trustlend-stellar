@@ -6,20 +6,17 @@ import {
   getAdminDashboardMetrics,
   presentAdminMetrics,
 } from "@/lib/dashboard/metrics";
-import { getServerSupabaseClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
 import {
   buildStellarTxVerificationUrl,
   extractPossibleTxHash,
   STELLAR_NETWORK_LABEL,
   STELLAR_VERIFY_PORTAL,
 } from "@/lib/stellar/explorer";
+import Link from "next/link";
 
 function formatAmount(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  }).format(value);
+  return `${value.toFixed(2)} XLM`;
 }
 
 function sumByPeriod(
@@ -36,21 +33,20 @@ export default async function AdminDashboardPage() {
   const metrics = await getAdminDashboardMetrics();
   const walletAddress = String(user.user_metadata?.wallet_address ?? "") || null;
   const walletConnected = Boolean(walletAddress);
+  const supabase = getServiceRoleClient();
 
-  const supabase = await getServerSupabaseClient();
-
-  const [profilesRes, loansRes, repaymentsRes, ledgerRes, fraudRes] = supabase
+  const [profilesRes, loansRes, repaymentsRes, ledgerRes, fraudRes, poolsRes] = supabase
     ? await Promise.all([
         supabase
           .from("profiles")
           .select("id, role, kyc_status, risk_status, full_name, phone, country_code, created_at")
           .order("created_at", { ascending: false })
-          .limit(300),
+          .limit(10),
         supabase
           .from("loans")
-          .select("id, status, principal_amount, approved_at")
+          .select("id, borrower_id, status, principal_amount, requested_at")
           .order("requested_at", { ascending: false })
-          .limit(300),
+          .limit(10),
         supabase
           .from("loan_repayments")
           .select("id, payer_id, amount, paid_at, tx_ref")
@@ -66,14 +62,20 @@ export default async function AdminDashboardPage() {
           .select("id, user_id, signal_type, severity, resolved, created_at")
           .order("created_at", { ascending: false })
           .limit(120),
+        supabase
+          .from("lending_pools")
+          .select("id, name, status, total_liquidity, apr_bps, created_at")
+          .order("created_at", { ascending: false })
+          .limit(10)
       ])
-    : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }];
+    : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }];
 
   const profiles = profilesRes.data ?? [];
   const loans = loansRes.data ?? [];
   const repayments = repaymentsRes.data ?? [];
   const ledgerRows = ledgerRes.data ?? [];
   const fraudSignals = fraudRes.data ?? [];
+  const pools = poolsRes.data ?? [];
 
   const anchorTime = new Date(
     String(ledgerRows[0]?.created_at ?? user.last_sign_in_at ?? user.created_at),
@@ -99,7 +101,7 @@ export default async function AdminDashboardPage() {
   const txAllTime = ledgerAmounts.reduce((sum, row) => sum + row.amount, 0);
 
   const sanctionedLoans = loans.filter((loan) =>
-    ["approved", "funded", "active", "repaid", "defaulted"].includes(String(loan.status)),
+    ["approved", "funded", "active", "repaid", "defaulted"].includes(String(loan.status).toLowerCase()),
   );
   const sanctionedAmount = sanctionedLoans.reduce((sum, loan) => sum + Number(loan.principal_amount ?? 0), 0);
   const repaidAmount = repayments.reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
@@ -225,86 +227,117 @@ export default async function AdminDashboardPage() {
               </article>
             </section>
 
-            <section className="workspace-grid workspace-grid--two">
+            <section className="workspace-grid workspace-grid--full">
               <article className="workspace-card workspace-card--full">
-                <h2 className="workspace-card-title">Flagged and non-compliant accounts</h2>
-                <ul className="workspace-list workspace-list--compact">
-                  <li><span>Flagged accounts (high/blocked risk)</span><strong>{blockedUserIds.length}</strong></li>
-                  <li><span>KYC incomplete or rejected</span><strong>{pendingKycProfiles.length}</strong></li>
-                  <li><span>Missing profile details</span><strong>{incompleteProfiles.length}</strong></li>
-                  <li><span>Malicious indicators</span><strong>{maliciousUserIds.size}</strong></li>
-                </ul>
-              </article>
-
-              <article className="workspace-card workspace-card--full">
-                <h2 className="workspace-card-title">Top users by transaction volume</h2>
-                <ul className="workspace-list workspace-list--compact">
-                  {topUsers.length === 0 ? (
-                    <li>No transaction activity yet.</li>
-                  ) : (
-                    topUsers.map((entry) => (
-                      <li key={entry.userId}>
-                        <span>
-                          {String(entry.profile?.full_name ?? entry.userId.slice(0, 8))}
-                        </span>
-                        <strong>{formatAmount(entry.amount)}</strong>
-                      </li>
-                    ))
-                  )}
-                </ul>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+                  <h2 className="workspace-card-title" style={{ margin: 0 }}>Recent Users</h2>
+                  <Link href="/dashboard/admin/users" className="workspace-nav-link" style={{ fontSize: "0.83rem" }}>
+                    See more →
+                  </Link>
+                </div>
+                <div className="workspace-table-wrap">
+                  <table className="workspace-table">
+                    <thead>
+                      <tr>
+                        <th>User ID</th>
+                        <th>Role</th>
+                        <th>Name</th>
+                        <th>KYC</th>
+                        <th>Risk</th>
+                        <th>Joined</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {profiles.length === 0 ? (
+                        <tr><td colSpan={6} style={{ textAlign: "center", padding: "1.5rem", opacity: 0.5 }}>No users found.</td></tr>
+                      ) : profiles.slice(0, 1).map((p) => (
+                        <tr key={String(p.id)}>
+                          <td style={{ fontFamily: "monospace", fontSize: "0.8rem" }}>{String(p.id).slice(0,8)}</td>
+                          <td><span style={{ textTransform: "capitalize", fontWeight: 600 }}>{String(p.role)}</span></td>
+                          <td>{String(p.full_name || "Unknown")}</td>
+                          <td>
+                            <span style={{ padding: "0.15rem 0.5rem", borderRadius: "999px", fontSize: "0.75rem", fontWeight: 600, background: p.kyc_status === "verified" ? "rgba(34,207,157,0.12)" : "rgba(245,166,35,0.12)", color: p.kyc_status === "verified" ? "#22cf9d" : "#f5a623" }}>
+                              {String(p.kyc_status).toUpperCase()}
+                            </span>
+                          </td>
+                          <td>
+                            <span style={{ padding: "0.15rem 0.5rem", borderRadius: "999px", fontSize: "0.75rem", fontWeight: 600, color: p.risk_status === "low" ? "#22cf9d" : p.risk_status === "blocked" ? "#ff6b6b" : "#f5a623", background: p.risk_status === "low" ? "rgba(34,207,157,0.12)" : p.risk_status === "blocked" ? "rgba(255,107,107,0.12)" : "rgba(245,166,35,0.12)" }}>
+                              {String(p.risk_status).toUpperCase()}
+                            </span>
+                          </td>
+                          <td>{p.created_at ? new Date(String(p.created_at)).toLocaleDateString() : "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </article>
             </section>
 
-            <section className="workspace-card workspace-card--full">
-              <h2 className="workspace-card-title">Blockchain verification stream</h2>
-              <p className="workspace-card-copy">
-                Network: {STELLAR_NETWORK_LABEL}. Verify signed transactions at {STELLAR_VERIFY_PORTAL}.
-              </p>
-              <div className="workspace-table-wrap">
-                <table className="workspace-table" aria-label="Recent chain-linked transactions">
-                  <thead>
-                    <tr>
-                      <th>Category</th>
-                      <th>User</th>
-                      <th>Amount</th>
-                      <th>Status</th>
-                      <th>Created</th>
-                      <th>Verify</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recentChainRows.length === 0 ? (
+            <section className="workspace-grid workspace-grid--two">
+              <article className="workspace-card workspace-card--full">
+                <h2 className="workspace-card-title">Recent Lending Pools</h2>
+                <div className="workspace-table-wrap">
+                  <table className="workspace-table">
+                    <thead>
                       <tr>
-                        <td colSpan={6} className="workspace-empty-row">No transaction rows available.</td>
+                        <th>Pool Name</th>
+                        <th>Liquidity</th>
+                        <th>Target APR</th>
+                        <th>Status</th>
                       </tr>
-                    ) : (
-                      recentChainRows.map((row) => (
-                        <tr key={row.id}>
-                          <td>{row.category}</td>
-                          <td>{row.userId.slice(0, 8)}</td>
-                          <td>{formatAmount(row.amount)}</td>
-                          <td>{row.status}</td>
-                          <td>{row.createdAt ? new Date(row.createdAt).toLocaleString() : "-"}</td>
+                    </thead>
+                    <tbody>
+                      {pools.length === 0 ? (
+                        <tr><td colSpan={4} style={{ textAlign: "center", padding: "1.5rem", opacity: 0.5 }}>No pools found.</td></tr>
+                      ) : pools.map((p) => (
+                        <tr key={String(p.id)}>
+                          <td style={{ fontWeight: 600 }}>{String(p.name)}</td>
+                          <td>{formatAmount(Number(p.total_liquidity ?? 0))}</td>
+                          <td style={{ color: "#22cf9d", fontWeight: "bold" }}>{(Number(p.apr_bps ?? 0) / 100).toFixed(2)}%</td>
                           <td>
-                            {row.txHash ? (
-                              <a
-                                href={buildStellarTxVerificationUrl(row.txHash)}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="workspace-nav-link"
-                              >
-                                Verify
-                              </a>
-                            ) : (
-                              "-"
-                            )}
+                            <span style={{ padding: "0.15rem 0.5rem", borderRadius: "999px", fontSize: "0.75rem", fontWeight: 600, background: p.status === "active" ? "rgba(34,207,157,0.12)" : "rgba(100,100,100,0.12)", color: p.status === "active" ? "#22cf9d" : "inherit" }}>
+                              {String(p.status).toUpperCase()}
+                            </span>
                           </td>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </article>
+
+              <article className="workspace-card workspace-card--full">
+                <h2 className="workspace-card-title">Recent P2P Loans</h2>
+                <div className="workspace-table-wrap">
+                  <table className="workspace-table">
+                    <thead>
+                      <tr>
+                        <th>Loan ID</th>
+                        <th>Principal</th>
+                        <th>Status</th>
+                        <th>Borrower</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {loans.length === 0 ? (
+                        <tr><td colSpan={4} style={{ textAlign: "center", padding: "1.5rem", opacity: 0.5 }}>No loans found.</td></tr>
+                      ) : loans.map((l) => (
+                        <tr key={String(l.id)}>
+                          <td style={{ fontFamily: "monospace", fontSize: "0.8rem" }}>{String(l.id).slice(0,8)}</td>
+                          <td><strong>{formatAmount(Number(l.principal_amount ?? 0))}</strong></td>
+                          <td>
+                            <span style={{ padding: "0.15rem 0.5rem", borderRadius: "999px", fontSize: "0.75rem", fontWeight: 600, background: l.status === "repaid" ? "rgba(155,111,224,0.12)" : "rgba(34,207,157,0.12)", color: l.status === "repaid" ? "#9b6fe0" : "#22cf9d" }}>
+                              {String(l.status).toUpperCase()}
+                            </span>
+                          </td>
+                          <td style={{ fontFamily: "monospace", fontSize: "0.75rem", opacity: 0.8 }}>{String(l.borrower_id).slice(0,6)}...</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </article>
             </section>
           </>
         )}

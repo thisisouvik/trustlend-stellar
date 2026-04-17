@@ -78,6 +78,7 @@ export async function POST(request: NextRequest) {
         loan_id: loanId,
         payer_id: user.id,
         amount: amount,
+        tx_ref: txHash,
       })
       .select()
       .single();

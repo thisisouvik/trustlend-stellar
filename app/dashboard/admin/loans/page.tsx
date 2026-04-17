@@ -6,15 +6,11 @@ import {
   getAdminDashboardMetrics,
   presentAdminMetrics,
 } from "@/lib/dashboard/metrics";
-import { getServerSupabaseClient } from "@/lib/supabase/server";
-import { buildStellarTxVerificationUrl, isLikelyTxHash } from "@/lib/stellar/explorer";
+import { getServiceRoleClient } from "@/lib/supabase/server";
+import { buildStellarTxVerificationUrl, extractPossibleTxHash, isLikelyTxHash } from "@/lib/stellar/explorer";
 
 function formatAmount(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  }).format(value);
+  return `${value.toFixed(2)} XLM`;
 }
 
 export default async function AdminLoansPage() {
@@ -23,8 +19,8 @@ export default async function AdminLoansPage() {
   const walletAddress = String(user.user_metadata?.wallet_address ?? "") || null;
   const walletConnected = Boolean(walletAddress);
 
-  const supabase = await getServerSupabaseClient();
-  const [loansRes, repaymentsRes] = supabase
+  const supabase = getServiceRoleClient();
+  const [loansRes, repaymentsRes, ledgerRepaysRes] = supabase
     ? await Promise.all([
         supabase
           .from("loans")
@@ -36,11 +32,25 @@ export default async function AdminLoansPage() {
           .select("id, loan_id, payer_id, amount, paid_at, tx_ref")
           .order("paid_at", { ascending: false })
           .limit(40),
+        supabase
+          .from("ledger_transactions")
+          .select("ref_id, metadata")
+          .eq("ref_type", "loan_repay")
       ])
-    : [{ data: [] as Array<Record<string, unknown>> }, { data: [] as Array<Record<string, unknown>> }];
+    : [{ data: [] }, { data: [] }, { data: [] }];
 
   const loans = loansRes.data ?? [];
   const repayments = repaymentsRes.data ?? [];
+  const oldHashesMap: Record<string, string> = {};
+  
+  if (ledgerRepaysRes?.data) {
+    for (const r of ledgerRepaysRes.data) {
+        const extracted = extractPossibleTxHash(r.metadata);
+        if (extracted) {
+           oldHashesMap[String(r.ref_id)] = extracted;
+        }
+    }
+  }
   const sanctionedAmount = loans
     .filter((loan) => ["approved", "funded", "active", "repaid", "defaulted"].includes(String(loan.status)))
     .reduce((sum, loan) => sum + Number(loan.principal_amount ?? 0), 0);
@@ -77,34 +87,34 @@ export default async function AdminLoansPage() {
         ) : (
           <>
             <div className="workspace-table-wrap">
-              <table className="workspace-table" aria-label="Admin loans table">
+              <table className="workspace-table">
                 <thead>
                   <tr>
-                    <th>Loan</th>
+                    <th>Loan ID</th>
                     <th>Borrower</th>
-                    <th>Status</th>
                     <th>Principal</th>
-                    <th>APR</th>
-                    <th>Due</th>
+                    <th>Status</th>
+                    <th>Target APR</th>
+                    <th>Due At</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loans.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="workspace-empty-row">No loan records found.</td>
+                    <tr><td colSpan={6} style={{ textAlign: "center", padding: "1.5rem", opacity: 0.5 }}>No loans found.</td></tr>
+                  ) : loans.map((l) => (
+                    <tr key={String(l.id)}>
+                      <td style={{ fontFamily: "monospace", fontSize: "0.8rem" }}>{String(l.id).slice(0,8)}</td>
+                      <td style={{ fontFamily: "monospace", fontSize: "0.8rem" }}>{String(l.borrower_id).slice(0,8)}...</td>
+                      <td><strong>{formatAmount(Number(l.principal_amount ?? 0))}</strong></td>
+                      <td>
+                        <span style={{ padding: "0.15rem 0.5rem", borderRadius: "999px", fontSize: "0.75rem", fontWeight: 600, background: l.status === "repaid" ? "rgba(155,111,224,0.12)" : "rgba(34,207,157,0.12)", color: l.status === "repaid" ? "#9b6fe0" : "#22cf9d" }}>
+                          {String(l.status).toUpperCase()}
+                        </span>
+                      </td>
+                      <td style={{ color: "#22cf9d", fontWeight: "bold" }}>{(Number(l.apr_bps ?? 0) / 100).toFixed(2)}%</td>
+                      <td>{l.due_at ? new Date(String(l.due_at)).toLocaleDateString() : "-"}</td>
                     </tr>
-                  ) : (
-                    loans.map((loan) => (
-                      <tr key={String(loan.id)}>
-                        <td>{String(loan.id).slice(0, 8)}</td>
-                        <td>{String(loan.borrower_id).slice(0, 8)}</td>
-                        <td>{String(loan.status)}</td>
-                        <td>{formatAmount(Number(loan.principal_amount ?? 0))}</td>
-                        <td>{(Number(loan.apr_bps ?? 0) / 100).toFixed(2)}%</td>
-                        <td>{loan.due_at ? new Date(String(loan.due_at)).toLocaleDateString() : "-"}</td>
-                      </tr>
-                    ))
-                  )}
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -129,7 +139,10 @@ export default async function AdminLoansPage() {
                       </tr>
                     ) : (
                       repayments.map((payment) => {
-                        const txHash = String(payment.tx_ref ?? "");
+                        let txHash = extractPossibleTxHash(payment.tx_ref) ?? "";
+                        if (!txHash || txHash.trim().length < 5) {
+                           txHash = oldHashesMap[String(payment.id)] ?? "";
+                        }
                         return (
                           <tr key={String(payment.id)}>
                             <td>{String(payment.loan_id).slice(0, 8)}</td>
@@ -138,11 +151,49 @@ export default async function AdminLoansPage() {
                             <td>{payment.paid_at ? new Date(String(payment.paid_at)).toLocaleString() : "-"}</td>
                             <td>
                               {isLikelyTxHash(txHash) ? (
-                                <a href={buildStellarTxVerificationUrl(txHash)} target="_blank" rel="noreferrer" className="workspace-nav-link">
+                                <a
+                                  href={buildStellarTxVerificationUrl(txHash)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "0.35rem",
+                                    padding: "0.35rem 0.75rem",
+                                    borderRadius: "999px",
+                                    border: "1px solid rgba(16,185,129,0.35)",
+                                    background: "rgba(16,185,129,0.14)",
+                                    color: "#047857",
+                                    fontSize: "0.8rem",
+                                    fontWeight: 700,
+                                    textDecoration: "none",
+                                  }}
+                                >
+                                  <span aria-hidden="true">✔</span>
                                   Verify
                                 </a>
                               ) : (
-                                "-"
+                                <span
+                                  aria-disabled="true"
+                                  title="Transaction hash not available yet for this repayment"
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "0.35rem",
+                                    padding: "0.35rem 0.75rem",
+                                    borderRadius: "999px",
+                                    border: "1px solid rgba(16,185,129,0.25)",
+                                    background: "rgba(16,185,129,0.08)",
+                                    color: "#10b981",
+                                    fontSize: "0.8rem",
+                                    fontWeight: 700,
+                                    opacity: 0.65,
+                                    cursor: "not-allowed",
+                                  }}
+                                >
+                                  <span aria-hidden="true">✔</span>
+                                  Pending
+                                </span>
                               )}
                             </td>
                           </tr>

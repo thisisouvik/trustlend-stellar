@@ -6,7 +6,7 @@ import {
   getAdminDashboardMetrics,
   presentAdminMetrics,
 } from "@/lib/dashboard/metrics";
-import { getServerSupabaseClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
 
 export default async function AdminUsersPage() {
   const { user } = await requireTradeVaultAdmin();
@@ -14,7 +14,7 @@ export default async function AdminUsersPage() {
   const walletAddress = String(user.user_metadata?.wallet_address ?? "") || null;
   const walletConnected = Boolean(walletAddress);
 
-  const supabase = await getServerSupabaseClient();
+  const supabase = getServiceRoleClient();
   const { data: users } = supabase
     ? await supabase
         .from("profiles")
@@ -73,34 +73,40 @@ export default async function AdminUsersPage() {
             </section>
 
             <div className="workspace-table-wrap">
-              <table className="workspace-table" aria-label="Admin users table">
-                <thead>
-                  <tr>
-                    <th>User</th>
-                    <th>Role</th>
-                    <th>KYC</th>
-                    <th>Risk</th>
-                    <th>Created</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {allUsers.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="workspace-empty-row">No user records found.</td>
-                    </tr>
-                  ) : (
-                    allUsers.map((profile) => (
-                      <tr key={String(profile.id)}>
-                        <td>{String(profile.full_name || String(profile.id).slice(0, 8))}</td>
-                        <td>{String(profile.role)}</td>
-                        <td>{String(profile.kyc_status)}</td>
-                        <td>{String(profile.risk_status)}</td>
-                        <td>{profile.created_at ? new Date(String(profile.created_at)).toLocaleDateString() : "-"}</td>
+                  <table className="workspace-table">
+                    <thead>
+                      <tr>
+                        <th>User ID</th>
+                        <th>Role</th>
+                        <th>Name</th>
+                        <th>KYC</th>
+                        <th>Risk</th>
+                        <th>Joined</th>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {allUsers.length === 0 ? (
+                        <tr><td colSpan={6} style={{ textAlign: "center", padding: "1.5rem", opacity: 0.5 }}>No users found.</td></tr>
+                      ) : allUsers.map((p) => (
+                        <tr key={String(p.id)}>
+                          <td style={{ fontFamily: "monospace", fontSize: "0.8rem" }}>{String(p.id).slice(0,8)}</td>
+                          <td><span style={{ textTransform: "capitalize", fontWeight: 600 }}>{String(p.role)}</span></td>
+                          <td>{String(p.full_name || "Unknown")}</td>
+                          <td>
+                            <span style={{ padding: "0.15rem 0.5rem", borderRadius: "999px", fontSize: "0.75rem", fontWeight: 600, background: p.kyc_status === "verified" ? "rgba(34,207,157,0.12)" : "rgba(245,166,35,0.12)", color: p.kyc_status === "verified" ? "#22cf9d" : "#f5a623" }}>
+                              {String(p.kyc_status).toUpperCase()}
+                            </span>
+                          </td>
+                          <td>
+                            <span style={{ padding: "0.15rem 0.5rem", borderRadius: "999px", fontSize: "0.75rem", fontWeight: 600, color: p.risk_status === "low" ? "#22cf9d" : p.risk_status === "blocked" ? "#ff6b6b" : "#f5a623", background: p.risk_status === "low" ? "rgba(34,207,157,0.12)" : p.risk_status === "blocked" ? "rgba(255,107,107,0.12)" : "rgba(245,166,35,0.12)" }}>
+                              {String(p.risk_status).toUpperCase()}
+                            </span>
+                          </td>
+                          <td>{p.created_at ? new Date(String(p.created_at)).toLocaleDateString() : "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
             </div>
           </>
         )}

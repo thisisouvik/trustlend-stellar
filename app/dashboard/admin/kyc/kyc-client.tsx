@@ -67,72 +67,119 @@ export default function AdminKYCClient({
     setLoading(false);
   };
 
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "2rem" }}>
-      {/* Document List */}
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            Pending Verification ({documents.filter(d => d.kyc_status === "submitted").length})
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {documents.length === 0 ? (
-            <p style={{ color: "#999", textAlign: "center", padding: "2rem" }}>
-              No pending documents
-            </p>
-          ) : (
-            <div style={{ display: "grid", gap: "1rem" }}>
-              {documents.map((doc) => (
-                <div
-                  key={doc.id}
-                  onClick={() => {
-                    setSelectedDoc(doc);
-                    setMessage(null);
-                    setRejectionReason("");
-                  }}
-                  style={{
-                    padding: "1rem",
-                    border:
-                      selectedDoc?.id === doc.id
-                        ? "2px solid #4f46e5"
-                        : "1px solid #e5e7eb",
-                    borderRadius: "0.5rem",
-                    cursor: "pointer",
-                    backgroundColor:
-                      selectedDoc?.id === doc.id ? "#f0f4ff" : "transparent",
-                  }}
-                >
-                  <div style={{ fontWeight: 600 }}>{doc.full_name}</div>
-                  <div style={{ fontSize: "0.85rem", color: "#666" }}>
-                    {doc.email}
-                  </div>
-                    <div
-                    style={{
-                      fontSize: "0.75rem",
-                      color: "#999",
-                      marginTop: "0.25rem",
-                    }}
-                  >
-                    Submitted:{" "}
-                    {doc.submitted_at ? new Date(doc.submitted_at).toISOString().split('T')[0] : "Unknown"}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+  const pendingDocuments = documents.filter((doc) => doc.kyc_status === "submitted");
+  const reviewedDocuments = documents.filter((doc) => doc.kyc_status !== "submitted");
 
-      {/* Document Viewer */}
-      {selectedDoc ? (
-        <Card>
+  const formatSubmittedDate = (submittedAt: string) => {
+    if (!submittedAt) {
+      return "Unknown";
+    }
+
+    return new Date(submittedAt).toLocaleDateString();
+  };
+
+  const isReviewedSelection = selectedDoc ? selectedDoc.kyc_status !== "submitted" : false;
+
+  return (
+    <div className="kyc-root">
+      <div className="kyc-note">
+        <span aria-hidden="true">💡</span>
+        <p>
+          <strong>Note:</strong> Reviews are currently manual. Automated AI face verification will be added in a future release.
+        </p>
+      </div>
+
+      <div className="kyc-grid">
+        <div className="kyc-list-stack">
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                Pending Verification ({pendingDocuments.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {pendingDocuments.length === 0 ? (
+                <p style={{ color: "#999", textAlign: "center", padding: "1.5rem 0" }}>
+                  No pending documents
+                </p>
+              ) : (
+                <div className="kyc-scroll-list">
+                  {pendingDocuments.map((doc) => (
+                    <div
+                      key={doc.id}
+                      onClick={() => {
+                        setSelectedDoc(doc);
+                        setMessage(null);
+                        setRejectionReason("");
+                      }}
+                      className={`kyc-doc-row ${selectedDoc?.id === doc.id ? "is-selected-pending" : ""}`}
+                    >
+                      <div style={{ fontWeight: 600 }}>{doc.full_name}</div>
+                      <div style={{ fontSize: "0.85rem", color: "#666" }}>{doc.email}</div>
+                      <div style={{ fontSize: "0.75rem", color: "#999", marginTop: "0.25rem" }}>
+                        Submitted: {formatSubmittedDate(doc.submitted_at)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                KYC History
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {reviewedDocuments.length === 0 ? (
+                <p style={{ color: "#999", textAlign: "center", padding: "1.5rem 0" }}>
+                  No reviewed documents
+                </p>
+              ) : (
+                <div className="kyc-scroll-list">
+                  {reviewedDocuments.map((doc) => (
+                    <div
+                      key={doc.id}
+                      onClick={() => {
+                        setSelectedDoc(doc);
+                        setMessage(null);
+                        setRejectionReason("");
+                      }}
+                      className={`kyc-doc-row ${selectedDoc?.id === doc.id ? "is-selected-reviewed" : ""}`}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div style={{ fontWeight: 600 }}>{doc.full_name}</div>
+                        <span style={{ fontSize: "0.65rem", fontWeight: 700, padding: "0.2rem 0.5rem", borderRadius: "999px", background: doc.kyc_status === "verified" ? "rgba(34,207,157,0.12)" : "rgba(245,166,35,0.12)", color: doc.kyc_status === "verified" ? "#22cf9d" : "#f5a623" }}>
+                          {doc.kyc_status.toUpperCase()}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: "0.85rem", color: "#666" }}>{doc.email}</div>
+                      <div style={{ fontSize: "0.75rem", color: "#999", marginTop: "0.25rem" }}>
+                        Submitted: {formatSubmittedDate(doc.submitted_at)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="kyc-viewer-panel">
+          {selectedDoc ? (
+        <Card className="kyc-viewer-card">
           <CardHeader>
             <CardTitle style={{ fontSize: "1rem" }}>
               {selectedDoc.full_name}
             </CardTitle>
           </CardHeader>
           <CardContent>
+            <div className="kyc-meta-row">
+              <span className="kyc-meta-pill">{isReviewedSelection ? "History Record" : "Pending Review"}</span>
+              <span className="kyc-meta-text">Submitted: {formatSubmittedDate(selectedDoc.submitted_at)}</span>
+            </div>
             {selectedDoc.government_id_url ? (
               <>
                 <div
@@ -142,6 +189,7 @@ export default function AdminKYCClient({
                     borderRadius: "0.5rem",
                     overflow: "hidden",
                     backgroundColor: "#f9f9f9",
+                    minHeight: "240px",
                   }}
                 >
                   {selectedDoc.government_id_url.endsWith(".pdf") ? (
@@ -219,6 +267,7 @@ export default function AdminKYCClient({
                             borderRadius: "0.4rem",
                             fontFamily: "inherit",
                             fontSize: "0.85rem",
+                            resize: "vertical",
                           }}
                         />
                       </div>
@@ -263,19 +312,179 @@ export default function AdminKYCClient({
           </CardContent>
         </Card>
       ) : (
-        <Card>
+        <Card className="kyc-viewer-card">
           <CardHeader>
             <CardTitle style={{ fontSize: "1rem" }}>
               Select a document
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p style={{ color: "#999", textAlign: "center" }}>
-              Choose a pending review from the list
-            </p>
+            <div className="kyc-empty-state">
+              <p style={{ color: "#64748b", textAlign: "center", margin: 0 }}>
+                Choose a record from Pending Verification or KYC History to preview details.
+              </p>
+              <div className="kyc-empty-stats">
+                <span>Pending: {pendingDocuments.length}</span>
+                <span>History: {reviewedDocuments.length}</span>
+              </div>
+            </div>
           </CardContent>
         </Card>
       )}
+        </div>
+      </div>
+
+      <style jsx>{`
+        .kyc-root {
+          display: flex;
+          flex-direction: column;
+          gap: 1.25rem;
+        }
+
+        .kyc-note {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          padding: 1rem;
+          background: linear-gradient(135deg, rgba(79, 70, 229, 0.08), rgba(14, 165, 233, 0.08));
+          border: 1px solid rgba(99, 102, 241, 0.3);
+          border-radius: 0.75rem;
+          color: #4338ca;
+          font-size: 0.9rem;
+        }
+
+        .kyc-note p {
+          margin: 0;
+        }
+
+        .kyc-grid {
+          display: grid;
+          grid-template-columns: minmax(320px, 1fr) minmax(420px, 1.35fr);
+          gap: 1.25rem;
+          align-items: stretch;
+        }
+
+        .kyc-list-stack {
+          display: grid;
+          gap: 1rem;
+          height: 100%;
+        }
+
+        .kyc-scroll-list {
+          display: grid;
+          gap: 0.75rem;
+          max-height: 360px;
+          overflow-y: auto;
+          padding-right: 0.35rem;
+        }
+
+        .kyc-doc-row {
+          padding: 0.9rem;
+          border: 1px solid #e5e7eb;
+          border-radius: 0.6rem;
+          cursor: pointer;
+          background: #ffffff;
+          transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
+        }
+
+        .kyc-doc-row:hover {
+          border-color: #c7d2fe;
+          box-shadow: 0 8px 20px rgba(79, 70, 229, 0.08);
+          transform: translateY(-1px);
+        }
+
+        .is-selected-pending {
+          border: 2px solid #4f46e5;
+          background: #eef2ff;
+        }
+
+        .is-selected-reviewed {
+          border: 2px solid #94a3b8;
+          background: #f8fafc;
+        }
+
+        .kyc-viewer-panel {
+          position: sticky;
+          top: 1.5rem;
+          align-self: start;
+          min-height: 100%;
+        }
+
+        .kyc-viewer-card {
+          min-height: 680px;
+        }
+
+        .kyc-meta-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 1rem;
+          gap: 0.75rem;
+          flex-wrap: wrap;
+        }
+
+        .kyc-meta-pill {
+          display: inline-block;
+          padding: 0.2rem 0.65rem;
+          border-radius: 999px;
+          font-size: 0.75rem;
+          font-weight: 700;
+          background: rgba(79, 70, 229, 0.14);
+          color: #4338ca;
+        }
+
+        .kyc-meta-text {
+          font-size: 0.8rem;
+          color: #64748b;
+        }
+
+        .kyc-empty-state {
+          min-height: 560px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 1rem;
+          border: 1px dashed #cbd5e1;
+          border-radius: 0.75rem;
+          padding: 1.25rem;
+          background: linear-gradient(180deg, rgba(248, 250, 252, 0.95), rgba(241, 245, 249, 0.75));
+        }
+
+        .kyc-empty-stats {
+          display: flex;
+          gap: 0.75rem;
+          flex-wrap: wrap;
+        }
+
+        .kyc-empty-stats span {
+          font-size: 0.8rem;
+          color: #334155;
+          background: #e2e8f0;
+          border: 1px solid #cbd5e1;
+          border-radius: 999px;
+          padding: 0.2rem 0.65rem;
+          font-weight: 600;
+        }
+
+        @media (max-width: 1160px) {
+          .kyc-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .kyc-viewer-panel {
+            position: static;
+          }
+
+          .kyc-viewer-card {
+            min-height: 420px;
+          }
+
+          .kyc-empty-state {
+            min-height: 280px;
+          }
+        }
+      `}</style>
     </div>
   );
 }

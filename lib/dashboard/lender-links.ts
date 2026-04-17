@@ -5,6 +5,5 @@ export const lenderNavLinks = [
   { href: "/dashboard/lender/history",     label: "Transaction History" },
   { href: "/dashboard/lender/pools",       label: "Pool Investment" },
   { href: "/dashboard/lender/portfolio",   label: "Portfolio" },
-  { href: "/dashboard/lender/risk",        label: "Risk" },
   { href: "/dashboard/lender/profile",     label: "Profile & Settings" },
 ];

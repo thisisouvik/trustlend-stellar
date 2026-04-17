@@ -150,7 +150,7 @@ export function WorkspaceFrame({
               </div>
             </header>
 
-            <div className="role-metrics role-metrics--four">
+            <div className={`role-metrics ${metrics.length === 4 ? "role-metrics--four" : ""}`} style={metrics.length !== 4 ? { display: "grid", gridTemplateColumns: `repeat(${metrics.length}, 1fr)`, gap: "1rem" } : {}}>
               {metrics.map((metric) => (
                 <article key={metric.label} className="role-metric-card">
                   <p className="role-metric-value font-display">{metric.value}</p>

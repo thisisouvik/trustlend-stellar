@@ -22,12 +22,21 @@ function getRateLimitKey(request: NextRequest): string {
 }
 
 export async function proxy(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+
+  // ── ① Short-circuit for static assets — no auth check needed ────────────────
+  const isStatic =
+    pathname.startsWith("/_next/") ||
+    pathname.startsWith("/favicon") ||
+    /\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?|ttf|otf|css|js|map)$/.test(pathname);
+  if (isStatic) return NextResponse.next({ request });
+
   const bypassUserId = request.headers.get("x-dev-user-id")?.trim() ?? "";
   const bypassRoleRaw = request.headers.get("x-dev-role")?.trim();
   const bypassActive = DEV_BYPASS_ENABLED && !!bypassUserId && isValidUuid(bypassUserId);
 
-  // ── Rate limiting on API routes ──────────────────────────────────────────────
-  if (request.nextUrl.pathname.startsWith("/api/")) {
+  // ── ② Rate limiting on API routes ───────────────────────────────────────────
+  if (pathname.startsWith("/api/")) {
     const key = getRateLimitKey(request);
     const now = Date.now();
     const record = requestCounts.get(key);
@@ -48,7 +57,11 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  // ── Supabase auth session refresh + route guard ──────────────────────────────
+  // ── ③ Supabase cookie-based session check (NO NETWORK CALL) ─────────────────
+  // We use getSession() here because it reads the JWT from the cookie locally.
+  // getUser() makes a live Supabase network call on every request and is the
+  // cause of the 10 s connect-timeout errors. Full JWT verification happens
+  // inside requireAuthenticatedUser() in each protected page/API route.
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -67,7 +80,6 @@ export async function proxy(request: NextRequest) {
         cookiesToSet.forEach(({ name, value }) => {
           request.cookies.set(name, value);
         });
-
         supabaseResponse = NextResponse.next({ request });
         cookiesToSet.forEach(({ name, value, options }) => {
           supabaseResponse.cookies.set(name, value, options);
@@ -76,18 +88,16 @@ export async function proxy(request: NextRequest) {
     },
   });
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // ✅ getSession() = local cookie read, NO network round-trip
+  const { data: { session } } = await supabase.auth.getSession();
 
   const effectiveUser = bypassActive
     ? {
         id: bypassUserId,
         user_metadata: { account_type: normalizeUserRole(bypassRoleRaw) },
       }
-    : user;
+    : session?.user ?? null;
 
-  const pathname = request.nextUrl.pathname;
   const isDashboardPath = pathname === "/dashboard" || pathname.startsWith("/dashboard/");
   const isAuthEntryPath = pathname === "/auth";
 

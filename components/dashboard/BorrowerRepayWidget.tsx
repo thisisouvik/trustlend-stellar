@@ -40,14 +40,14 @@ interface RepaymentBreakdown {
 
 function SuccessOverlay({ data, onClose }: { data: SuccessData; onClose: () => void }) {
   return (
-    <div style={{
+    <div className="borrower-success-overlay" style={{
       position: "fixed", inset: 0, zIndex: 1000,
       background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)",
       display: "flex", alignItems: "center", justifyContent: "center",
       padding: "1rem",
       animation: "fadeIn 0.2s ease",
     }}>
-      <div style={{
+      <div className="borrower-success-card" style={{
         background: "#fff", borderRadius: "1.25rem",
         padding: "2.5rem 2rem", maxWidth: "420px", width: "100%",
         boxShadow: "0 25px 60px rgba(0,0,0,0.2)",
@@ -73,7 +73,7 @@ function SuccessOverlay({ data, onClose }: { data: SuccessData; onClose: () => v
            </a>
         )}
 
-        <div style={{ display: "flex", gap: "0.75rem", justifyContent: "center" }}>
+        <div className="borrower-success-actions" style={{ display: "flex", gap: "0.75rem", justifyContent: "center" }}>
           <button
             onClick={onClose}
             style={{
@@ -282,7 +282,7 @@ export function BorrowerRepayWidget({ loan, dueAmount: initialDue }: { loan: Rep
 
       <article className="workspace-card workspace-card--full">
         {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "1.25rem" }}>
+        <div className="borrower-repay-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "1.25rem" }}>
           <div>
             <h2 className="workspace-card-title" style={{ margin: 0 }}>On-Chain Repayment</h2>
             <p style={{ margin: "0.25rem 0 0", fontSize: "0.82rem", color: "#6b7280" }}>
@@ -354,7 +354,7 @@ export function BorrowerRepayWidget({ loan, dueAmount: initialDue }: { loan: Rep
         {dueAmount > 0 ? (
           <>
             {/* Quick pay buttons */}
-            <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+            <div className="borrower-repay-actions" style={{ display: "flex", gap: "0.75rem", marginBottom: "1rem", flexWrap: "wrap" }}>
               <button
                 onClick={() => handleRepayOnChain(dueAmount)}
                 disabled={isBusy}
@@ -388,7 +388,7 @@ export function BorrowerRepayWidget({ loan, dueAmount: initialDue }: { loan: Rep
             </div>
 
             {/* Custom amount */}
-            <div style={{ display: "flex", gap: "0.5rem", alignItems: "stretch" }}>
+            <div className="borrower-repay-custom-row" style={{ display: "flex", gap: "0.5rem", alignItems: "stretch" }}>
               <input
                 type="number" step="0.01" min="0.01" max={dueAmount}
                 value={customAmount}
@@ -474,6 +474,55 @@ export function BorrowerRepayWidget({ loan, dueAmount: initialDue }: { loan: Rep
             </div>
           </div>
         )}
+
+        <style jsx>{`
+          @media (max-width: 560px) {
+            .borrower-success-overlay {
+              align-items: flex-end;
+              padding: 0.75rem;
+            }
+
+            .borrower-success-card {
+              width: 100% !important;
+              max-width: none !important;
+              max-height: calc(100dvh - 1.5rem);
+              overflow-y: auto;
+              padding: 1.3rem 1rem !important;
+              border-radius: 1rem !important;
+            }
+
+            .borrower-success-actions {
+              flex-direction: column;
+            }
+
+            .borrower-success-actions > button {
+              width: 100%;
+            }
+
+            .borrower-repay-header {
+              flex-direction: column;
+              gap: 0.75rem;
+            }
+
+            .borrower-repay-actions {
+              flex-direction: column;
+            }
+
+            .borrower-repay-actions > button {
+              width: 100%;
+              min-width: 0 !important;
+            }
+
+            .borrower-repay-custom-row {
+              flex-direction: column;
+            }
+
+            .borrower-repay-custom-row > input,
+            .borrower-repay-custom-row > button {
+              width: 100%;
+            }
+          }
+        `}</style>
       </article>
     </>
   );

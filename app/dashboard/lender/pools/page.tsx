@@ -77,7 +77,7 @@ export default async function LenderPoolsPage() {
       <div className="workspace-stack">
 
         {/* ── My positions summary ──────────────────────────────── */}
-        <section className="workspace-grid workspace-grid--two" style={{ gridTemplateColumns: "1fr 2fr" }}>
+        <section className="workspace-grid workspace-grid--two">
           <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
             {[
               { label: "Your Total Deployed", value: `${totalDeployed.toFixed(2)} XLM` },

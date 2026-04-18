@@ -6,7 +6,7 @@ export function TableWrap({ className, ...props }: HTMLAttributes<HTMLDivElement
 }
 
 export function Table({ className, ...props }: TableHTMLAttributes<HTMLTableElement>) {
-  return <table className={clsx("w-full min-w-[620px] border-collapse", className)} {...props} />;
+  return <table className={clsx("w-full min-w-full md:min-w-[620px] border-collapse", className)} {...props} />;
 }
 
 export function TableHead({ className, ...props }: HTMLAttributes<HTMLTableSectionElement>) {

@@ -89,7 +89,7 @@ export function InteractiveLineChart({
 
       {/* Hover tooltip HTML (absolute positioned) */}
       {hoverIdx !== null && (
-        <div style={{
+        <div className="interactive-chart-tooltip" style={{
           position: "absolute",
           top: "10px", right: "20px",
           background: "#fff",
@@ -106,6 +106,19 @@ export function InteractiveLineChart({
           </p>
         </div>
       )}
+
+      <style jsx>{`
+        @media (max-width: 640px) {
+          .interactive-chart-tooltip {
+            left: 12px;
+            right: 12px;
+            top: auto !important;
+            bottom: 12px;
+            min-width: 0 !important;
+            width: auto;
+          }
+        }
+      `}</style>
     </div>
   );
 }

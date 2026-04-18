@@ -6,13 +6,7 @@ import {
   getAdminDashboardMetrics,
   presentAdminMetrics,
 } from "@/lib/dashboard/metrics";
-import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
-import {
-  buildStellarTxVerificationUrl,
-  extractPossibleTxHash,
-  STELLAR_NETWORK_LABEL,
-  STELLAR_VERIFY_PORTAL,
-} from "@/lib/stellar/explorer";
+import { getServiceRoleClient } from "@/lib/supabase/server";
 import Link from "next/link";
 
 function formatAmount(value: number) {
@@ -114,16 +108,6 @@ export default async function AdminDashboardPage() {
       .map((row) => String(row.user_id)),
   ).size;
 
-  const incompleteProfiles = profiles.filter((profile) =>
-    !String(profile.full_name ?? "").trim()
-    || !String(profile.phone ?? "").trim()
-    || !String(profile.country_code ?? "").trim(),
-  );
-
-  const pendingKycProfiles = profiles.filter((profile) =>
-    ["pending", "submitted", "rejected"].includes(String(profile.kyc_status)),
-  );
-
   const maliciousUserIds = new Set(
     fraudSignals
       .filter((signal) => !signal.resolved && Number(signal.severity ?? 0) >= 4)
@@ -145,30 +129,6 @@ export default async function AdminDashboardPage() {
     }
     topUsersMap.set(userId, (topUsersMap.get(userId) ?? 0) + amount);
   }
-
-  const topUsers = [...topUsersMap.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 6)
-    .map(([userId, amount]) => ({
-      userId,
-      amount,
-      profile: profiles.find((profile) => String(profile.id) === userId),
-    }));
-
-  const recentChainRows = ledgerRows
-    .map((row) => {
-      const hashFromMeta = extractPossibleTxHash(row.metadata);
-      return {
-        id: String(row.id),
-        category: String(row.category ?? "unknown"),
-        amount: Number(row.amount ?? 0),
-        status: String(row.status ?? "pending"),
-        userId: String(row.user_id ?? ""),
-        createdAt: String(row.created_at ?? ""),
-        txHash: hashFromMeta,
-      };
-    })
-    .slice(0, 10);
 
   return (
     <WorkspaceFrame

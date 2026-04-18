@@ -68,6 +68,8 @@ export function WorkspaceFrame({
     });
   })();
 
+  const metricColumns = metrics.length === 4 ? 4 : metrics.length || 1;
+
   return (
     <main className="role-dashboard-shell">
       <section className="role-dashboard-card role-dashboard-card--wide">
@@ -150,7 +152,10 @@ export function WorkspaceFrame({
               </div>
             </header>
 
-            <div className={`role-metrics ${metrics.length === 4 ? "role-metrics--four" : ""}`} style={metrics.length !== 4 ? { display: "grid", gridTemplateColumns: `repeat(${metrics.length}, 1fr)`, gap: "1rem" } : {}}>
+            <div
+              className={`role-metrics ${metrics.length === 4 ? "role-metrics--four" : ""}`}
+              style={{ ["--metric-columns" as string]: String(metricColumns) }}
+            >
               {metrics.map((metric) => (
                 <article key={metric.label} className="role-metric-card">
                   <p className="role-metric-value font-display">{metric.value}</p>

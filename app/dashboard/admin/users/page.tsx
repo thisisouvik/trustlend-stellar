@@ -6,7 +6,7 @@ import {
   getAdminDashboardMetrics,
   presentAdminMetrics,
 } from "@/lib/dashboard/metrics";
-import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
+import { getServiceRoleClient } from "@/lib/supabase/server";
 
 export default async function AdminUsersPage() {
   const { user } = await requireTradeVaultAdmin();

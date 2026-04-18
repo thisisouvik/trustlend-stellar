@@ -180,6 +180,7 @@ export function DirectFundForm({ loan, onClose }: DirectFundFormProps) {
 
   return (
     <div
+      className="direct-fund-form"
       style={{
         padding: "1.75rem",
         border: "1px solid rgba(126, 47, 208, 0.15)",
@@ -204,7 +205,7 @@ export function DirectFundForm({ loan, onClose }: DirectFundFormProps) {
         padding: "1.25rem",
         marginBottom: "1.5rem" 
       }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem 2rem" }}>
+        <div className="direct-fund-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem 2rem" }}>
           <div>
             <p style={{ margin: "0 0 0.2rem 0", fontSize: "0.75rem", color: "rgba(0,0,0,0.5)", textTransform: "uppercase", fontWeight: 600 }}>Principal Amount</p>
             <p style={{ margin: 0, fontSize: "1.1rem", fontWeight: 700, color: "#111" }}>{loan.principal_amount} <span style={{ fontSize: "0.8rem", color: "rgba(0,0,0,0.4)" }}>XLM</span></p>
@@ -303,7 +304,7 @@ export function DirectFundForm({ loan, onClose }: DirectFundFormProps) {
         </div>
       )}
 
-      <div style={{ display: "flex", gap: "1rem" }}>
+      <div className="direct-fund-actions" style={{ display: "flex", gap: "1rem" }}>
         <button
           onClick={handleFund}
           disabled={step !== "idle" && step !== "error"}
@@ -342,6 +343,29 @@ export function DirectFundForm({ loan, onClose }: DirectFundFormProps) {
           0% { opacity: 0.8; }
           50% { opacity: 1; }
           100% { opacity: 0.8; }
+        }
+
+        @media (max-width: 640px) {
+          .direct-fund-form {
+            width: calc(100vw - 1rem);
+            max-width: none !important;
+            margin: 0 auto;
+            padding: 1rem !important;
+          }
+
+          .direct-fund-grid {
+            grid-template-columns: 1fr !important;
+            gap: 0.9rem !important;
+          }
+
+          .direct-fund-actions {
+            flex-direction: column;
+          }
+
+          .direct-fund-actions > button {
+            width: 100%;
+            min-width: 0 !important;
+          }
         }
       `}</style>
     </div>

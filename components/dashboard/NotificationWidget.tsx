@@ -56,10 +56,10 @@ export function NotificationWidget() {
   };
 
   return (
-    <div ref={dropdownRef} style={{ position: "relative", display: "inline-block" }}>
+    <div ref={dropdownRef} className="notification-widget" style={{ position: "relative", display: "inline-block" }}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="workspace-chip"
+        className="notification-trigger workspace-chip"
         style={{
           position: "relative",
           padding: "0.45rem 0.6rem",
@@ -91,6 +91,7 @@ export function NotificationWidget() {
 
       {isOpen && (
         <div
+          className="notification-dropdown"
           style={{
             position: "absolute", top: "calc(100% + 8px)", right: 0, minWidth: "300px", maxWidth: "400px", maxHeight: "450px",
             background: "white", border: "1px solid #dbe3f5", borderRadius: "0.85rem",
@@ -150,6 +151,34 @@ export function NotificationWidget() {
           )}
         </div>
       )}
+
+      <style jsx>{`
+        .notification-widget {
+          position: relative;
+          display: inline-block;
+        }
+
+        @media (max-width: 640px) {
+          .notification-widget {
+            position: static;
+          }
+
+          .notification-dropdown {
+            position: fixed !important;
+            top: 4.4rem !important;
+            left: 0.75rem !important;
+            right: 0.75rem !important;
+            width: auto !important;
+            min-width: 0 !important;
+            max-width: none !important;
+            max-height: calc(100dvh - 5.5rem) !important;
+          }
+
+          .notification-trigger {
+            min-width: 44px;
+          }
+        }
+      `}</style>
     </div>
   );
 }

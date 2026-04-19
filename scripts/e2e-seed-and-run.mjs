@@ -153,7 +153,7 @@ async function main() {
     poolId = createdPool.id;
   }
 
-  const base = "http://localhost:3000";
+  const base = process.env.E2E_BASE_URL ?? "http://localhost:3000";
   const borrowerHeaders = {
     "x-dev-user-id": borrower.id,
     "x-dev-role": "borrower",
@@ -197,6 +197,8 @@ async function main() {
   const deposit = await http("POST", `${base}/api/pools/deposit`, lenderHeaders, {
     poolId,
     amount: 250,
+    txHash: "e2e-deposit-tx-001",
+    lenderAddress: "GE2ELENDERADDRESS0000000000000000000000000000000000000000000",
   });
   const positionId = deposit?.payload?.position?.id;
   check("Lender deposit", deposit.status === 201 && !!positionId, `status=${deposit.status}`);
@@ -210,12 +212,16 @@ async function main() {
   const repayPartial = await http("POST", `${base}/api/loans/repay`, borrowerHeaders, {
     loanId,
     amount: 30,
+    txHash: "e2e-repay-partial-001",
+    borrowerAddress: "GE2EBORROWERADDRESS0000000000000000000000000000000000000000",
   });
   check("Borrower partial repayment", repayPartial.status === 201, `status=${repayPartial.status}`);
 
   const repayFull = await http("POST", `${base}/api/loans/repay`, borrowerHeaders, {
     loanId,
     amount: 500,
+    txHash: "e2e-repay-full-001",
+    borrowerAddress: "GE2EBORROWERADDRESS0000000000000000000000000000000000000000",
   });
   check("Borrower full repayment", repayFull.status === 201, `status=${repayFull.status}`);
 

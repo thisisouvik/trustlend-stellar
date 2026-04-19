@@ -71,14 +71,24 @@ export function WalletCard({
     const { error: authErr } = await supabase.auth.updateUser({ data: nextMetadata });
     if (authErr) throw new Error(authErr.message);
 
-    // 2. ALSO save to profiles table — this is what the lender marketplace reads
-    //    via the service role client when showing borrower wallet addresses.
+    // 2. Mirror into profiles.wallet_address (schema migration adds this column).
+    // Keep this non-fatal in case migration has not yet been applied.
     const { error: profileErr } = await supabase
       .from("profiles")
-      .upsert({ id: session.user.id, wallet_address: nextAddress })
+      .update({ wallet_address: nextAddress })
       .eq("id", session.user.id);
-    // Non-fatal: log but don't throw (auth metadata is the source of truth for current user)
-    if (profileErr) console.warn("profiles wallet_address sync failed:", profileErr.message);
+
+    if (profileErr) {
+      console.warn("profiles wallet_address sync failed:", profileErr.message);
+    }
+
+    // 3. Legacy local storage compatibility for client-side flows.
+    if (nextAddress) {
+      window.localStorage.setItem("wallet_address", nextAddress);
+    } else {
+      window.localStorage.removeItem("wallet_address");
+    }
+
   };
 
   const connectWallet = async () => {

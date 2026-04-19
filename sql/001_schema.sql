@@ -135,6 +135,7 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   full_name text not null default '',
   role public.app_role not null default 'borrower',
+  wallet_address text,
   country_code text,
   phone text,
   kyc_status public.kyc_status not null default 'pending',
@@ -144,6 +145,7 @@ create table if not exists public.profiles (
 );
 
 create index if not exists idx_profiles_role on public.profiles(role);
+create index if not exists idx_profiles_wallet_address on public.profiles(wallet_address);
 create index if not exists idx_profiles_kyc_status on public.profiles(kyc_status);
 create index if not exists idx_profiles_risk_status on public.profiles(risk_status);
 

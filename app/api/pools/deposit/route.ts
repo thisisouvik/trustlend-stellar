@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 
 /**
  * POST /api/pools/deposit
@@ -16,14 +18,10 @@ import { getServerSupabaseClient } from "@/lib/supabase/server";
  */
 export async function POST(request: NextRequest) {
   try {
+    const { user } = await requireAuthenticatedUser("lender");
     const supabase = await getServerSupabaseClient();
     if (!supabase) {
       return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
-    }
-
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const body = await request.json();
@@ -152,6 +150,9 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (error) {
+    if (isRedirectError(error)) {
+      throw error;
+    }
     console.error("Deposit error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

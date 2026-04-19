@@ -25,7 +25,9 @@ export async function getServerSupabaseClient(): Promise<SupabaseClient | null> 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const bypassEnabled = process.env.ENABLE_DEV_AUTH_BYPASS === "true";
+  const bypassEnabled =
+    process.env.NODE_ENV !== "production" &&
+    process.env.ENABLE_DEV_AUTH_BYPASS === "true";
 
   if (!url || (!anonKey && !(bypassEnabled && serviceRoleKey))) {
     return null;

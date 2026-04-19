@@ -8,16 +8,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
 
-/** Service-role client that bypasses RLS — only used server-side after identity check */
-function getServiceRoleClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return null;
-  return createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-}
-
 export async function uploadKYCDocument(formData: FormData): Promise<{
   success: boolean;
   path?: string;
@@ -58,23 +48,27 @@ export async function uploadKYCDocument(formData: FormData): Promise<{
       return { success: false, error: "File too large. Maximum 10MB allowed." };
     }
 
-    // Ensure kyc-documents bucket exists (using admin client to bypass Storage RLS)
-    const admin = getServiceRoleClient();
-    if (!admin) {
-      console.error("Service role client unavailable");
-      return { success: false, error: "Server configuration error. Contact support." };
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !anonKey) {
+      return { success: false, error: "Supabase is not configured." };
     }
 
-    const { data: bucketsData } = await admin.storage.listBuckets();
-    const bucketExists = bucketsData?.some((b) => b.name === "kyc-documents");
+    // Use session token for storage upload so deployment does not require service-role key.
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
 
-    if (!bucketExists) {
-      // If bucket doesn't exist, create it via admin client
-      await admin.storage.createBucket("kyc-documents", {
-        public: false, // Private bucket; we'll use signed URLs or admin view
-      });
-      console.log("✅ Created kyc-documents bucket");
-    }
+    const client = createClient(url, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: session?.access_token
+        ? {
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          }
+        : undefined,
+    });
 
     // Create unique file path: /kyc-documents/{userId}/government_id_{timestamp}
     const filename = `government_id_${Date.now()}_${Math.random().toString(36).substring(7)}`;
@@ -82,8 +76,7 @@ export async function uploadKYCDocument(formData: FormData): Promise<{
 
     console.log(`📤 Uploading ${file.name} to Supabase Storage: ${filepath}`);
 
-    // Upload file to Supabase Storage using admin client
-    const { error: uploadError } = await admin.storage
+    const { error: uploadError } = await client.storage
       .from("kyc-documents")
       .upload(filepath, file, {
         cacheControl: "3600",
@@ -95,17 +88,17 @@ export async function uploadKYCDocument(formData: FormData): Promise<{
       return { success: false, error: uploadError.message };
     }
 
-    // Get public URL using admin client
+    // Get public URL for the uploaded document path
     const {
       data: { publicUrl },
-    } = admin.storage.from("kyc-documents").getPublicUrl(filepath);
+    } = client.storage.from("kyc-documents").getPublicUrl(filepath);
 
-    // Store reference in profiles table (use service role to bypass RLS)
+    // Store reference in profiles table with caller session (RLS-protected)
     // Note regarding IPFS: The database schema originally named this column 
     // `government_id_ipfs_hash` planning for future decentralized storage. 
     // Currently, we use it to store the Supabase Storage filepath.
 
-    const { error: updateError } = await admin
+    const { error: updateError } = await supabase
       .from("profiles")
       .update({
         government_id_ipfs_hash: filepath,

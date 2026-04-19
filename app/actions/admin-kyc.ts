@@ -5,18 +5,7 @@
  * Only admins can verify/reject user identity documents
  */
 
-import { createClient } from "@supabase/supabase-js";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
-
-/** Service-role client that bypasses RLS */
-function getServiceRoleClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return null;
-  return createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-}
 
 export async function verifyKYCDocument(
   userId: string,
@@ -65,43 +54,31 @@ export async function verifyKYCDocument(
 
     if (updateError) throw updateError;
 
-    // When KYC is APPROVED: seed a real initial reputation score based on
-    // what the user has actually completed. Nothing is hardcoded — the score
-    // is computed from real profile fields at the time of approval.
+    // When KYC is approved, seed an initial reputation score from real profile fields.
     if (approved) {
-      const admin = getServiceRoleClient();
-      if (admin) {
-        // Fetch the user's actual profile data to compute a fair starting score
-        const { data: userProfile } = await admin
-          .from("profiles")
-          .select("full_name, phone, country_code")
-          .eq("id", userId)
-          .maybeSingle();
+      const { data: userProfile } = await supabase
+        .from("profiles")
+        .select("full_name, phone, country_code")
+        .eq("id", userId)
+        .maybeSingle();
 
-        const { data: authUser } = await admin.auth.admin.getUserById(userId);
+      let initialScore = 70;
+      if (userProfile?.full_name?.trim()) initialScore += 15;
+      if (userProfile?.phone?.trim()) initialScore += 15;
+      if (userProfile?.country_code?.trim()) initialScore += 10;
 
-        // Real-time score calculation — each completed field contributes
-        let initialScore = 0;
-        if (authUser?.user?.email_confirmed_at) initialScore += 20; // Email verified
-        if (userProfile?.full_name?.trim())       initialScore += 15; // Legal name set
-        if (userProfile?.phone?.trim())            initialScore += 15; // Phone verified
-        if (userProfile?.country_code?.trim())     initialScore += 10; // Country set
-        initialScore += 50; // KYC government ID approved (the primary event)
-        // Total: 50–110 depending on profile completeness → Beginner–Silver tier
+      await supabase.from("reputation_snapshots").upsert(
+        {
+          user_id: userId,
+          score_total: initialScore,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id" }
+      );
 
-        await admin.from("reputation_snapshots").upsert(
-          {
-            user_id: userId,
-            score_total: initialScore,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "user_id" }
-        );
-
-        console.log(
-          `[TrustLend] Reputation snapshot seeded for ${userId}: score=${initialScore}`
-        );
-      }
+      console.log(
+        `[TrustLend] Reputation snapshot seeded for ${userId}: score=${initialScore}`
+      );
     }
 
 
@@ -144,11 +121,7 @@ export async function getPendingKYCDocuments(): Promise<
 
     if (adminProfile?.role !== "admin") return null;
 
-    // Fetch pending KYC documents using admin client
-    const admin = getServiceRoleClient();
-    if (!admin) return null;
-
-    const { data, error } = await admin
+    const { data, error } = await supabase
       .from("profiles")
       .select("id, full_name, kyc_status, government_id_ipfs_hash, government_id_url, kyc_submitted_at")
       .in("kyc_status", ["submitted", "verified", "rejected"])
@@ -159,15 +132,12 @@ export async function getPendingKYCDocuments(): Promise<
       return null;
     }
 
-    // Get email and generate signed URLs for each profile
+    // Generate signed URLs for each profile document path.
     const docsWithEmail = await Promise.all(
       (data || []).map(async (doc) => {
-        const { data: authData } = await admin.auth.admin.getUserById(doc.id);
-        
         let viewUrl = doc.government_id_url;
-        // Generate a 1-hour signed URL if we have the file path
         if (doc.government_id_ipfs_hash) {
-           const { data: signedData } = await admin.storage
+           const { data: signedData } = await supabase.storage
              .from("kyc-documents")
              .createSignedUrl(doc.government_id_ipfs_hash, 3600);
            
@@ -178,7 +148,7 @@ export async function getPendingKYCDocuments(): Promise<
 
         return {
            ...doc,
-           email: authData?.user?.email || "unknown",
+            email: "hidden",
            submitted_at: doc.kyc_submitted_at || "",
            government_id_url: viewUrl || "",
         };

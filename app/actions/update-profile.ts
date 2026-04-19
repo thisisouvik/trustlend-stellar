@@ -3,11 +3,9 @@
 /**
  * Server Action: Update user profile fields
  * Uses getServerSupabaseClient() — authenticated via cookie (anon key + user JWT).
- * The actual DB write uses a service-role client to bypass RLS and avoid
- * WITH CHECK edge-cases, after verifying the caller matches the row id.
+ * DB writes are done with the caller session and enforced by RLS.
  */
 
-import { createClient } from "@supabase/supabase-js";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
 
 interface ProfileUpdatePayload {
@@ -19,19 +17,6 @@ interface ProfileUpdatePayload {
 interface ProfileUpdateResult {
   success: boolean;
   error?: string;
-}
-
-/**
- * Returns a service-role Supabase client that bypasses RLS entirely.
- * Only used server-side after the caller's identity is verified.
- */
-function getServiceRoleClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceKey) return null;
-  return createClient(url, serviceKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
 }
 
 export async function updateUserProfile(
@@ -85,13 +70,8 @@ export async function updateUserProfile(
       updates.date_of_birth = payload.date_of_birth.trim();
     }
 
-    // 4. Write via service-role client (RLS bypass) — safe because we verified caller above
-    const admin = getServiceRoleClient();
-    if (!admin) {
-      return { success: false, error: "Server configuration error. Contact support." };
-    }
-
-    const { error: updateError } = await admin
+    // 4. Write with session client; RLS restricts updates to the caller row
+    const { error: updateError } = await supabase
       .from("profiles")
       .update(updates)
       .eq("id", user.id);

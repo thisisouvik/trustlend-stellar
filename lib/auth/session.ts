@@ -90,16 +90,6 @@ function parseAllowedAdminEmails(): Set<string> {
   );
 }
 
-function hasTradeVaultAdminClaim(user: { app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown> }) {
-  const appMeta = user.app_metadata ?? {};
-  const userMeta = user.user_metadata ?? {};
-
-  const company = (userMeta.company ?? appMeta.company ?? userMeta.org ?? appMeta.org) as string | undefined;
-  const isAdminFlag = (userMeta.is_trade_vault_admin ?? appMeta.is_trade_vault_admin) as boolean | undefined;
-
-  return isAdminFlag === true || company === "trade_vault" || company === "tradevault";
-}
-
 export function isTradeVaultAdminUser(user: {
   email?: string;
   app_metadata?: Record<string, unknown>;
@@ -108,13 +98,29 @@ export function isTradeVaultAdminUser(user: {
   const allowedAdmins = parseAllowedAdminEmails();
   const email = user.email?.toLowerCase() ?? "";
 
-  return allowedAdmins.has(email) || hasTradeVaultAdminClaim(user);
+  // Do not trust user/app metadata claims for admin access.
+  // Only allowlisted email + DB role check in requireTradeVaultAdmin grants access.
+  return allowedAdmins.has(email);
 }
 
 export async function requireTradeVaultAdmin() {
   const { user, role } = await requireAuthenticatedUser();
+  const emailAllowlisted = isTradeVaultAdminUser(user);
 
-  if (!isTradeVaultAdminUser(user)) {
+  const supabase = await getServerSupabaseClient();
+  if (!supabase) {
+    redirect(getDashboardPath(normalizeUserRole(role)));
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  const dbAdmin = profile?.role === "admin";
+
+  if (!emailAllowlisted || !dbAdmin) {
     redirect(getDashboardPath(normalizeUserRole(role)));
   }
 

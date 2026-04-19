@@ -2,26 +2,13 @@ import { WorkspaceFrame } from "@/components/dashboard/WorkspaceFrame";
 import { adminNavLinks } from "@/lib/dashboard/admin-links";
 import { requireTradeVaultAdmin } from "@/lib/auth/session";
 import { getAdminDashboardMetrics, presentAdminMetrics } from "@/lib/dashboard/metrics";
-import { createClient } from "@supabase/supabase-js";
+import { getServerSupabaseClient } from "@/lib/supabase/server";
 import AdminPoolsClient from "./pools-client";
-
-/** Service-role client bypasses RLS — required for admin to read all users' data. */
-function getServiceRoleClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return null;
-  return createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-}
 
 export default async function AdminPoolsPage() {
   const { user } = await requireTradeVaultAdmin();
   const metrics = await getAdminDashboardMetrics();
-
-  // Use service-role client — the regular session-bound client is blocked by RLS
-  // from reading loans/profiles belonging to other users.
-  const admin = getServiceRoleClient();
+  const admin = await getServerSupabaseClient();
 
   const [poolsRes, pendingLoansRes] = admin
     ? await Promise.all([

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
-import { getServerSupabaseClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 
 interface RepayPayload {
@@ -23,7 +23,8 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = await getServerSupabaseClient();
-    if (!supabase) {
+    const srClient = getServiceRoleClient();
+    if (!supabase || !srClient) {
       return NextResponse.json({ error: "Database unavailable" }, { status: 500 });
     }
 
@@ -40,7 +41,7 @@ export async function POST(request: NextRequest) {
     if (loan.status === "defaulted") return NextResponse.json({ error: "Loan is in default" }, { status: 400 });
 
     // Prevent duplicate txHash
-    const { data: existingTx } = await supabase
+    const { data: existingTx } = await srClient
       .from("ledger_transactions")
       .select("id")
       .eq("ref_type", "loan_repay")
@@ -52,7 +53,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Figure out the lender to notify them
-    const { data: fundTx } = await supabase
+    const { data: fundTx } = await srClient
       .from("ledger_transactions")
       .select("user_id, metadata")
       .eq("ref_type", "loan_fund")
@@ -61,9 +62,9 @@ export async function POST(request: NextRequest) {
       
     const lenderUserId = fundTx?.user_id || "";
     let lenderAddress = "";
-    if (fundTx) {
+    if (fundTx && fundTx.metadata) {
        try {
-         const meta = JSON.parse(String(fundTx.metadata ?? "{}"));
+         const meta = typeof fundTx.metadata === "string" ? JSON.parse(fundTx.metadata) : fundTx.metadata;
          lenderAddress = meta.lenderAddress ?? "";
        } catch { /* ignore */ }
     }

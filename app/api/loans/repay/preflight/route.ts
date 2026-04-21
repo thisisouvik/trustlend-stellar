@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
-import { getServerSupabaseClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 
 /**
@@ -16,7 +16,8 @@ export async function GET(request: NextRequest) {
     if (!loanId) return NextResponse.json({ error: "loanId required" }, { status: 400 });
 
     const supabase = await getServerSupabaseClient();
-    if (!supabase) return NextResponse.json({ error: "Database unavailable" }, { status: 500 });
+    const srClient = getServiceRoleClient();
+    if (!supabase || !srClient) return NextResponse.json({ error: "Database unavailable" }, { status: 500 });
 
     const { data: loan } = await supabase
       .from("loans")
@@ -33,7 +34,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Find lender wallet from the ledger (the wallet that funded this loan)
-    const { data: fundTx } = await supabase
+    // Use service role client to bypass RLS, because this transaction was minted by the lender.
+    const { data: fundTx } = await srClient
       .from("ledger_transactions")
       .select("metadata, user_id")
       .eq("ref_type", "loan_fund")
@@ -42,9 +44,9 @@ export async function GET(request: NextRequest) {
 
     let lenderAddress = "";
     let lenderUserId  = "";
-    if (fundTx) {
+    if (fundTx && fundTx.metadata) {
       try {
-        const meta  = JSON.parse(String(fundTx.metadata ?? "{}"));
+        const meta = typeof fundTx.metadata === "string" ? JSON.parse(fundTx.metadata) : fundTx.metadata;
         lenderAddress = String(meta.lenderAddress ?? "");
         lenderUserId  = String(fundTx.user_id ?? meta.lenderUserId ?? "");
       } catch { /* ignore */ }

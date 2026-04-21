@@ -6,13 +6,14 @@ import { getLenderDashboardMetrics, presentLenderMetrics } from "@/lib/dashboard
 import { getServerSupabaseClient } from "@/lib/supabase/server";
 import { lenderNavLinks } from "@/lib/dashboard/lender-links";
 import { formatCurrency } from "@/lib/utils/formatting";
+import { isLikelyTxHash, buildStellarTxVerificationUrl } from "@/lib/stellar/explorer";
 
 export default async function LenderPoolsPage() {
   const { user } = await requireAuthenticatedUser("lender");
   const metrics = await getLenderDashboardMetrics(user.id);
   const supabase = await getServerSupabaseClient();
 
-  const [poolsRes, positionsRes, profileRes] = supabase
+  const [poolsRes, positionsRes, profileRes, txHistoryRes] = supabase
     ? await Promise.all([
         supabase
           .from("lending_pools")
@@ -29,12 +30,20 @@ export default async function LenderPoolsPage() {
           .select("full_name, kyc_status")
           .eq("id", user.id)
           .maybeSingle(),
+        supabase
+          .from("ledger_transactions")
+          .select("id, amount, category, metadata, status, created_at")
+          .eq("user_id", user.id)
+          .eq("ref_type", "pool_position")
+          .order("created_at", { ascending: false })
+          .limit(10),
       ])
-    : [{ data: [] }, { data: [] }, { data: null }];
+    : [{ data: [] }, { data: [] }, { data: null }, { data: [] }];
 
   const pools     = poolsRes.data     ?? [];
   const positions = positionsRes.data ?? [];
   const profile   = profileRes.data;
+  const txHistory = txHistoryRes.data ?? [];
 
   const totalDeployed = positions.reduce((s, p) => s + Number(p.principal_amount ?? 0), 0);
   const totalEarned   = positions.reduce((s, p) => s + Number(p.earned_interest   ?? 0), 0);
@@ -201,6 +210,71 @@ export default async function LenderPoolsPage() {
             )}
           </article>
         </section>
+
+        {/* ── Transaction History ──────────────────────────── */}
+        {txHistory.length > 0 && (
+          <section className="workspace-card workspace-card--full" style={{ marginTop: "1rem" }}>
+            <h2 className="workspace-card-title">Recent Activity</h2>
+            <div className="workspace-table-wrap">
+              <table className="workspace-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>Verification</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {txHistory.map((tx) => {
+                    let txHash = "";
+                    try {
+                      const meta = JSON.parse(String(tx.metadata || "{}"));
+                      txHash = meta.txHash ?? "";
+                    } catch {}
+
+                    const isDeposit = tx.category === "deposit";
+
+                    return (
+                      <tr key={String(tx.id)}>
+                        <td style={{ opacity: 0.8, fontSize: "0.85rem" }}>
+                          {tx.created_at ? new Date(String(tx.created_at)).toLocaleDateString() : "—"}
+                        </td>
+                        <td>
+                          <span style={{ 
+                            padding: "0.15rem 0.5rem", borderRadius: "9999px", fontSize: "0.75rem", fontWeight: 600,
+                            background: isDeposit ? "rgba(34,207,157,0.12)" : "rgba(155,111,224,0.12)",
+                            color: isDeposit ? "#22cf9d" : "#9b6fe0" 
+                          }}>
+                            {String(tx.category ?? "Unknown").toUpperCase()}
+                          </span>
+                        </td>
+                        <td style={{ fontWeight: 600 }}>{Number(tx.amount || 0).toFixed(2)} XLM</td>
+                        <td style={{ opacity: 0.7, fontSize: "0.85rem", textTransform: "capitalize" }}>{tx.status}</td>
+                        <td>
+                          {isLikelyTxHash(txHash) ? (
+                            <a
+                              href={buildStellarTxVerificationUrl(txHash)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="workspace-nav-link"
+                              style={{ display: "inline-block", background: "rgba(34,207,157,0.1)", color: "#22cf9d", padding: "0.3rem 0.6rem", borderRadius: "0.4rem", fontSize: "0.75rem" }}
+                            >
+                              ✅ Verify Tx ↗
+                            </a>
+                          ) : (
+                            <span style={{ opacity: 0.4, fontSize: "0.8rem", fontStyle: "italic" }}>—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
 
       </div>
     </WorkspaceFrame>

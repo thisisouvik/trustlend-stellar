@@ -227,6 +227,8 @@ interface LenderFormsProps {
 
 export function LenderForms({ pools, positions, platformAddress }: LenderFormsProps) {
   const router = useRouter();
+  const [successTx, setSuccessTx] = useState<{poolName: string; amount: number; hash: string} | null>(null);
+
   const PLATFORM_WALLET =
     platformAddress ??
     process.env.NEXT_PUBLIC_PLATFORM_STELLAR_ADDRESS ??
@@ -234,6 +236,7 @@ export function LenderForms({ pools, positions, platformAddress }: LenderFormsPr
 
   // ── Real Stellar deposit via Freighter ──────────────────────────────────────
   const handleDeposit = async (poolId: string, amount: number) => {
+    setSuccessTx(null);
     if (!PLATFORM_WALLET) {
       throw new Error(
         "Platform wallet not configured. Set NEXT_PUBLIC_PLATFORM_STELLAR_ADDRESS."
@@ -336,6 +339,9 @@ export function LenderForms({ pools, positions, platformAddress }: LenderFormsPr
       throw new Error(apiErr.error ?? "Backend recording failed");
     }
 
+    const depositedPool = pools.find(p => p.id === poolId);
+    setSuccessTx({ poolName: depositedPool?.name ?? "Pool", amount, hash: txHash });
+
     router.refresh();
   };
 
@@ -361,7 +367,41 @@ export function LenderForms({ pools, positions, platformAddress }: LenderFormsPr
 
   return (
     <>
-      <article className="workspace-card workspace-card--full">
+      <article className="workspace-card workspace-card--full" style={{ position: "relative" }}>
+        
+        {successTx && (
+          <div style={{
+            position: "absolute", top: "-1.5rem", left: "50%", transform: "translateX(-50%)", zIndex: 10,
+            background: "linear-gradient(135deg, rgba(34,207,157,0.1), rgba(34,207,157,0.2))",
+            border: "1px solid rgba(34,207,157,0.4)",
+            borderRadius: "0.8rem", padding: "1rem 1.5rem",
+            boxShadow: "0 8px 32px rgba(34,207,157,0.15)",
+            backdropFilter: "blur(12px)", minWidth: "300px", textAlign: "center",
+            animation: "slideDown 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)"
+          }}>
+             <h4 style={{ color: "#22cf9d", margin: "0 0 0.5rem 0", fontSize: "1rem" }}>✅ Deposit Successful!</h4>
+             <p style={{ margin: "0 0 0.75rem 0", fontSize: "0.85rem", opacity: 0.9 }}>
+                You successfully deployed <strong>{successTx.amount} XLM</strong> into the <strong>{successTx.poolName}</strong>.
+             </p>
+             <div style={{ display: "flex", gap: "0.75rem", justifyContent: "center" }}>
+               <a 
+                 href={`https://stellar.expert/explorer/testnet/tx/${successTx.hash}`} 
+                 target="_blank" rel="noopener noreferrer"
+                 className="workspace-nav-link"
+                 style={{ background: "rgba(34,207,157,0.15)", padding: "0.4rem 0.8rem", borderRadius: "9999px", fontSize: "0.8rem", fontWeight: 600, color: "#22cf9d" }}
+               >
+                 Verify on Stellar ↗
+               </a>
+               <button 
+                 onClick={() => setSuccessTx(null)}
+                 style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "white", padding: "0.4rem 0.8rem", borderRadius: "9999px", fontSize: "0.8rem", cursor: "pointer" }}
+               >
+                 Dismiss
+               </button>
+             </div>
+          </div>
+        )}
+
         <h2 className="workspace-card-title">Manage Your Deposits</h2>
         <div className="workspace-grid workspace-grid--two">
           <div>
@@ -378,6 +418,12 @@ export function LenderForms({ pools, positions, platformAddress }: LenderFormsPr
           </div>
         </div>
       </article>
+      <style dangerouslySetInnerHTML={{__html:`
+        @keyframes slideDown {
+          from { opacity: 0; transform: translate(-50%, -20px); }
+          to { opacity: 1; transform: translate(-50%, 0); }
+        }
+      `}}/>
     </>
   );
 }

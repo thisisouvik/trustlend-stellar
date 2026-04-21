@@ -108,7 +108,7 @@ export async function getBorrowerDashboardMetrics(userId: string): Promise<Borro
 export async function getLenderDashboardMetrics(userId: string): Promise<LenderDashboardMetrics> {
   const { getServerSupabaseClient, getServiceRoleClient } = await import("@/lib/supabase/server");
   const supabase = await getServerSupabaseClient();
-  const srClient = await getServiceRoleClient();
+  const srClient = getServiceRoleClient();
 
   if (!supabase || !srClient) {
     return { deployedCapital: 0, totalEarnings: 0, activePositions: 0, defaultRate: 0 };

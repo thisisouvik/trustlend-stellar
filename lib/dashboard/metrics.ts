@@ -106,9 +106,11 @@ export async function getBorrowerDashboardMetrics(userId: string): Promise<Borro
 }
 
 export async function getLenderDashboardMetrics(userId: string): Promise<LenderDashboardMetrics> {
+  const { getServerSupabaseClient, getServiceRoleClient } = await import("@/lib/supabase/server");
   const supabase = await getServerSupabaseClient();
+  const srClient = await getServiceRoleClient();
 
-  if (!supabase) {
+  if (!supabase || !srClient) {
     return { deployedCapital: 0, totalEarnings: 0, activePositions: 0, defaultRate: 0 };
   }
 
@@ -124,20 +126,44 @@ export async function getLenderDashboardMetrics(userId: string): Promise<LenderD
     const poolEarnings = positions.reduce((s, r) => s + Number(r.earned_interest   ?? 0), 0);
     const poolActive   = positions.filter((r) => r.status === "active").length;
 
-    const { data: p2pMetrics, error: metricsError } = await supabase.rpc("get_lender_dashboard_metrics", {
-      p_user_id: userId,
+    // 2. P2P Metrics
+    const { data: p2pFunds } = await supabase
+      .from("ledger_transactions")
+      .select("amount, ref_id")
+      .eq("user_id", userId)
+      .eq("ref_type", "loan_fund");
+
+    const { data: p2pRepays } = await srClient
+      .from("ledger_transactions")
+      .select("amount, metadata")
+      .eq("ref_type", "loan_repay");
+
+    const lenderRepays = (p2pRepays ?? []).filter(tx => {
+      try {
+        const meta = JSON.parse(String(tx.metadata || "{}"));
+        return String(meta.lenderUserId) === String(userId) || String(meta.lenderAddress) === String(userId);
+      } catch { return false; }
     });
 
-    if (metricsError) {
-      throw metricsError;
+    const p2pDeployed = (p2pFunds ?? []).reduce((s, t) => s + Number(t.amount || 0), 0);
+    const p2pReceived = lenderRepays.reduce((s, t) => s + Number(t.amount || 0), 0);
+    const p2pProfit = Math.max(0, p2pReceived - p2pDeployed);
+
+    // Get active loan count from the funded loans
+    const loanIds = Array.from(new Set((p2pFunds ?? []).map(t => String(t.ref_id))));
+    let p2pActiveCount = 0;
+    if (loanIds.length > 0) {
+      const { data: loans } = await srClient
+        .from("loans")
+        .select("status")
+        .in("id", loanIds);
+      p2pActiveCount = (loans ?? []).filter(l => l.status === "active").length;
     }
 
-    const p2p = Array.isArray(p2pMetrics) ? p2pMetrics[0] : p2pMetrics;
-
-    const deployedCapital = poolDeployed + Number(p2p?.deployed_capital ?? 0);
-    const totalEarnings = poolEarnings + Number(p2p?.total_earnings ?? 0);
-    const activePositions = poolActive + Number(p2p?.active_positions ?? 0);
-    const defaultRate = Number(p2p?.default_rate ?? 0);
+    const deployedCapital = poolDeployed + p2pDeployed;
+    const totalEarnings = poolEarnings + p2pProfit;
+    const activePositions = poolActive + p2pActiveCount;
+    const defaultRate = 0;
 
     return { deployedCapital, totalEarnings, activePositions, defaultRate };
   } catch {

@@ -99,6 +99,36 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: loanError.message }, { status: 500 });
     }
 
+    // ── 6. Record request in ledger for traceability ────────────────────────
+    const { error: ledgerError } = await supabase
+      .from("ledger_transactions")
+      .insert({
+        user_id: user.id,
+        category: "loan_request",
+        amount: Number(amount),
+        currency: "XLM",
+        status: "confirmed",
+        ref_type: "loan_request",
+        ref_id: String(loan.id),
+        metadata: {
+          stage: "requested",
+          loanId: String(loan.id),
+          durationDays: Number(durationDays),
+          aprBps,
+          fundingPath: poolId ? "pool" : "direct",
+        },
+      });
+
+    if (ledgerError) {
+      // Roll back the just-created loan to keep invariants strict: every request must have a ledger entry.
+      await supabase
+        .from("loans")
+        .delete()
+        .eq("id", String(loan.id))
+        .eq("borrower_id", user.id);
+      return NextResponse.json({ error: `Failed to record transaction trail: ${ledgerError.message}` }, { status: 500 });
+    }
+
     // ── Emit notification ──
     const { createNotification } = await import("@/lib/notifications");
     await createNotification({

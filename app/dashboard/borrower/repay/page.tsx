@@ -84,44 +84,6 @@ export default async function BorrowerRepayPage() {
               dueAmount={dueAmount}
             />
 
-            {pendingLoans.length > 0 && (
-              <article className="workspace-card workspace-card--full" style={{ borderColor: "rgba(245,166,35,0.25)", background: "rgba(245,166,35,0.04)" }}>
-                <h2 className="workspace-card-title">Pending Loan Request{pendingLoans.length > 1 ? "s" : ""}</h2>
-                <p className="workspace-card-copy" style={{ marginTop: "0.35rem" }}>
-                  You have {pendingLoans.length} submitted request{pendingLoans.length > 1 ? "s" : ""} waiting for funding.
-                </p>
-                <div style={{ display: "grid", gap: "0.75rem", marginTop: "1rem" }}>
-                  {pendingLoans.slice(0, 3).map((loan) => (
-                    <div
-                      key={String(loan.id)}
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        gap: "1rem",
-                        alignItems: "center",
-                        padding: "0.85rem 1rem",
-                        borderRadius: "0.7rem",
-                        background: "rgba(255,255,255,0.75)",
-                        border: "1px solid rgba(245,166,35,0.18)",
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <div>
-                        <p style={{ fontWeight: 700, margin: 0 }}>Loan #{String(loan.id).slice(0, 8)}</p>
-                        <p style={{ fontSize: "0.8rem", color: "#6b7280", margin: "0.15rem 0 0" }}>
-                          Requested {loan.created_at ? new Date(String(loan.created_at)).toLocaleDateString() : "recently"}
-                        </p>
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        <p style={{ margin: 0, fontWeight: 800, color: "#7e2fd0" }}>{Number(loan.principal_amount ?? 0).toFixed(2)} XLM</p>
-                        <p style={{ fontSize: "0.75rem", color: "#f59e0b", fontWeight: 700, margin: "0.15rem 0 0" }}>REQUESTED</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </article>
-            )}
-
             {/* All loans history */}
             {loans.length > 1 && (
               <article className="workspace-card workspace-card--full">
@@ -159,6 +121,44 @@ export default async function BorrowerRepayPage() {
               </article>
             )}
           </>
+        )}
+
+        {pendingLoans.length > 0 && (
+          <article className="workspace-card workspace-card--full" style={{ borderColor: "rgba(245,166,35,0.25)", background: "rgba(245,166,35,0.04)" }}>
+            <h2 className="workspace-card-title">Pending Loan Request{pendingLoans.length > 1 ? "s" : ""}</h2>
+            <p className="workspace-card-copy" style={{ marginTop: "0.35rem" }}>
+              You have {pendingLoans.length} submitted request{pendingLoans.length > 1 ? "s" : ""} waiting for funding.
+            </p>
+            <div style={{ display: "grid", gap: "0.75rem", marginTop: "1rem" }}>
+              {pendingLoans.slice(0, 3).map((loan) => (
+                <div
+                  key={String(loan.id)}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: "1rem",
+                    alignItems: "center",
+                    padding: "0.85rem 1rem",
+                    borderRadius: "0.7rem",
+                    background: "rgba(255,255,255,0.75)",
+                    border: "1px solid rgba(245,166,35,0.18)",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div>
+                    <p style={{ fontWeight: 700, margin: 0 }}>Loan #{String(loan.id).slice(0, 8)}</p>
+                    <p style={{ fontSize: "0.8rem", color: "#6b7280", margin: "0.15rem 0 0" }}>
+                      Requested {loan.created_at ? new Date(String(loan.created_at)).toLocaleDateString() : "recently"}
+                    </p>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <p style={{ margin: 0, fontWeight: 800, color: "#7e2fd0" }}>{Number(loan.principal_amount ?? 0).toFixed(2)} XLM</p>
+                    <p style={{ fontSize: "0.75rem", color: "#f59e0b", fontWeight: 700, margin: "0.15rem 0 0" }}>REQUESTED</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </article>
         )}
       </div>
     </WorkspaceFrame>

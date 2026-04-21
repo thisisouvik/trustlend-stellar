@@ -35,6 +35,15 @@ export default async function BorrowerHistoryPage() {
         .in("ref_id", loanIds)
     : { data: [] };
 
+  // Fetch request-stage ledger events to preserve full lifecycle visibility
+  const requestLedgerRes = supabase && loanIds.length > 0
+    ? await supabase
+        .from("ledger_transactions")
+        .select("ref_id, metadata, created_at, amount")
+        .eq("ref_type", "loan_request")
+        .in("ref_id", loanIds)
+    : { data: [] };
+
   const loanTxMap: Record<string, { hash: string; amount: number; date: string }> = {};
   for (const entry of ledgerRes.data ?? []) {
     try {
@@ -82,7 +91,7 @@ export default async function BorrowerHistoryPage() {
   // Build unified transaction feed
   interface TxEntry {
     id: string;
-    type: "funding_received" | "repayment_made";
+    type: "loan_requested" | "funding_received" | "repayment_made";
     loanId: string;
     amount: number;
     date: string;
@@ -91,6 +100,33 @@ export default async function BorrowerHistoryPage() {
   }
 
   const transactions: TxEntry[] = [];
+
+  const requestTxMap: Record<string, { date: string; amount: number }> = {};
+  for (const entry of requestLedgerRes.data ?? []) {
+    if (!entry.ref_id) continue;
+    requestTxMap[String(entry.ref_id)] = {
+      date: String(entry.created_at ?? ""),
+      amount: Number(entry.amount ?? 0),
+    };
+  }
+
+  // Request events (created for all new requests; fallback to loan.created_at for historical rows)
+  for (const loan of loans) {
+    const loanId = String(loan.id);
+    const requestTx = requestTxMap[loanId];
+    const amount = requestTx?.amount ?? Number(loan.principal_amount ?? 0);
+    const date = requestTx?.date || String(loan.created_at ?? "");
+
+    transactions.push({
+      id: `request-${loanId}`,
+      type: "loan_requested",
+      loanId,
+      amount,
+      date,
+      txHash: "",
+      loanStatus: String(loan.status),
+    });
+  }
 
   // Funding events
   for (const loan of loans) {
@@ -177,30 +213,44 @@ export default async function BorrowerHistoryPage() {
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
               {transactions.map((tx) => {
+                const isRequested = tx.type === "loan_requested";
                 const isFunding = tx.type === "funding_received";
-                const hasTx     = isLikelyTxHash(tx.txHash);
+                const isRepayment = tx.type === "repayment_made";
+                const hasTx = isLikelyTxHash(tx.txHash);
                 return (
                   <div key={tx.id} style={{
                     display: "flex", alignItems: "center", gap: "1rem",
                     padding: "0.9rem 1rem", borderRadius: "0.65rem",
-                    background: isFunding ? "rgba(126,47,208,0.04)" : "rgba(34,207,157,0.04)",
-                    border: `1px solid ${isFunding ? "rgba(126,47,208,0.12)" : "rgba(34,207,157,0.12)"}`,
+                    background: isRequested
+                      ? "rgba(245,166,35,0.08)"
+                      : isFunding
+                        ? "rgba(126,47,208,0.04)"
+                        : "rgba(34,207,157,0.04)",
+                    border: `1px solid ${isRequested
+                      ? "rgba(245,166,35,0.28)"
+                      : isFunding
+                        ? "rgba(126,47,208,0.12)"
+                        : "rgba(34,207,157,0.12)"}`,
                     flexWrap: "wrap",
                   }}>
                     {/* Icon */}
                     <div style={{
                       width: "38px", height: "38px", borderRadius: "50%", flexShrink: 0,
-                      background: isFunding ? "rgba(126,47,208,0.1)" : "rgba(34,207,157,0.1)",
+                      background: isRequested
+                        ? "rgba(245,166,35,0.14)"
+                        : isFunding
+                          ? "rgba(126,47,208,0.1)"
+                          : "rgba(34,207,157,0.1)",
                       display: "flex", alignItems: "center", justifyContent: "center",
                       fontSize: "1.1rem",
                     }}>
-                      {isFunding ? "📥" : "📤"}
+                      {isRequested ? "📝" : isFunding ? "📥" : "📤"}
                     </div>
 
                     {/* Details */}
                     <div style={{ flex: 1, minWidth: "200px" }}>
                       <p style={{ margin: 0, fontWeight: 700, fontSize: "0.88rem", color: "#111827" }}>
-                        {isFunding ? "Funding Received" : "Repayment Made"}
+                        {isRequested ? "Loan Request Created" : isFunding ? "Funding Received" : "Repayment Made"}
                       </p>
                       <p style={{ margin: "0.15rem 0 0", fontSize: "0.75rem", color: "#9ca3af", fontFamily: "monospace" }}>
                         Loan #{tx.loanId.slice(0, 8)}
@@ -211,8 +261,8 @@ export default async function BorrowerHistoryPage() {
 
                     {/* Amount */}
                     <div style={{ textAlign: "right", flexShrink: 0 }}>
-                      <p style={{ margin: 0, fontWeight: 800, fontSize: "0.95rem", color: isFunding ? "#7e2fd0" : "#22cf9d" }}>
-                        {isFunding ? "+" : "-"}{tx.amount.toFixed(2)} XLM
+                      <p style={{ margin: 0, fontWeight: 800, fontSize: "0.95rem", color: isRequested ? "#d97706" : isFunding ? "#7e2fd0" : "#22cf9d" }}>
+                        {isRequested ? "" : isRepayment ? "-" : "+"}{tx.amount.toFixed(2)} XLM
                       </p>
                       <span style={{
                         fontSize: "0.7rem", fontWeight: 700, textTransform: "uppercase",
@@ -241,6 +291,15 @@ export default async function BorrowerHistoryPage() {
                     ) : isFunding ? (
                       <span style={{ fontSize: "0.72rem", color: "#d1d5db", whiteSpace: "nowrap", flexShrink: 0 }}>
                         ⏳ Awaiting TX
+                      </span>
+                    ) : isRequested ? (
+                      <span style={{
+                        display: "inline-flex", alignItems: "center", gap: "0.3rem",
+                        padding: "0.35rem 0.75rem", borderRadius: "0.4rem",
+                        background: "rgba(245,166,35,0.12)", border: "1px solid rgba(245,166,35,0.28)",
+                        fontSize: "0.72rem", color: "#d97706", whiteSpace: "nowrap", flexShrink: 0,
+                      }}>
+                        🧾 Request recorded
                       </span>
                     ) : (
                       <span style={{

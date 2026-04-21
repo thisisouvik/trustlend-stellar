@@ -17,6 +17,20 @@
 
 **Live App:** https://trustlendborrow.vercel.app/
 
+**Project Overview Documentation:** [View in Google DOCs](https://docs.google.com/document/d/1bnVoG9n4WajP-05TWVWZhFh036hFgK5KwmklnX8762I/edit?usp=sharing)
+
+## Demo Video (YouTube)
+
+<p align="center">
+    <a href="https://www.youtube.com/watch?v=Vmrn6shwWd4" target="_blank" rel="noreferrer">
+        <img src="https://img.youtube.com/vi/Vmrn6shwWd4/hqdefault.jpg" alt="Watch TrustLend Demo on YouTube" width="560">
+    </a>
+</p>
+
+<p align="center">
+    Click the video preview to open and play it on YouTube.
+</p>
+
 </div>
 
 ---
@@ -36,6 +50,7 @@
 
 - [Web Application](#web-application)
 - [Role Dashboards](#role-dashboards)
+- [Role Dashboard Gallery](#role-dashboard-gallery-compact)
 - [API Layer](#api-layer)
 - [Smart Contracts](#smart-contracts)
 
@@ -191,18 +206,51 @@ graph TB
 
 ---
 
-## Product Features
+## Role Dashboard Gallery (Compact)
 
-| Product Area | Screenshot | Notes |
-|-------------|------------|-------|
-| Landing Page | <img src="assets/landing.png" width="600"> | First-touch product story and platform positioning |
-| Borrower Dashboard | <img src="assets/borrower-dashboard.png" width="600"> | Borrower overview, actions, and loan progress |
-| Borrower Profile & KYC | <img src="assets/borrower-profile.png" width="600"> | Identity and profile completion flow |
-| Lender Dashboard | <img src="assets/lender-dashboard.png" width="600"> | Lender portfolio, activity, and controls |
-| Lending Pool Operations | <img src="assets/lending-pool.png" width="600"> | Pool participation and liquidity workflow |
-| Admin Control Panel | <img src="assets/admin-dashboard.png" width="600"> | Oversight, moderation, and platform management |
-| Contract Test Evidence | <img src="assets/contracts-test.png" width="600"> | Smart contract validation and verification |
-| End-to-End Test Evidence | <img src="assets/e2e-test.png" width="600"> | User-flow validation across the app |
+<details>
+<summary><strong>1) Auth and Main Dashboard</strong></summary>
+
+<p>
+    <a href="assets/auth.png"><img src="assets/auth.png" alt="Authentication Screen" width="220"></a>
+    <a href="assets/main-dashboard.png"><img src="assets/main-dashboard.png" alt="Main Dashboard" width="220"></a>
+</p>
+
+</details>
+
+<details>
+<summary><strong>2) Borrower Screens</strong></summary>
+
+<p>
+    <a href="assets/borrower/home-tab.png"><img src="assets/borrower/home-tab.png" alt="Borrower Home" width="220"></a>
+    <a href="assets/borrower/applyLoan-tab.png"><img src="assets/borrower/applyLoan-tab.png" alt="Borrower Apply Loan" width="220"></a>
+    <a href="assets/borrower/repay-tab.png"><img src="assets/borrower/repay-tab.png" alt="Borrower Repay" width="220"></a>
+    <a href="assets/borrower/profile-tab.png"><img src="assets/borrower/profile-tab.png" alt="Borrower Profile" width="220"></a>
+    <a href="assets/borrower/task-tab.png"><img src="assets/borrower/task-tab.png" alt="Borrower Tasks" width="220"></a>
+</p>
+
+</details>
+
+<details>
+<summary><strong>3) Lender Screens</strong></summary>
+
+<p>
+    <a href="assets/lender/home.png"><img src="assets/lender/home.png" alt="Lender Home" width="220"></a>
+    <a href="assets/lender/loan-marketplace.png"><img src="assets/lender/loan-marketplace.png" alt="Lender Marketplace" width="220"></a>
+    <a href="assets/lender/pool-investment.png"><img src="assets/lender/pool-investment.png" alt="Lender Pool Investment" width="220"></a>
+    <a href="assets/lender/history-tab.png"><img src="assets/lender/history-tab.png" alt="Lender History" width="220"></a>
+</p>
+
+</details>
+
+<details>
+<summary><strong>4) Admin Screens</strong></summary>
+
+<p>
+    <a href="assets/admin/adminKYC%20verify.png"><img src="assets/admin/adminKYC%20verify.png" alt="Admin KYC Verify" width="220"></a>
+</p>
+
+</details>
 
 ---
 
@@ -326,11 +374,9 @@ Required values include:
 
 Run in Supabase SQL editor in this exact order:
 
-1. `sql/001_schema.sql`
-2. `sql/002_rls.sql`
-3. `sql/003_wallet_address.sql`
-4. `sql/004_mvp_security.sql`
-5. `sql/KYC_SCHEMA.sql`
+1. `sql/01_core_schema.sql`
+2. `sql/02_security_rls.sql`
+3. `sql/03_functions_rpcs.sql`
 
 ---
 
@@ -396,7 +442,6 @@ trustlend/
 |- app/                    # App Router pages, API routes, actions
 |- components/             # UI, dashboard, auth, landing components
 |- contracts/              # Soroban contracts + deployment scripts
-|- docs/                   # Setup, testing, and domain guides
 |- lib/                    # Auth, Supabase, Stellar, and contract helpers
 |- public/                 # Static assets and images
 |- sql/                    # Schema and RLS migrations
@@ -432,6 +477,8 @@ This next phase is prioritized from collected user feedback around identity trus
 | Identity trust before funding | Add live face verification in the UI to match each KYC submission before account activation. | Lower fraud risk and stronger lender confidence in borrower identity. |
 | Need one account for both roles | Enable one verified account to operate as borrower, lender, or both with safe role-switching controls. | Better retention and smoother growth from borrower to lender journeys. |
 | Security expectations for production readiness | Harden access control, transaction validation, audit logs, and abuse/rate-limiting defenses. | Stronger platform integrity for larger pools and higher transaction volume. |
+| Dedicated admin dashboard evolution | Build a more advanced admin workspace for risk monitoring, fraud alerts, manual review queues, and policy controls. | Faster operational response, better governance, and safer platform-wide decisions. |
+| Stronger repayment security for lender protection | Add repayment safeguards such as preflight validation, stricter repayment checks, repayment monitoring, and recovery/default workflows. | Higher lender fund safety, lower repayment risk, and improved trust in long-term lending. |
 | New users need guided onboarding | Add beginner-friendly guided tasks, checklists, and contextual status hints across dashboards. | Faster activation, fewer drop-offs, and clearer first-time user experience. |
 | Better decision support | Expand risk scoring, lender analytics, and smarter pool matching automation. | Improved loan quality, clearer lender insights, and healthier pool utilization. |
 
@@ -440,8 +487,10 @@ This next phase is prioritized from collected user feedback around identity trus
 1. Identity + face verification rollout with KYC binding.
 2. Unified dual-role account model (borrower/lender switching).
 3. Security hardening sprint across auth, APIs, and contract interactions.
-4. Guided task UX for first-time users.
-5. Advanced analytics and pool automation improvements.
+4. Dedicated admin dashboard upgrade with fraud/risk operations tooling.
+5. Repayment security hardening to better protect lender capital.
+6. Guided task UX for first-time users.
+7. Advanced analytics and pool automation improvements.
 
 ---
 
@@ -455,3 +504,7 @@ MIT (project-level license policy).
 - Supabase platform
 - Next.js and React ecosystems
 - Open-source Rust and TypeScript communities
+
+---
+
+Done with ❤️ by Souvik. We look forward to your feedback and questions!

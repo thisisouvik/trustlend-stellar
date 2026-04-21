@@ -241,14 +241,28 @@ export default async function LenderHomePage() {
 
                        // Find actual loan data
                        const actualLoan = loanMap[String(tx.ref_id)];
-                       const rawStatus = actualLoan?.status ?? "funded";
+                       const rawStatus = actualLoan?.status ?? "processing";
 
 
                        const repaid = Number(actualLoan?.repaid_amount ?? 0);
                        const profit = Math.max(0, repaid - Number(tx.amount));
                        const isRepaid = rawStatus === "repaid";
-                       const stColor = isRepaid ? "#9b6fe0" : rawStatus === "defaulted" ? "#ff6b6b" : "#22cf9d";
-                       const stBg = isRepaid ? "rgba(155,111,224,0.12)" : rawStatus === "defaulted" ? "rgba(255,107,107,0.12)" : "rgba(34,207,157,0.12)";
+                       const isDefaulted = rawStatus === "defaulted";
+                       const isProcessing = rawStatus === "processing";
+                       const stColor = isRepaid
+                         ? "#9b6fe0"
+                         : isDefaulted
+                           ? "#ff6b6b"
+                           : isProcessing
+                             ? "#6b7280"
+                             : "#22cf9d";
+                       const stBg = isRepaid
+                         ? "rgba(155,111,224,0.12)"
+                         : isDefaulted
+                           ? "rgba(255,107,107,0.12)"
+                           : isProcessing
+                             ? "rgba(107,114,128,0.12)"
+                             : "rgba(34,207,157,0.12)";
 
                        // Use repayment hash if it's repaid, otherwise fallback to funding hash
                        const finalTxHash = (isRepaid && repayMap[String(tx.ref_id)]) ? repayMap[String(tx.ref_id)] : fundTxHash;

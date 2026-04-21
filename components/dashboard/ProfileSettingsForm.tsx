@@ -25,6 +25,7 @@ export function ProfileSettingsForm({
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
 
   const [formData, setFormData] = useState({
     full_name: initialName,
@@ -92,6 +93,21 @@ export function ProfileSettingsForm({
   };
 
   const docLocked = hasGovId && kycStatus !== "pending";
+
+  const handleLogout = async () => {
+    setSigningOut(true);
+    try {
+      const { getBrowserSupabaseClient } = await import("@/lib/supabase/client");
+      const supabase = getBrowserSupabaseClient();
+      if (supabase) {
+        await supabase.auth.signOut();
+      }
+      router.push("/auth");
+    } catch (err) {
+      console.error("Logout failed:", err);
+      setSigningOut(false);
+    }
+  };
 
   return (
     <form className="settings-form-group" onSubmit={handleSubmit}>
@@ -271,6 +287,16 @@ export function ProfileSettingsForm({
         className="workspace-button workspace-button--primary settings-submit-btn"
       >
         {loading ? "Saving…" : "Save & Verify Identity"}
+      </button>
+
+      <button
+        type="button"
+        onClick={handleLogout}
+        disabled={signingOut}
+        className="workspace-button workspace-button--secondary settings-submit-btn"
+        style={{ marginLeft: "0.75rem", background: "rgba(239,68,68,0.08)", color: "#dc2626", border: "1px solid rgba(239,68,68,0.3)" }}
+      >
+        {signingOut ? "Signing out…" : "Sign Out"}
       </button>
     </form>
   );

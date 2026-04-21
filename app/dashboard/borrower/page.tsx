@@ -7,7 +7,7 @@ import {
   presentBorrowerMetrics,
 } from "@/lib/dashboard/metrics";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
-import { buildStellarTxVerificationUrl, isLikelyTxHash } from "@/lib/stellar/explorer";
+import { buildStellarTxVerificationUrl, extractPossibleTxHash, isLikelyTxHash } from "@/lib/stellar/explorer";
 import { BorrowerRepayWidget } from "@/components/dashboard/BorrowerRepayWidget";
 import { borrowerNavLinks } from "@/lib/dashboard/borrower-links";
 
@@ -49,13 +49,13 @@ export default async function BorrowerDashboardPage() {
   const loanTxMap: Record<string, string> = {};
   const fundedLoanIds = new Set<string>();
   for (const entry of ledgerRes.data ?? []) {
-    try {
-      const meta = JSON.parse(String(entry.metadata ?? "{}"));
-      if (String(entry.ref_id)) {
-        fundedLoanIds.add(String(entry.ref_id));
+    if (String(entry.ref_id)) {
+      fundedLoanIds.add(String(entry.ref_id));
+      const extracted = extractPossibleTxHash(entry.metadata);
+      if (extracted) {
+        loanTxMap[String(entry.ref_id)] = extracted;
       }
-      if (meta.txHash && String(entry.ref_id)) loanTxMap[String(entry.ref_id)] = String(meta.txHash);
-    } catch { /* ignore */ }
+    }
   }
 
   const normalizedLoans = loans.map((loan) => {
@@ -185,6 +185,48 @@ export default async function BorrowerDashboardPage() {
             </a>
           )}
         </article>
+
+        {/* ── Prominent Current Loan Status ── */}
+        {normalizedLoans.length > 0 && (() => {
+          const latestLoan = normalizedLoans[0];
+          const latestId = String(latestLoan.id);
+          const txHash = loanTxMap[latestId] ?? "";
+          const hasTx = isLikelyTxHash(txHash);
+          const status = String(latestLoan.effectiveStatus);
+
+          return (
+            <article className="workspace-card workspace-card--full" style={{ padding: "1.5rem", borderLeft: "4px solid #7e2fd0" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <h2 className="workspace-card-title" style={{ margin: "0 0 0.25rem 0", fontSize: "1.1rem" }}>Current Loan Status</h2>
+                  <p className="workspace-card-copy" style={{ margin: 0, fontSize: "0.85rem", opacity: 0.8 }}>
+                    Loan ID: <span style={{ fontFamily: "monospace" }}>{latestId.slice(0, 8)}</span>
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+                    <span style={{ fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 700, color: "#6b7280", letterSpacing: "0.05em", marginBottom: "0.2rem" }}>Status</span>
+                    <Badge variant={statusBadge(status)}>{status.toUpperCase()}</Badge>
+                  </div>
+                  <div style={{ borderLeft: "1px solid #eef0f8", height: "40px", margin: "0 0.5rem" }} />
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+                    <span style={{ fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 700, color: "#6b7280", letterSpacing: "0.05em", marginBottom: "0.3rem" }}>Blockchain Verification</span>
+                    {hasTx ? (
+                      <a href={buildStellarTxVerificationUrl(txHash)} target="_blank" rel="noreferrer"
+                        style={{ fontSize: "0.85rem", color: "#22cf9d", fontWeight: 700, display: "flex", alignItems: "center", gap: "0.35rem", textDecoration: "none", background: "rgba(34,207,157,0.1)", padding: "0.2rem 0.6rem", borderRadius: "0.4rem" }}>
+                        View Tx ↗
+                      </a>
+                    ) : (
+                      <span style={{ fontSize: "0.85rem", color: "#9ca3af", fontStyle: "italic", fontWeight: 500 }}>
+                        {status === "requested" || status === "approved" ? "Pending Approval..." : status === "funded" ? "Processing..." : "Not Available"}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </article>
+          );
+        })()}
 
         {/* ── Active / pending loans summary ── */}
         {normalizedLoans.length > 0 && (

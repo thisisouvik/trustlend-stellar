@@ -1,7 +1,7 @@
 import { WorkspaceFrame } from "@/components/dashboard/WorkspaceFrame";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { getLenderDashboardMetrics, presentLenderMetrics } from "@/lib/dashboard/metrics";
-import { getServerSupabaseClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
 import { lenderNavLinks } from "@/lib/dashboard/lender-links";
 import { buildStellarTxVerificationUrl, isLikelyTxHash } from "@/lib/stellar/explorer";
 
@@ -9,6 +9,7 @@ export default async function LenderHistoryPage() {
   const { user }  = await requireAuthenticatedUser("lender");
   const metrics   = await getLenderDashboardMetrics(user.id);
   const supabase  = await getServerSupabaseClient();
+  const srClient  = getServiceRoleClient();
 
   // Profile data
   const { data: profile } = supabase 
@@ -26,9 +27,9 @@ export default async function LenderHistoryPage() {
     : { data: [] };
 
   // Fetch incoming payments (repayments to this lender, where the borrower initiated it)
-  // We use the same filter we built in metrics.ts
-  const { data: allRepays } = supabase
-    ? await supabase
+  // We use the Service Role Client to bypass borrower-owned table RLS
+  const { data: allRepays } = srClient
+    ? await srClient
         .from("ledger_transactions")
         .select("id, category, ref_type, ref_id, amount, currency, status, metadata, created_at")
         .eq("ref_type", "loan_repay")

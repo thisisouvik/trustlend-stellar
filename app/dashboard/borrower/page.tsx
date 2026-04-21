@@ -6,7 +6,7 @@ import {
   getBorrowerDashboardMetrics,
   presentBorrowerMetrics,
 } from "@/lib/dashboard/metrics";
-import { getServerSupabaseClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
 import { buildStellarTxVerificationUrl, extractPossibleTxHash, isLikelyTxHash } from "@/lib/stellar/explorer";
 import { BorrowerRepayWidget } from "@/components/dashboard/BorrowerRepayWidget";
 import { borrowerNavLinks } from "@/lib/dashboard/borrower-links";
@@ -17,6 +17,7 @@ export default async function BorrowerDashboardPage() {
   const metrics = await getBorrowerDashboardMetrics(user.id);
 
   const supabase = await getServerSupabaseClient();
+  const srClient = getServiceRoleClient();
 
   const [profileRes, loansRes] = supabase
     ? await Promise.all([
@@ -39,8 +40,8 @@ export default async function BorrowerDashboardPage() {
 
   // Stellar TX lookups
   const loanIds = loans.map((l) => String(l.id));
-  const ledgerRes = supabase && loanIds.length > 0
-    ? await supabase
+  const ledgerRes = srClient && loanIds.length > 0
+    ? await srClient
         .from("ledger_transactions")
         .select("ref_id, metadata")
         .eq("ref_type", "loan_fund")

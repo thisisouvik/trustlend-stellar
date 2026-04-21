@@ -1,7 +1,7 @@
 import { WorkspaceFrame } from "@/components/dashboard/WorkspaceFrame";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { getLenderDashboardMetrics, presentLenderMetrics } from "@/lib/dashboard/metrics";
-import { getServerSupabaseClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
 import { lenderNavLinks } from "@/lib/dashboard/lender-links";
 
 export default async function LenderPortfolioPage() {
@@ -9,6 +9,7 @@ export default async function LenderPortfolioPage() {
   const metrics = await getLenderDashboardMetrics(user.id);
 
   const supabase = await getServerSupabaseClient();
+  const srClient = getServiceRoleClient();
 
   // 1. Fetch Pool Positions
   const [positionsRes, profileRes] = supabase
@@ -40,8 +41,8 @@ export default async function LenderPortfolioPage() {
         .eq("ref_type", "loan_fund")
     : { data: [] };
 
-  const { data: p2pRepays } = supabase
-    ? await supabase
+  const { data: p2pRepays } = srClient
+    ? await srClient
         .from("ledger_transactions")
         .select("amount, metadata, ref_id")
         .eq("ref_type", "loan_repay")

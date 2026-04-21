@@ -32,3 +32,23 @@ export async function getServerSupabaseClient(): Promise<SupabaseClient | null> 
     },
   });
 }
+
+import { createClient } from "@supabase/supabase-js";
+
+/**
+ * Service Role Client — bypasses RLS.
+ * Use strictly for trusted server-side admin logic where you need elevated privileges.
+ */
+export function getServiceRoleClient(): SupabaseClient | null {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+  if (!url || !key) {
+    return null;
+  }
+  return createClient(url, key, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+}

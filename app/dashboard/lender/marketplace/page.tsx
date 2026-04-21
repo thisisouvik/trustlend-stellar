@@ -2,7 +2,7 @@ import { WorkspaceFrame } from "@/components/dashboard/WorkspaceFrame";
 import { LoanMarketplace } from "@/components/dashboard/LoanMarketplace";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { getLenderDashboardMetrics, presentLenderMetrics } from "@/lib/dashboard/metrics";
-import { getServerSupabaseClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
 import { lenderNavLinks } from "@/lib/dashboard/lender-links";
 import { buildStellarTxVerificationUrl, isLikelyTxHash } from "@/lib/stellar/explorer";
 
@@ -12,10 +12,11 @@ export default async function LenderMarketplacePage() {
   const metrics = await getLenderDashboardMetrics(user.id);
 
   const supabase  = await getServerSupabaseClient();
+  const srClient = getServiceRoleClient();
 
   // ── Own funded loan records (ledger) ─────────────────────────────────────
-  const fundedTxsRes = supabase
-    ? await supabase
+  const fundedTxsRes = srClient
+    ? await srClient
         .from("ledger_transactions")
         .select("id, ref_id, amount, metadata, created_at")
         .eq("user_id", user.id)
@@ -24,8 +25,8 @@ export default async function LenderMarketplacePage() {
         .limit(20)
     : { data: [] };
 
-  const openLoansRes = supabase
-    ? await supabase.rpc("get_marketplace_loans")
+  const openLoansRes = srClient
+    ? await srClient.rpc("get_marketplace_loans")
     : { data: null, error: null };
 
   type MarketplaceLoanRow = {
@@ -43,9 +44,9 @@ export default async function LenderMarketplacePage() {
 
   if (!openLoansRes.error) {
     openLoans = (openLoansRes.data ?? []) as MarketplaceLoanRow[];
-  } else if (supabase) {
+  } else if (srClient) {
     // Fallback path for environments where the RPC migration is not applied yet.
-    const fallbackLoansRes = await supabase
+    const fallbackLoansRes = await srClient
       .from("loans")
       .select("id, principal_amount, apr_bps, duration_days, borrower_id")
       .in("status", ["requested", "approved"])
@@ -56,11 +57,11 @@ export default async function LenderMarketplacePage() {
 
     const [profilesRes, snapshotsRes] = borrowerIds.length > 0
       ? await Promise.all([
-          supabase
+          srClient
             .from("profiles")
             .select("id, full_name, wallet_address")
             .in("id", borrowerIds),
-          supabase
+          srClient
             .from("reputation_snapshots")
             .select("user_id, score_total")
             .in("user_id", borrowerIds),

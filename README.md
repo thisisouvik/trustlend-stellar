@@ -113,7 +113,7 @@
 ## Feedback & Judges
 
 - Feedback Form: https://forms.gle/HikhmMvWXZLgcrEM8
-- Judge Responses Sheet: https://docs.google.com/spreadsheets/d/168QC8eCrS6rfZeSRwYctr6XH38dLQwsK9YmIzpOryXo/edit?usp=sharing
+- Responses Sheet (For Judges): https://docs.google.com/spreadsheets/d/168QC8eCrS6rfZeSRwYctr6XH38dLQwsK9YmIzpOryXo/edit?usp=sharing
 
 ---
 
@@ -424,7 +424,6 @@ trustlend/
 
 This next phase is prioritized from collected user feedback around identity trust, role flexibility, onboarding clarity, and safer lending operations.
 
-- Improvement tracking commit: https://github.com/thisisouvik/trustlend-stellar/commit/a3e6927d0c5f1e0e96f10e091e11a374a0346022
 
 ### Feedback-Driven Plan
 

@@ -2,7 +2,7 @@ import { WorkspaceFrame } from "@/components/dashboard/WorkspaceFrame";
 import { WalletCard } from "@/components/dashboard/WalletCard";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { getLenderDashboardMetrics, presentLenderMetrics } from "@/lib/dashboard/metrics";
-import { getServerSupabaseClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
 import { formatCurrency } from "@/lib/utils/formatting";
 import { lenderNavLinks } from "@/lib/dashboard/lender-links";
 import Link from "next/link";
@@ -12,8 +12,9 @@ export default async function LenderHomePage() {
   const walletAddress = String(user.user_metadata?.wallet_address ?? "") || null;
   const metrics = await getLenderDashboardMetrics(user.id);
   const supabase = await getServerSupabaseClient();
+  const srClient = getServiceRoleClient();
 
-  const [positionsRes, profileRes, p2pRes, openLoanCountRes, allLoansRes, repaysRes] = supabase
+  const [positionsRes, profileRes, p2pRes, openLoanCountRes, allLoansRes, repaysRes] = supabase && srClient
     ? await Promise.all([
         supabase
           .from("pool_positions")
@@ -32,15 +33,15 @@ export default async function LenderHomePage() {
           .eq("user_id", user.id)
           .eq("ref_type", "loan_fund")
           .order("created_at", { ascending: false })
-          .limit(5),
+          .limit(20),
         supabase
           .from("loans")
           .select("id", { count: "exact", head: true })
           .in("status", ["requested", "approved"]),
-        supabase
+        srClient
           .from("loans")
           .select("id, status, repaid_amount, principal_amount"),
-        supabase
+        srClient
           .from("ledger_transactions")
           .select("ref_id, metadata")
           .eq("ref_type", "loan_repay")

@@ -6,7 +6,7 @@ import {
   getAdminDashboardMetrics,
   presentAdminMetrics,
 } from "@/lib/dashboard/metrics";
-import { getServiceRoleClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient } from "@/lib/supabase/server";
 import Link from "next/link";
 
 function formatAmount(value: number) {
@@ -27,7 +27,7 @@ export default async function AdminDashboardPage() {
   const metrics = await getAdminDashboardMetrics();
   const walletAddress = String(user.user_metadata?.wallet_address ?? "") || null;
   const walletConnected = Boolean(walletAddress);
-  const supabase = getServiceRoleClient();
+  const supabase = await getServerSupabaseClient();
 
   const [profilesRes, loansRes, repaymentsRes, ledgerRes, fraudRes, poolsRes] = supabase
     ? await Promise.all([

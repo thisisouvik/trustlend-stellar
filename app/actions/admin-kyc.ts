@@ -67,14 +67,14 @@ export async function verifyKYCDocument(
       if (userProfile?.phone?.trim()) initialScore += 15;
       if (userProfile?.country_code?.trim()) initialScore += 10;
 
-      await supabase.from("reputation_snapshots").upsert(
-        {
-          user_id: userId,
-          score_total: initialScore,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "user_id" }
-      );
+      const { error: reputationError } = await supabase.rpc("seed_reputation_snapshot", {
+        p_user_id: userId,
+        p_initial_score: initialScore,
+      });
+
+      if (reputationError) {
+        throw reputationError;
+      }
 
       console.log(
         `[TrustLend] Reputation snapshot seeded for ${userId}: score=${initialScore}`

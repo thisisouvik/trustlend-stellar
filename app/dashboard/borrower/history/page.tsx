@@ -1,7 +1,7 @@
 import { WorkspaceFrame } from "@/components/dashboard/WorkspaceFrame";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { getBorrowerDashboardMetrics, presentBorrowerMetrics } from "@/lib/dashboard/metrics";
-import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient } from "@/lib/supabase/server";
 import { buildStellarTxVerificationUrl, isLikelyTxHash } from "@/lib/stellar/explorer";
 import { borrowerNavLinks } from "@/lib/dashboard/borrower-links";
 
@@ -10,7 +10,6 @@ export default async function BorrowerHistoryPage() {
   const metrics  = await getBorrowerDashboardMetrics(user.id);
 
   const supabase = await getServerSupabaseClient();
-  const srClient = getServiceRoleClient();
 
   const [profileRes, loansRes] = supabase
     ? await Promise.all([
@@ -28,8 +27,8 @@ export default async function BorrowerHistoryPage() {
   const loanIds = loans.map((l) => String(l.id));
 
   // Fetch Stellar TX hashes for funded loans
-  const ledgerRes = srClient && loanIds.length > 0
-    ? await srClient
+  const ledgerRes = supabase && loanIds.length > 0
+    ? await supabase
         .from("ledger_transactions")
         .select("ref_id, metadata, created_at, amount")
         .eq("ref_type", "loan_fund")
@@ -64,8 +63,8 @@ export default async function BorrowerHistoryPage() {
   const repaymentIds = repayments.map(r => String(r.id));
 
   // Fetch stellar transaction details for those repayments (if on-chain)
-  const repayTxsRes = srClient && repaymentIds.length > 0
-    ? await srClient
+  const repayTxsRes = supabase && repaymentIds.length > 0
+    ? await supabase
         .from("ledger_transactions")
         .select("ref_id, metadata")
         .eq("ref_type", "loan_repay")

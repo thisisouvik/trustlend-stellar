@@ -6,7 +6,7 @@ import {
   getAdminDashboardMetrics,
   presentAdminMetrics,
 } from "@/lib/dashboard/metrics";
-import { getServiceRoleClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient } from "@/lib/supabase/server";
 
 export default async function AdminUsersPage() {
   const { user } = await requireTradeVaultAdmin();
@@ -14,7 +14,7 @@ export default async function AdminUsersPage() {
   const walletAddress = String(user.user_metadata?.wallet_address ?? "") || null;
   const walletConnected = Boolean(walletAddress);
 
-  const supabase = getServiceRoleClient();
+  const supabase = await getServerSupabaseClient();
   const { data: users } = supabase
     ? await supabase
         .from("profiles")

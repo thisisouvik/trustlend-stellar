@@ -52,7 +52,7 @@ export function ProfileSettingsForm({
     setUploadProgress(null);
 
     try {
-      // Step 1: Update profile fields via server action (uses service-role → no RLS issues)
+      // Step 1: Update profile fields via server action with the signed-in session.
       const result = await updateUserProfile({
         full_name: formData.full_name,
         phone: formData.phone,
@@ -167,6 +167,9 @@ export function ProfileSettingsForm({
             required
             autoComplete="tel"
           />
+          <p className="settings-help-text" style={{ marginTop: "0.25rem", color: "#8b5cf6" }}>
+            OTP Verification coming soon.
+          </p>
         </div>
 
         <div className="settings-field">
@@ -189,7 +192,7 @@ export function ProfileSettingsForm({
             required
           />
           <p className="settings-help-text" style={{ marginTop: "0.25rem" }}>
-            Must be 18+.
+            Must be 18+ (Required).
           </p>
         </div>
       </div>

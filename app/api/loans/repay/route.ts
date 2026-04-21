@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
-import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient } from "@/lib/supabase/server";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 
 interface RepayPayload {
@@ -39,11 +39,8 @@ export async function POST(request: NextRequest) {
     if (loan.status === "repaid") return NextResponse.json({ error: "Loan is already fully repaid" }, { status: 400 });
     if (loan.status === "defaulted") return NextResponse.json({ error: "Loan is in default" }, { status: 400 });
 
-    const srClient = getServiceRoleClient();
-    if (!srClient) return NextResponse.json({ error: "Service config error" }, { status: 500 });
-
     // Prevent duplicate txHash
-    const { data: existingTx } = await srClient
+    const { data: existingTx } = await supabase
       .from("ledger_transactions")
       .select("id")
       .eq("ref_type", "loan_repay")
@@ -55,7 +52,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Figure out the lender to notify them
-    const { data: fundTx } = await srClient
+    const { data: fundTx } = await supabase
       .from("ledger_transactions")
       .select("user_id, metadata")
       .eq("ref_type", "loan_fund")
@@ -104,14 +101,12 @@ export async function POST(request: NextRequest) {
       newStatus = "active";
     }
 
-    // Update loan record using service role (bypasses RLS which blocks borrowers from modifying statuses)
-    const { error: updateError } = await srClient
-      .from("loans")
-      .update({
-        repaid_amount: newRepaidAmount,
-        status: newStatus,
-      })
-      .eq("id", loanId);
+    const { error: updateError } = await supabase.rpc("record_loan_repayment", {
+      p_loan_id: loanId,
+      p_payer_id: user.id,
+      p_repaid_amount: newRepaidAmount,
+      p_new_status: newStatus,
+    });
 
     if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
 
@@ -146,16 +141,6 @@ export async function POST(request: NextRequest) {
       points_delta: repayPoints,
       reason:       `On-chain repayment of ${amount.toFixed(2)} XLM`,
     });
-
-    if (srClient) {
-      const { data: snap } = await srClient.from("reputation_snapshots").select("score_total").eq("user_id", user.id).maybeSingle();
-      const newScore = Math.min(750, (snap?.score_total ?? 250) + repayPoints);
-      await srClient.from("reputation_snapshots").upsert({
-        user_id:     user.id,
-        score_total: newScore,
-        updated_at:  new Date().toISOString(),
-      });
-    }
 
     // Notifications
     const { createNotification } = await import("@/lib/notifications");

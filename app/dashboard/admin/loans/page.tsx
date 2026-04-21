@@ -6,7 +6,7 @@ import {
   getAdminDashboardMetrics,
   presentAdminMetrics,
 } from "@/lib/dashboard/metrics";
-import { getServiceRoleClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient } from "@/lib/supabase/server";
 import { buildStellarTxVerificationUrl, extractPossibleTxHash, isLikelyTxHash } from "@/lib/stellar/explorer";
 
 function formatAmount(value: number) {
@@ -19,7 +19,7 @@ export default async function AdminLoansPage() {
   const walletAddress = String(user.user_metadata?.wallet_address ?? "") || null;
   const walletConnected = Boolean(walletAddress);
 
-  const supabase = getServiceRoleClient();
+  const supabase = await getServerSupabaseClient();
   const [loansRes, repaymentsRes, ledgerRepaysRes] = supabase
     ? await Promise.all([
         supabase

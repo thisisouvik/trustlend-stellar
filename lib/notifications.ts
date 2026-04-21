@@ -1,4 +1,4 @@
-import { getServiceRoleClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient } from "@/lib/supabase/server";
 
 export async function createNotification({
   userId,
@@ -11,11 +11,11 @@ export async function createNotification({
   message: string;
   type: string;
 }) {
-  const srClient = getServiceRoleClient();
-  if (!srClient) return null;
+  const supabase = await getServerSupabaseClient();
+  if (!supabase) return null;
 
   try {
-    const { error } = await srClient.from("notifications").insert({
+    const { error } = await supabase.from("notifications").insert({
       user_id: userId,
       title,
       message,

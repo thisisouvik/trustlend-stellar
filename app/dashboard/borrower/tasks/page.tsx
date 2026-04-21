@@ -2,14 +2,13 @@ import { WorkspaceFrame } from "@/components/dashboard/WorkspaceFrame";
 import { TasksBoard } from "@/components/dashboard/TasksBoard";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { getBorrowerDashboardMetrics, presentBorrowerMetrics } from "@/lib/dashboard/metrics";
-import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient } from "@/lib/supabase/server";
 import { getPlatformTasks } from "@/app/api/tasks/complete/route";
 
 export default async function BorrowerTasksPage() {
   const { user } = await requireAuthenticatedUser("borrower");
   const metrics = await getBorrowerDashboardMetrics(user.id);
   const supabase = await getServerSupabaseClient();
-  const srClient = getServiceRoleClient();
 
   const [profileRes, completedEventsRes, snapshotRes] = supabase
     ? await Promise.all([
@@ -25,17 +24,11 @@ export default async function BorrowerTasksPage() {
           .eq("user_id", user.id)
           .eq("source_type", "task_completion"),
         // Current trust score
-        srClient
-          ? srClient
-              .from("reputation_snapshots")
-              .select("score_total")
-              .eq("user_id", user.id)
-              .maybeSingle()
-          : supabase
-              .from("reputation_snapshots")
-              .select("score_total")
-              .eq("user_id", user.id)
-              .maybeSingle(),
+        supabase
+          .from("reputation_snapshots")
+          .select("score_total")
+          .eq("user_id", user.id)
+          .maybeSingle(),
       ])
     : [{ data: null }, { data: [] }, { data: null }];
 

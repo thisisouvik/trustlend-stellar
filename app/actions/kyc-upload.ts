@@ -54,20 +54,25 @@ export async function uploadKYCDocument(formData: FormData): Promise<{
       return { success: false, error: "Supabase is not configured." };
     }
 
-    // Use session token for storage upload so deployment does not require service-role key.
+    // Use the signed-in user's session token for storage upload so no service-role key is needed.
     const {
       data: { session },
     } = await supabase.auth.getSession();
 
+    if (!session?.access_token) {
+      return {
+        success: false,
+        error: "Your session has expired. Please sign in again before uploading KYC documents.",
+      };
+    }
+
     const client = createClient(url, anonKey, {
       auth: { persistSession: false, autoRefreshToken: false },
-      global: session?.access_token
-        ? {
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-            },
-          }
-        : undefined,
+      global: {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      },
     });
 
     // Create unique file path: /kyc-documents/{userId}/government_id_{timestamp}
@@ -85,6 +90,13 @@ export async function uploadKYCDocument(formData: FormData): Promise<{
 
     if (uploadError) {
       console.error("Upload error:", uploadError);
+      if (uploadError.message.toLowerCase().includes("row-level security")) {
+        return {
+          success: false,
+          error:
+            "KYC storage access is not configured yet. Apply the KYC storage RLS migration, then try again.",
+        };
+      }
       return { success: false, error: uploadError.message };
     }
 
@@ -94,9 +106,6 @@ export async function uploadKYCDocument(formData: FormData): Promise<{
     } = client.storage.from("kyc-documents").getPublicUrl(filepath);
 
     // Store reference in profiles table with caller session (RLS-protected)
-    // Note regarding IPFS: The database schema originally named this column 
-    // `government_id_ipfs_hash` planning for future decentralized storage. 
-    // Currently, we use it to store the Supabase Storage filepath.
 
     const { error: updateError } = await supabase
       .from("profiles")

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
-import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient } from "@/lib/supabase/server";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 
 /**
@@ -56,14 +56,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Use service role for cross-user loan operations (lender updating borrower's loan)
-    const srClient = getServiceRoleClient();
-    if (!srClient) {
-      return NextResponse.json({ error: "Service configuration error" }, { status: 500 });
-    }
-
     // ── Fetch the loan ───────────────────────────────────────────────────────
-    const { data: loan, error: fetchErr } = await srClient
+    const { data: loan, error: fetchErr } = await supabase
       .from("loans")
       .select("id, status, principal_amount, borrower_id, pool_id, apr_bps, duration_days")
       .eq("id", loanId)
@@ -96,15 +90,12 @@ export async function POST(request: NextRequest) {
     dueDate.setDate(dueDate.getDate() + Number(loan.duration_days ?? 30));
 
     // ── Activate the loan ────────────────────────────────────────────────────
-    const { error: updateErr } = await srClient
-      .from("loans")
-      .update({
-        status: "active",
-        approved_at: now,
-        due_at: dueDate.toISOString(),
-      })
-      .eq("id", loanId)
-      .in("status", fundableStatuses); // double-check it's still fundable
+    const { data: activatedLoan, error: updateErr } = await supabase.rpc("activate_loan_funding", {
+      p_loan_id: loanId,
+      p_lender_id: user.id,
+      p_approved_at: now,
+      p_due_at: dueDate.toISOString(),
+    });
 
     if (updateErr) {
       return NextResponse.json({ error: updateErr.message }, { status: 500 });
@@ -152,7 +143,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         loanId,
-        status: "active",
+        status: String(activatedLoan?.status ?? "active"),
         txHash,
         explorerUrl: `https://stellar.expert/explorer/testnet/tx/${txHash}`,
         message: "Loan funded successfully. The borrower will receive XLM in their wallet.",

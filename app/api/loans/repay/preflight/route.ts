@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
-import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient } from "@/lib/supabase/server";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 
 /**
@@ -32,11 +32,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Loan is not in a repayable state" }, { status: 400 });
     }
 
-    const srClient = getServiceRoleClient();
-    if (!srClient) return NextResponse.json({ error: "Service error" }, { status: 500 });
-
     // Find lender wallet from the ledger (the wallet that funded this loan)
-    const { data: fundTx } = await srClient
+    const { data: fundTx } = await supabase
       .from("ledger_transactions")
       .select("metadata, user_id")
       .eq("ref_type", "loan_fund")

@@ -1,4 +1,4 @@
-import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient } from "@/lib/supabase/server";
 
 export interface BorrowerDashboardMetrics {
   reputationScore: number;
@@ -114,9 +114,6 @@ export async function getLenderDashboardMetrics(userId: string): Promise<LenderD
   }
 
   try {
-    const sr = getServiceRoleClient();
-    if (!sr) throw new Error("No SR");
-
     // 1. Pool positions
     const positionsRes = await supabase
       .from("pool_positions")
@@ -128,49 +125,20 @@ export async function getLenderDashboardMetrics(userId: string): Promise<LenderD
     const poolEarnings = positions.reduce((s, r) => s + Number(r.earned_interest   ?? 0), 0);
     const poolActive   = positions.filter((r) => r.status === "active").length;
 
-    // 2. Load all loans (needed for default rate AND finding real P2P statuses)
-    const { data: allLoans } = await sr.from("loans").select("id, status");
-    const all = allLoans ?? [];
-    const loanMap = Object.fromEntries(all.map(l => [String(l.id), l.status]));
-
-    // 3. Direct P2P Loans Funded
-    const p2pFunds = await sr
-      .from("ledger_transactions")
-      .select("amount, ref_id")
-      .eq("user_id", userId)
-      .eq("ref_type", "loan_fund");
-    
-    // We only count deployed capital for loans that were actually funded/active.
-    // Wait, deployed capital is total all time. However, active position is ONLY if the loan is still active!
-    const p2pLoansDeployed = (p2pFunds.data ?? []).reduce((s, t) => s + Number(t.amount), 0);
-    const p2pActiveCount = (p2pFunds.data ?? []).filter((t) => {
-      const st = loanMap[String(t.ref_id)];
-      return st === "active" || st === "funded" || st === "approved";
-    }).length;
-
-    // 4. Earnings from P2P (Repayments where lenderUserId matches)
-    const p2pRepays = await sr
-      .from("ledger_transactions")
-      .select("amount, metadata")
-      .eq("ref_type", "loan_repay");
-      
-    const lenderRepays = (p2pRepays.data ?? []).filter(tx => {
-       try {
-         const meta = JSON.parse(String(tx.metadata || "{}"));
-         return String(meta.lenderUserId) === String(userId) || String(meta.lenderAddress) === String(userId);
-       } catch { return false; }
+    const { data: p2pMetrics, error: metricsError } = await supabase.rpc("get_lender_dashboard_metrics", {
+      p_user_id: userId,
     });
-    const p2pTotalRepaid = lenderRepays.reduce((s, t) => s + Number(t.amount), 0);
-    const p2pEarnings = Math.max(0, p2pTotalRepaid - p2pLoansDeployed);
 
-    const deployedCapital = poolDeployed + p2pLoansDeployed;
-    const totalEarnings = poolEarnings + p2pEarnings;
-    const activePositions = poolActive + p2pActiveCount;
+    if (metricsError) {
+      throw metricsError;
+    }
 
-    // Global default rate computation
-    const bad          = all.filter((l) => l.status === "defaulted").length;
-    const closed       = all.filter((l) => ["repaid","defaulted"].includes(String(l.status))).length;
-    const defaultRate  = closed > 0 ? (bad / closed) * 100 : 0;
+    const p2p = Array.isArray(p2pMetrics) ? p2pMetrics[0] : p2pMetrics;
+
+    const deployedCapital = poolDeployed + Number(p2p?.deployed_capital ?? 0);
+    const totalEarnings = poolEarnings + Number(p2p?.total_earnings ?? 0);
+    const activePositions = poolActive + Number(p2p?.active_positions ?? 0);
+    const defaultRate = Number(p2p?.default_rate ?? 0);
 
     return { deployedCapital, totalEarnings, activePositions, defaultRate };
   } catch {
@@ -179,17 +147,16 @@ export async function getLenderDashboardMetrics(userId: string): Promise<LenderD
 }
 
 export async function getAdminDashboardMetrics(): Promise<AdminDashboardMetrics> {
-  // Admin metrics need service role to see counts across ALL users
-  const sr = getServiceRoleClient();
-  if (!sr) return { totalUsers: 0, totalLoans: 0, activeLoans: 0, highRiskUsers: 0 };
+  const supabase = await getServerSupabaseClient();
+  if (!supabase) return { totalUsers: 0, totalLoans: 0, activeLoans: 0, highRiskUsers: 0 };
 
   try {
     const [usersRes, totalLoansRes, activeLoansRes, highRiskRes] = await Promise.all([
-      sr.from("profiles").select("id", { count: "exact", head: true }),
-      sr.from("loans").select("id", { count: "exact", head: true }),
-      sr.from("loans").select("id", { count: "exact", head: true })
+      supabase.from("profiles").select("id", { count: "exact", head: true }),
+      supabase.from("loans").select("id", { count: "exact", head: true }),
+      supabase.from("loans").select("id", { count: "exact", head: true })
         .in("status", ["approved", "funded", "active", "requested"]),
-      sr.from("profiles").select("id", { count: "exact", head: true })
+      supabase.from("profiles").select("id", { count: "exact", head: true })
         .in("risk_status", ["high", "blocked"]),
     ]);
     return {

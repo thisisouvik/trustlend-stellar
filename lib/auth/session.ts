@@ -1,6 +1,4 @@
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
-import type { User } from "@supabase/supabase-js";
 import {
   getDashboardPath,
   normalizeUserRole,
@@ -8,51 +6,7 @@ import {
 } from "@/lib/auth/roles";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
 
-// SECURITY: bypass is disabled in production regardless of env var
-const DEV_BYPASS_ENABLED =
-  process.env.NODE_ENV !== "production" &&
-  process.env.ENABLE_DEV_AUTH_BYPASS === "true";
-
-function isValidUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
-async function tryGetBypassUser(expectedRole?: UserRole) {
-  if (!DEV_BYPASS_ENABLED) {
-    return null;
-  }
-
-  const headerStore = await headers();
-  const bypassUserId = headerStore.get("x-dev-user-id")?.trim() ?? "";
-  const bypassRoleRaw = (headerStore.get("x-dev-role")?.trim() ?? "") as UserRole;
-  const bypassEmail = headerStore.get("x-dev-email")?.trim() ?? "dev-user@local.test";
-
-  if (!bypassUserId || !isValidUuid(bypassUserId)) {
-    return null;
-  }
-
-  const role = normalizeUserRole(bypassRoleRaw);
-
-  if (expectedRole && role !== expectedRole) {
-    redirect(getDashboardPath(role));
-  }
-
-  const user = {
-    id: bypassUserId,
-    email: bypassEmail,
-    app_metadata: {},
-    user_metadata: { account_type: role },
-  } as unknown as User;
-
-  return { user, role };
-}
-
 export async function requireAuthenticatedUser(expectedRole?: UserRole) {
-  const bypass = await tryGetBypassUser(expectedRole);
-  if (bypass) {
-    return bypass;
-  }
-
   const supabase = await getServerSupabaseClient();
 
   if (!supabase) {

@@ -70,7 +70,7 @@ export async function updateUserProfile(
       updates.date_of_birth = payload.date_of_birth.trim();
     }
 
-    // 4. Write with session client; RLS restricts updates to the caller row
+    // 4. Write with the caller session; RLS restricts updates to the caller row
     const { error: updateError } = await supabase
       .from("profiles")
       .update(updates)

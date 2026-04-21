@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
+import { getServerSupabaseClient } from "@/lib/supabase/server";
 
 /**
  * POST /api/tasks/complete
@@ -60,26 +60,6 @@ export async function POST(request: NextRequest) {
 
     if (eventErr) {
       return NextResponse.json({ error: eventErr.message }, { status: 500 });
-    }
-
-    // Update (upsert) the reputation snapshot using service role
-    const sr = getServiceRoleClient();
-    if (sr) {
-      // Get current snapshot
-      const { data: snap } = await sr
-        .from("reputation_snapshots")
-        .select("score_total")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      const currentScore = snap?.score_total ?? 250;
-      const newScore = Math.min(750, Math.max(0, currentScore + task.points));
-
-      await sr.from("reputation_snapshots").upsert({
-        user_id:     user.id,
-        score_total: newScore,
-        updated_at:  new Date().toISOString(),
-      });
     }
 
     return NextResponse.json({

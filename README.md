@@ -17,19 +17,9 @@
 
 **Live App:** https://trustlendborrow.vercel.app/
 
-**Project Overview Documentation:** [View in Google DOCs](https://docs.google.com/document/d/1bnVoG9n4WajP-05TWVWZhFh036hFgK5KwmklnX8762I/edit?usp=sharing)
+**Project Overview Documentation:** [View in Google Docs](https://docs.google.com/document/d/1bnVoG9n4WajP-05TWVWZhFh036hFgK5KwmklnX8762I/edit?usp=sharing)
 
-## Demo Video (YouTube)
-
-<p align="center">
-    <a href="https://www.youtube.com/watch?v=Vmrn6shwWd4" target="_blank" rel="noreferrer">
-        <img src="https://img.youtube.com/vi/Vmrn6shwWd4/hqdefault.jpg" alt="Watch TrustLend Demo on YouTube" width="560">
-    </a>
-</p>
-
-<p align="center">
-    Click the video preview to open and play it on YouTube.
-</p>
+## Demo Video : [Youtube Video Link](https://www.youtube.com/watch?v=Vmrn6shwWd4)
 
 </div>
 
@@ -40,7 +30,8 @@
 <details>
 <summary>System Architecture</summary>
 
-- [Overview](#system-architecture-overview)
+- [System Architecture Overview](#system-architecture-overview)
+- [Platform Interface Gallery](#-platform-interface-gallery-compact)
 - [Technology Stack](#technology-stack)
 
 </details>
@@ -50,7 +41,6 @@
 
 - [Web Application](#web-application)
 - [Role Dashboards](#role-dashboards)
-- [Role Dashboard Gallery](#role-dashboard-gallery-compact)
 - [API Layer](#api-layer)
 - [Smart Contracts](#smart-contracts)
 
@@ -189,6 +179,34 @@ graph TB
 
 ---
 
+## 📸 Platform Interface Gallery (Compact)
+
+### 1) Auth & Main Landing
+![Authentication](./assets/auth.png)
+![Main Dashboard](./assets/main-dashboard.png)
+
+### 2) Borrower Workflows
+![Borrower Home](./assets/borrower/home-tab.png)
+![Borrower Apply Loan](./assets/borrower/applyLoan-tab.png)
+![Borrower Repay](./assets/borrower/repay-tab.png)
+![Borrower Profile](./assets/borrower/profile-tab.png)
+![Borrower Tasks](./assets/borrower/task-tab.png)
+
+### 3) Lender Workflows
+![Lender Home](./assets/lender/home.png)
+![Lender Marketplace](./assets/lender/loan-marketplace.png)
+![Lender Pools](./assets/lender/pool-investment.png)
+![Lender History](./assets/lender/history-tab.png)
+
+### 4) Admin Treasury
+![Admin Verification](./assets/admin/adminKYC%20verify.png)
+
+### 5) Workflow & Contracts Testing
+![End-to-End Testing Array](./assets/test/e2e-test.png)
+![Soroban Smart Contracts Suite](./assets/test/contracts-test.png)
+
+---
+
 ## Technology Stack
 
 ### Core Technologies
@@ -204,55 +222,7 @@ graph TB
 | Styling/UI | Tailwind CSS + Framer Motion | Tailwind 4, Framer Motion 12.38.0 | Dashboard UI/animations |
 | Tooling | ESLint + TypeScript + Node.js | ESLint 9 | Build quality and lint checks |
 
----
 
-## Role Dashboard Gallery (Compact)
-
-<details>
-<summary><strong>1) Auth and Main Dashboard</strong></summary>
-
-<p>
-    <a href="assets/auth.png"><img src="assets/auth.png" alt="Authentication Screen" width="220"></a>
-    <a href="assets/main-dashboard.png"><img src="assets/main-dashboard.png" alt="Main Dashboard" width="220"></a>
-</p>
-
-</details>
-
-<details>
-<summary><strong>2) Borrower Screens</strong></summary>
-
-<p>
-    <a href="assets/borrower/home-tab.png"><img src="assets/borrower/home-tab.png" alt="Borrower Home" width="220"></a>
-    <a href="assets/borrower/applyLoan-tab.png"><img src="assets/borrower/applyLoan-tab.png" alt="Borrower Apply Loan" width="220"></a>
-    <a href="assets/borrower/repay-tab.png"><img src="assets/borrower/repay-tab.png" alt="Borrower Repay" width="220"></a>
-    <a href="assets/borrower/profile-tab.png"><img src="assets/borrower/profile-tab.png" alt="Borrower Profile" width="220"></a>
-    <a href="assets/borrower/task-tab.png"><img src="assets/borrower/task-tab.png" alt="Borrower Tasks" width="220"></a>
-</p>
-
-</details>
-
-<details>
-<summary><strong>3) Lender Screens</strong></summary>
-
-<p>
-    <a href="assets/lender/home.png"><img src="assets/lender/home.png" alt="Lender Home" width="220"></a>
-    <a href="assets/lender/loan-marketplace.png"><img src="assets/lender/loan-marketplace.png" alt="Lender Marketplace" width="220"></a>
-    <a href="assets/lender/pool-investment.png"><img src="assets/lender/pool-investment.png" alt="Lender Pool Investment" width="220"></a>
-    <a href="assets/lender/history-tab.png"><img src="assets/lender/history-tab.png" alt="Lender History" width="220"></a>
-</p>
-
-</details>
-
-<details>
-<summary><strong>4) Admin Screens</strong></summary>
-
-<p>
-    <a href="assets/admin/adminKYC%20verify.png"><img src="assets/admin/adminKYC%20verify.png" alt="Admin KYC Verify" width="220"></a>
-</p>
-
-</details>
-
----
 
 ## Web Application
 

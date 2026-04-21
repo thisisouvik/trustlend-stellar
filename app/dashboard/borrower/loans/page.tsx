@@ -29,11 +29,28 @@ export default async function BorrowerLoansPage() {
   const loans   = loansRes.data ?? [];
   const profile = profileRes.data;
 
+  const loanIds = loans.map((l) => String(l.id));
+  const fundedLedgerRes = supabase && loanIds.length > 0
+    ? await supabase
+        .from("ledger_transactions")
+        .select("ref_id")
+        .eq("ref_type", "loan_fund")
+        .in("ref_id", loanIds)
+    : { data: [] };
+
+  const fundedLoanIds = new Set((fundedLedgerRes.data ?? []).map((row) => String(row.ref_id)));
+  const normalizedLoans = loans.map((loan) => {
+    const status = String(loan.status ?? "requested");
+    const effectiveStatus = status === "requested" && fundedLoanIds.has(String(loan.id)) ? "funded" : status;
+    return { ...loan, status: effectiveStatus };
+  });
+
   const isKycVerified = profile?.kyc_status === "verified";
   const canApplyLoan  = isKycVerified;
   const maxLoanAmount = canApplyLoan ? metrics.availableCredit : 0;
 
-  const activeLoans = loans.filter((l) => l.status === "active");
+  const REPAYABLE_STATUSES = ["active", "funded", "approved"];
+  const activeLoans = normalizedLoans.filter((l) => REPAYABLE_STATUSES.includes(String(l.status)));
   const repayableLoan = activeLoans[0] ?? null;
   const dueAmount = repayableLoan
     ? Math.max(0, Number(repayableLoan.principal_amount ?? 0) - Number(repayableLoan.repaid_amount ?? 0))
@@ -69,7 +86,7 @@ export default async function BorrowerLoansPage() {
         <BorrowerForms
           canApplyLoan={canApplyLoan}
           maxLoanAmount={maxLoanAmount}
-          loans={loans as { id: string; status: string; due_at: string | null; principal_amount: number; repaid_amount: number; apr_bps?: number; duration_days?: number; created_at?: string | null; }[]}
+          loans={normalizedLoans as { id: string; status: string; due_at: string | null; principal_amount: number; repaid_amount: number; apr_bps?: number; duration_days?: number; created_at?: string | null; }[]}
           selectedRepaymentLoan={repayableLoan as { id: string; status: string; due_at: string | null; principal_amount: number; repaid_amount: number } | null}
           dueAmount={dueAmount}
         />

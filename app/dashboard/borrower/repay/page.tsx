@@ -30,12 +30,28 @@ export default async function BorrowerRepayPage() {
   const loans   = loansRes.data ?? [];
   const profile = profileRes.data;
 
+  const loanIds = loans.map((l) => String(l.id));
+  const fundedLedgerRes = supabase && loanIds.length > 0
+    ? await supabase
+        .from("ledger_transactions")
+        .select("ref_id")
+        .eq("ref_type", "loan_fund")
+        .in("ref_id", loanIds)
+    : { data: [] };
+
+  const fundedLoanIds = new Set((fundedLedgerRes.data ?? []).map((row) => String(row.ref_id)));
+  const normalizedLoans = loans.map((loan) => {
+    const status = String(loan.status ?? "requested");
+    const effectiveStatus = status === "requested" && fundedLoanIds.has(String(loan.id)) ? "funded" : status;
+    return { ...loan, status: effectiveStatus };
+  });
+
   // Repayable = any loan that has been funded/disbursed (not yet repaid or defaulted)
   // Statuses: "funded" (just funded by lender), "active" (repayment in progress)
   const REPAYABLE_STATUSES = ["active", "funded", "approved"];
-  const repayableLoans = loans.filter((l) => REPAYABLE_STATUSES.includes(String(l.status)));
+  const repayableLoans = normalizedLoans.filter((l) => REPAYABLE_STATUSES.includes(String(l.status)));
   const repayableLoan  = repayableLoans[0] ?? null;
-  const pendingLoans = loans.filter((l) => String(l.status) === "requested");
+  const pendingLoans = normalizedLoans.filter((l) => String(l.status) === "requested");
   const dueAmount = repayableLoan
     ? Math.max(0, Number(repayableLoan.principal_amount ?? 0) - Number(repayableLoan.repaid_amount ?? 0))
     : 0;
@@ -85,7 +101,7 @@ export default async function BorrowerRepayPage() {
             />
 
             {/* All loans history */}
-            {loans.length > 1 && (
+            {normalizedLoans.length > 1 && (
               <article className="workspace-card workspace-card--full">
                 <h2 className="workspace-card-title" style={{ marginBottom: "1rem" }}>Loan History</h2>
                 <div style={{ overflowX: "auto" }}>
@@ -98,7 +114,7 @@ export default async function BorrowerRepayPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {loans.map((loan) => (
+                      {normalizedLoans.map((loan) => (
                         <tr key={String(loan.id)} style={{ borderBottom: "1px solid #f9fafb" }}>
                           <td style={{ padding: "0.75rem", fontFamily: "monospace", fontSize: "0.8rem", color: "#6b7280" }}>{String(loan.id).slice(0, 8)}</td>
                           <td style={{ padding: "0.75rem", fontWeight: 700 }}>{Number(loan.principal_amount).toFixed(2)} XLM</td>

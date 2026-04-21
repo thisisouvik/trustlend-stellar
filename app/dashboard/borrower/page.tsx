@@ -47,12 +47,23 @@ export default async function BorrowerDashboardPage() {
         .in("ref_id", loanIds)
     : { data: [] };
   const loanTxMap: Record<string, string> = {};
+  const fundedLoanIds = new Set<string>();
   for (const entry of ledgerRes.data ?? []) {
     try {
       const meta = JSON.parse(String(entry.metadata ?? "{}"));
+      if (String(entry.ref_id)) {
+        fundedLoanIds.add(String(entry.ref_id));
+      }
       if (meta.txHash && String(entry.ref_id)) loanTxMap[String(entry.ref_id)] = String(meta.txHash);
     } catch { /* ignore */ }
   }
+
+  const normalizedLoans = loans.map((loan) => {
+    const status = String(loan.status ?? "requested");
+    const hasFundingLedger = fundedLoanIds.has(String(loan.id));
+    const effectiveStatus = status === "requested" && hasFundingLedger ? "funded" : status;
+    return { ...loan, effectiveStatus };
+  });
 
   const kycStatus = String(profile?.kyc_status ?? "pending");
   const isKycVerified = kycStatus === "verified";
@@ -72,8 +83,8 @@ export default async function BorrowerDashboardPage() {
 
   // Active = any loan with money disbursed that still needs repayment
   const REPAYABLE_STATUSES = ["active", "funded", "approved"];
-  const activeLoans  = loans.filter((l) => REPAYABLE_STATUSES.includes(String(l.status)));
-  const pendingLoans = loans.filter((l) => l.status === "requested");
+  const activeLoans  = normalizedLoans.filter((l) => REPAYABLE_STATUSES.includes(String(l.effectiveStatus)));
+  const pendingLoans = normalizedLoans.filter((l) => String(l.effectiveStatus) === "requested");
   const inLoansXlm   = activeLoans.reduce((sum, l) => sum + Math.max(0, Number(l.principal_amount ?? 0) - Number(l.repaid_amount ?? 0)), 0);
   const pendingXlm   = pendingLoans.reduce((sum, l) => sum + Number(l.principal_amount ?? 0), 0);
 
@@ -176,7 +187,7 @@ export default async function BorrowerDashboardPage() {
         </article>
 
         {/* ── Active / pending loans summary ── */}
-        {loans.length > 0 && (
+        {normalizedLoans.length > 0 && (
           <article className="workspace-card workspace-card--full">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
               <h2 className="workspace-card-title" style={{ margin: 0 }}>Your Loans</h2>
@@ -194,8 +205,8 @@ export default async function BorrowerDashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {loans.slice(0, 5).map((loan) => {
-                    const status = String(loan.status);
+                  {normalizedLoans.slice(0, 5).map((loan) => {
+                    const status = String(loan.effectiveStatus);
                     const loanId = String(loan.id);
                     const txHash = loanTxMap[loanId] ?? "";
                     const hasTx  = isLikelyTxHash(txHash);
@@ -218,7 +229,7 @@ export default async function BorrowerDashboardPage() {
                             </a>
                           ) : (
                             <span style={{ fontSize: "0.75rem", opacity: 0.4, whiteSpace: "nowrap" }}>
-                              {status === "requested" || status === "approved" ? "⏳ Pending" : "—"}
+                              {status === "requested" || status === "approved" ? "⏳ Pending" : status === "funded" ? "✅ Recorded" : "—"}
                             </span>
                           )}
                         </td>
@@ -245,7 +256,7 @@ export default async function BorrowerDashboardPage() {
         )}
 
         {/* ── Empty state (no loans) ── */}
-        {loans.length === 0 && (
+        {normalizedLoans.length === 0 && (
           <article className="workspace-card workspace-card--full" style={{ textAlign: "center", padding: "2.5rem 1.5rem" }}>
             <div style={{ fontSize: "2.5rem", marginBottom: "0.75rem" }}>📋</div>
             <h2 className="workspace-card-title">No Loans Yet</h2>

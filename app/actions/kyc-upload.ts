@@ -75,9 +75,9 @@ export async function uploadKYCDocument(formData: FormData): Promise<{
       },
     });
 
-    // Create unique file path: /kyc-documents/{userId}/government_id_{timestamp}
+    // Create unique object key inside bucket: {userId}/government_id_{timestamp}
     const filename = `government_id_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    const filepath = `kyc-documents/${user.id}/${filename}`;
+    const filepath = `${user.id}/${filename}`;
 
     console.log(`📤 Uploading ${file.name} to Supabase Storage: ${filepath}`);
 

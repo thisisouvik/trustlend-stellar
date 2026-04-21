@@ -1,11 +1,10 @@
 "use client";
-
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatCurrency } from "@/lib/utils/formatting";
-import { 
-  LendingContract, 
-  ReputationContract, 
+import {
+  LendingContract,
+  ReputationContract,
   xlmToStroops,
 } from "@/lib/contracts";
 
@@ -13,7 +12,6 @@ interface LoanApplicationFormProps {
   maxAmount: number;
   onSubmit: (amount: number, duration: number) => Promise<void>;
 }
-
 export function LoanApplicationForm({ maxAmount, onSubmit }: LoanApplicationFormProps) {
   const [amount, setAmount] = useState("");
   const [duration, setDuration] = useState("60");
@@ -198,14 +196,19 @@ export function RepaymentForm({ loanAmount, repaidAmount, onSubmit }: RepaymentF
 
 interface BorrowerLoan {
   id: string;
+  status: string;
   due_at: string | null;
   principal_amount: number;
   repaid_amount: number;
+  apr_bps?: number;
+  duration_days?: number;
+  created_at?: string | null;
 }
 
 interface BorrowerFormsProps {
   canApplyLoan: boolean;
   maxLoanAmount: number;
+  loans: BorrowerLoan[];
   selectedRepaymentLoan: BorrowerLoan | null;
   dueAmount: number;
 }
@@ -213,17 +216,18 @@ interface BorrowerFormsProps {
 export function BorrowerForms({
   canApplyLoan,
   maxLoanAmount,
+  loans,
   selectedRepaymentLoan,
   dueAmount,
 }: BorrowerFormsProps) {
   const router = useRouter();
   const [monitoringDays] = useState(0);
   const [, setSorobanLoading] = useState(false);
+  const pendingLoans = loans.filter((loan) => String(loan.status) === "requested");
 
   const handleLoanApplication = async (amount: number, duration: number) => {
     setSorobanLoading(true);
     try {
-      // 1. Supabase application (Database record)
       const response = await fetch("/api/loans/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -237,10 +241,8 @@ export function BorrowerForms({
 
       await response.json();
 
-      // 2. Soroban application (On-chain record) — best-effort, never blocks
       const walletAddress = window.localStorage.getItem("wallet_address") || "";
       if (walletAddress) {
-        // 5-second timeout: testnet RPC is optional, don't freeze the UI
         const timeout = new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error("Soroban RPC timeout")), 5000)
         );
@@ -267,15 +269,12 @@ export function BorrowerForms({
 
           console.log("[TrustLend] Soroban loan request recorded.");
         } catch (sorobanErr) {
-          // Non-fatal: Soroban sync is optional on testnet
           console.warn("[TrustLend] Soroban sync skipped:", (sorobanErr as Error).message);
         }
       }
 
       router.refresh();
       alert("Loan application submitted successfully!");
-    } catch (error) {
-      throw error;
     } finally {
       setSorobanLoading(false);
     }
@@ -318,10 +317,55 @@ export function BorrowerForms({
         )}
       </article>
 
+      {pendingLoans.length > 0 && (
+        <article className="workspace-card workspace-card--full" style={{ borderColor: "rgba(245,166,35,0.25)", background: "rgba(245,166,35,0.04)" }}>
+          <h2 className="workspace-card-title">Pending Loan Request{pendingLoans.length > 1 ? "s" : ""}</h2>
+          <p className="workspace-card-copy" style={{ marginTop: "0.35rem" }}>
+            Your submitted request{pendingLoans.length > 1 ? "s are" : " is"} waiting for lender funding.
+          </p>
+          <div style={{ display: "grid", gap: "0.75rem", marginTop: "1rem" }}>
+            {pendingLoans.slice(0, 3).map((loan) => (
+              <div
+                key={String(loan.id)}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: "1rem",
+                  alignItems: "center",
+                  padding: "0.85rem 1rem",
+                  borderRadius: "0.7rem",
+                  background: "rgba(255,255,255,0.75)",
+                  border: "1px solid rgba(245,166,35,0.18)",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div>
+                  <p style={{ fontWeight: 700, margin: 0 }}>Loan #{String(loan.id).slice(0, 8)}</p>
+                  <p style={{ fontSize: "0.8rem", color: "#6b7280", margin: "0.15rem 0 0" }}>
+                    Requested {loan.created_at ? new Date(String(loan.created_at)).toLocaleDateString() : "recently"}
+                  </p>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <p style={{ margin: 0, fontWeight: 800, color: "#7e2fd0" }}>{formatCurrency(Number(loan.principal_amount ?? 0))}</p>
+                  <p style={{ fontSize: "0.75rem", color: "#f59e0b", fontWeight: 700, margin: "0.15rem 0 0" }}>REQUESTED</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </article>
+      )}
+
       <article className="workspace-card">
         <h2 className="workspace-card-title">Make a Repayment</h2>
         {!selectedRepaymentLoan ? (
-          <p className="workspace-card-copy">No active loan available for repayment.</p>
+          <>
+            <p className="workspace-card-copy">No active loan available for repayment.</p>
+            {pendingLoans.length > 0 && (
+              <p className="workspace-card-copy" style={{ marginTop: "0.5rem", color: "#f59e0b" }}>
+                You still have a pending loan request. Repayment will appear after a lender funds it.
+              </p>
+            )}
+          </>
         ) : (
           <>
             <p className="workspace-card-copy">Loan #{String(selectedRepaymentLoan.id).slice(0, 8)}</p>

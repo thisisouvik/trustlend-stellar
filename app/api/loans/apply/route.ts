@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
     await createNotification({
       userId: user.id,
       title: "Loan Request Submitted",
-      message: `Your request for ${amount} XLM has been submitted and is pending review.`,
+      message: `Your request for ${amount} XLM is now live in the marketplace and waiting for lender funding.`,
       type: "loan_requested",
     });
 

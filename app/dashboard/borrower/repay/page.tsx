@@ -15,7 +15,7 @@ export default async function BorrowerRepayPage() {
     ? await Promise.all([
         supabase
           .from("loans")
-          .select("id, status, principal_amount, repaid_amount, apr_bps, duration_days, due_at")
+          .select("id, status, principal_amount, repaid_amount, apr_bps, duration_days, due_at, created_at")
           .eq("borrower_id", user.id)
           .order("created_at", { ascending: false })
           .limit(20),
@@ -31,10 +31,11 @@ export default async function BorrowerRepayPage() {
   const profile = profileRes.data;
 
   // Repayable = any loan that has been funded/disbursed (not yet repaid or defaulted)
-  // Statuses: "funded" (just funded by lender), "approved" (admin-approved), "active" (repayment in progress)
+  // Statuses: "funded" (just funded by lender), "active" (repayment in progress)
   const REPAYABLE_STATUSES = ["active", "funded", "approved"];
   const repayableLoans = loans.filter((l) => REPAYABLE_STATUSES.includes(String(l.status)));
   const repayableLoan  = repayableLoans[0] ?? null;
+  const pendingLoans = loans.filter((l) => String(l.status) === "requested");
   const dueAmount = repayableLoan
     ? Math.max(0, Number(repayableLoan.principal_amount ?? 0) - Number(repayableLoan.repaid_amount ?? 0))
     : 0;
@@ -57,7 +58,7 @@ export default async function BorrowerRepayPage() {
             <h2 className="workspace-card-title">No Active Loans</h2>
             <p className="workspace-card-copy" style={{ marginTop: "0.4rem" }}>
               {loans.some((l) => ["requested"].includes(String(l.status)))
-                ? "Your loan request is pending approval. Repayment will be available once a lender funds it."
+                ? "Your loan request is pending lender funding. Repayment will be available once a lender funds it."
                 : "You have no loans to repay. Apply for a new loan using the 'Apply for Loan' section."}
             </p>
             <a href="/dashboard/borrower/loans" style={{ display: "inline-block", marginTop: "1rem", padding: "0.6rem 1.5rem", background: "#7e2fd0", color: "#fff", borderRadius: "0.5rem", fontSize: "0.875rem", fontWeight: 700, textDecoration: "none" }}>
@@ -82,6 +83,44 @@ export default async function BorrowerRepayPage() {
               }}
               dueAmount={dueAmount}
             />
+
+            {pendingLoans.length > 0 && (
+              <article className="workspace-card workspace-card--full" style={{ borderColor: "rgba(245,166,35,0.25)", background: "rgba(245,166,35,0.04)" }}>
+                <h2 className="workspace-card-title">Pending Loan Request{pendingLoans.length > 1 ? "s" : ""}</h2>
+                <p className="workspace-card-copy" style={{ marginTop: "0.35rem" }}>
+                  You have {pendingLoans.length} submitted request{pendingLoans.length > 1 ? "s" : ""} waiting for funding.
+                </p>
+                <div style={{ display: "grid", gap: "0.75rem", marginTop: "1rem" }}>
+                  {pendingLoans.slice(0, 3).map((loan) => (
+                    <div
+                      key={String(loan.id)}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: "1rem",
+                        alignItems: "center",
+                        padding: "0.85rem 1rem",
+                        borderRadius: "0.7rem",
+                        background: "rgba(255,255,255,0.75)",
+                        border: "1px solid rgba(245,166,35,0.18)",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div>
+                        <p style={{ fontWeight: 700, margin: 0 }}>Loan #{String(loan.id).slice(0, 8)}</p>
+                        <p style={{ fontSize: "0.8rem", color: "#6b7280", margin: "0.15rem 0 0" }}>
+                          Requested {loan.created_at ? new Date(String(loan.created_at)).toLocaleDateString() : "recently"}
+                        </p>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <p style={{ margin: 0, fontWeight: 800, color: "#7e2fd0" }}>{Number(loan.principal_amount ?? 0).toFixed(2)} XLM</p>
+                        <p style={{ fontSize: "0.75rem", color: "#f59e0b", fontWeight: 700, margin: "0.15rem 0 0" }}>REQUESTED</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            )}
 
             {/* All loans history */}
             {loans.length > 1 && (

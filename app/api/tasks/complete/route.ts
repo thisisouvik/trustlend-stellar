@@ -31,41 +31,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
 
-    // Check if already completed (prevent double-claiming)
-    const { data: existing } = await supabase
-      .from("reputation_events")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("source_type", "task_completion")
-      .eq("source_key", taskId)
-      .maybeSingle();
+    const { data: awardedPoints, error: rpcErr } = await supabase.rpc("complete_platform_task", {
+      p_task_id: taskId,
+    });
 
-    if (existing) {
-      return NextResponse.json(
-        { error: "Task already completed. Each task can only be claimed once." },
-        { status: 409 }
-      );
+    if (rpcErr) {
+      const message = rpcErr.message || "Failed to complete task.";
+      const status = /already completed/i.test(message) ? 409 : 500;
+      return NextResponse.json({ error: message }, { status });
     }
 
-    // Record reputation event
-    const { error: eventErr } = await supabase
-      .from("reputation_events")
-      .insert({
-        user_id:     user.id,
-        source_type: "task_completion",
-        source_key:  taskId,
-        points_delta: task.points,
-        reason:      `Completed: ${task.title}`,
-      });
-
-    if (eventErr) {
-      return NextResponse.json({ error: eventErr.message }, { status: 500 });
-    }
+    const pointsAwarded = Number(awardedPoints ?? task.points);
 
     return NextResponse.json({
       taskId,
-      pointsAwarded: task.points,
-      message: `+${task.points} trust points awarded for completing "${task.title}"`,
+      pointsAwarded,
+      message: `+${pointsAwarded} trust points awarded for completing "${task.title}"`,
     });
   } catch (err) {
     console.error("Task complete error:", err);

@@ -69,7 +69,8 @@ export default async function BorrowerLoansPage() {
         <BorrowerForms
           canApplyLoan={canApplyLoan}
           maxLoanAmount={maxLoanAmount}
-          selectedRepaymentLoan={repayableLoan as { id: string; due_at: string | null; principal_amount: number; repaid_amount: number } | null}
+          loans={loans as { id: string; status: string; due_at: string | null; principal_amount: number; repaid_amount: number; apr_bps?: number; duration_days?: number; created_at?: string | null; }[]}
+          selectedRepaymentLoan={repayableLoan as { id: string; status: string; due_at: string | null; principal_amount: number; repaid_amount: number } | null}
           dueAmount={dueAmount}
         />
       </div>

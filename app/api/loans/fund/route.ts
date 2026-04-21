@@ -98,6 +98,15 @@ export async function POST(request: NextRequest) {
     });
 
     if (updateErr) {
+      if (String(updateErr.message || "").includes("Could not find the function public.activate_loan_funding")) {
+        return NextResponse.json(
+          {
+            error:
+              "Funding RPC is not installed in this database yet. Apply sql/009_hotfix_activate_loan_funding_rpc.sql in Supabase, then retry funding.",
+          },
+          { status: 500 }
+        );
+      }
       return NextResponse.json({ error: updateErr.message }, { status: 500 });
     }
 

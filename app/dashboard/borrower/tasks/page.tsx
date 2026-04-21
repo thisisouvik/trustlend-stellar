@@ -21,7 +21,7 @@ export default async function BorrowerTasksPage() {
         // Which tasks has this user already completed?
         supabase
           .from("reputation_events")
-          .select("source_id")
+          .select("source_key, source_id")
           .eq("user_id", user.id)
           .eq("source_type", "task_completion"),
         // Current trust score
@@ -34,7 +34,9 @@ export default async function BorrowerTasksPage() {
     : [{ data: null }, { data: [] }, { data: null }];
 
   const profile          = profileRes.data;
-  const completedTaskIds = new Set((completedEventsRes.data ?? []).map((e) => String(e.source_id)));
+  const completedTaskIds = new Set(
+    (completedEventsRes.data ?? []).map((e) => String(e.source_key ?? e.source_id ?? ""))
+  );
   const currentScore     = snapshotRes.data?.score_total ?? 250;
 
   // Merge completion status into the canonical task list

@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
       .select("id")
       .eq("user_id", user.id)
       .eq("source_type", "task_completion")
-      .eq("source_id", taskId)
+      .eq("source_key", taskId)
       .maybeSingle();
 
     if (existing) {
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
       .insert({
         user_id:     user.id,
         source_type: "task_completion",
-        source_id:   taskId,
+        source_key:  taskId,
         points_delta: task.points,
         reason:      `Completed: ${task.title}`,
       });

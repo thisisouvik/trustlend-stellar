@@ -38,10 +38,9 @@ export function presentBorrowerMetrics(metrics: BorrowerDashboardMetrics) {
   return [
     { label: "Trust score", value: String(metrics.reputationScore) },
     { label: "Available credit", value: toCurrency(metrics.availableCredit) },
-    // Show pending requests when there are no active loans yet
-    metrics.activeLoans > 0
-      ? { label: "Active loans", value: String(metrics.activeLoans) }
-      : { label: "Loan requests", value: String(metrics.pendingLoans) },
+    metrics.pendingLoans > 0
+      ? { label: "Loan requests", value: String(metrics.pendingLoans) }
+      : { label: "Active loans", value: String(metrics.activeLoans) },
     { label: "Repayment rate", value: toPercentage(metrics.repaymentRate) },
   ];
 }

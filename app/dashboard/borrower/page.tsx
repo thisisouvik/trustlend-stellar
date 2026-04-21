@@ -68,6 +68,7 @@ export default async function BorrowerDashboardPage() {
   const verificationProgress = Math.round((verificationItems.filter((i) => i.done).length / verificationItems.length) * 100);
   const profileComplete = verificationProgress === 100;
   const canApplyLoan = profileComplete && isKycVerified;
+  const profileNeedsAttention = !canApplyLoan;
 
   // Active = any loan with money disbursed that still needs repayment
   const REPAYABLE_STATUSES = ["active", "funded", "approved"];
@@ -109,15 +110,19 @@ export default async function BorrowerDashboardPage() {
       }
       currentPath="/dashboard/borrower"
       profilePath="/dashboard/borrower/profile"
-      profileSummary={profileComplete ? undefined : {
+      profileSummary={profileNeedsAttention ? {
         completion: verificationProgress,
         kycStatus,
         warningText: kycStatus === "submitted" && !isKycVerified
           ? "Your documents are under admin review."
-          : "Complete your profile to unlock borrowing.",
-        requiredItems: verificationItems.filter((i) => !i.done).map((i) => i.label),
-      }}
-      showProfileAlert={!profileComplete}
+          : profileComplete
+            ? "Your profile is ready, but KYC approval is still required to unlock borrowing."
+            : "Complete your profile to unlock borrowing.",
+        requiredItems: profileComplete && !isKycVerified
+          ? ["KYC approval"]
+          : verificationItems.filter((i) => !i.done).map((i) => i.label),
+      } : undefined}
+      showProfileAlert={profileNeedsAttention}
       links={borrowerNavLinks}
     >
       <div className="workspace-stack">

@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create repayment record in DB
-    const { data: repayment, error: repaymentError } = await supabase
+    const { data: repayment, error: repaymentError } = await srClient
       .from("loan_repayments")
       .insert({
         loan_id: loanId,
@@ -102,17 +102,18 @@ export async function POST(request: NextRequest) {
       newStatus = "active";
     }
 
-    const { error: updateError } = await supabase.rpc("record_loan_repayment", {
-      p_loan_id: loanId,
-      p_payer_id: user.id,
-      p_repaid_amount: newRepaidAmount,
-      p_new_status: newStatus,
-    });
+    const { error: updateError } = await srClient
+      .from("loans")
+      .update({
+        repaid_amount: newRepaidAmount,
+        status: newStatus,
+      })
+      .eq("id", loanId);
 
     if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
 
     // Record on Ledger
-    await supabase.from("ledger_transactions").insert({
+    await srClient.from("ledger_transactions").insert({
       user_id: user.id, // the borrower
       category: "loan_repay",
       amount: amount,
@@ -135,7 +136,7 @@ export async function POST(request: NextRequest) {
 
     // Add reputation points
     const repayPoints = newStatus === "repaid" ? 20 : 5;
-    await supabase.from("reputation_events").insert({
+    await srClient.from("reputation_events").insert({
       user_id:      user.id,
       source_type:  "loan_repayment",
       source_id:    loanId,

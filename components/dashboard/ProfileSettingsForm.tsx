@@ -281,23 +281,32 @@ export function ProfileSettingsForm({
         )}
       </fieldset>
 
-      <button
-        type="submit"
-        disabled={loading}
-        className="workspace-button workspace-button--primary settings-submit-btn"
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "0.75rem",
+          alignItems: "center",
+        }}
       >
-        {loading ? "Saving…" : "Save & Verify Identity"}
-      </button>
+        <button
+          type="submit"
+          disabled={loading}
+          className="workspace-button workspace-button--primary settings-submit-btn"
+        >
+          {loading ? "Saving…" : "Save & Verify Identity"}
+        </button>
 
-      <button
-        type="button"
-        onClick={handleLogout}
-        disabled={signingOut}
-        className="workspace-button workspace-button--secondary settings-submit-btn"
-        style={{ marginLeft: "0.75rem", background: "rgba(239,68,68,0.08)", color: "#dc2626", border: "1px solid rgba(239,68,68,0.3)" }}
-      >
-        {signingOut ? "Signing out…" : "Sign Out"}
-      </button>
+        <button
+          type="button"
+          onClick={handleLogout}
+          disabled={signingOut}
+          className="workspace-button workspace-button--secondary settings-submit-btn"
+          style={{ background: "rgba(239,68,68,0.08)", color: "#dc2626", border: "1px solid rgba(239,68,68,0.3)" }}
+        >
+          {signingOut ? "Signing out…" : "Sign Out"}
+        </button>
+      </div>
     </form>
   );
 }

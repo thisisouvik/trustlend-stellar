@@ -5,6 +5,7 @@ import {
   getBorrowerDashboardMetrics,
   presentBorrowerMetrics,
 } from "@/lib/dashboard/metrics";
+import { borrowerNavLinks } from "@/lib/dashboard/borrower-links";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
 
 // Compliance status config
@@ -105,13 +106,7 @@ export default async function BorrowerProfilePage() {
           : `Complete your profile to unlock borrowing. ${missingItems.length} item${missingItems.length !== 1 ? "s" : ""} remaining.`,
         requiredItems: missingItems,
       }}
-      links={[
-        { href: "/dashboard/borrower",         label: "Home" },
-        { href: "/dashboard/borrower/loans",   label: "Apply for Loan" },
-        { href: "/dashboard/borrower/repay",   label: "Repay Loan" },
-        { href: "/dashboard/borrower/tasks",   label: "Trust Tasks" },
-        { href: "/dashboard/borrower/profile", label: "Profile & Settings" },
-      ]}
+      links={borrowerNavLinks}
     >
       <div className="workspace-grid workspace-grid--two">
         {/* ── LEFT: Identity Verification Form ── */}

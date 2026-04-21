@@ -2,6 +2,7 @@ import { WorkspaceFrame } from "@/components/dashboard/WorkspaceFrame";
 import { BorrowerForms } from "@/components/dashboard/BorrowerForms";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { getBorrowerDashboardMetrics, presentBorrowerMetrics } from "@/lib/dashboard/metrics";
+import { borrowerNavLinks } from "@/lib/dashboard/borrower-links";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
 
 export default async function BorrowerLoansPage() {
@@ -38,14 +39,6 @@ export default async function BorrowerLoansPage() {
     ? Math.max(0, Number(repayableLoan.principal_amount ?? 0) - Number(repayableLoan.repaid_amount ?? 0))
     : 0;
 
-  const borrowerLinks = [
-    { href: "/dashboard/borrower",         label: "Home" },
-    { href: "/dashboard/borrower/loans",   label: "Apply for Loan" },
-    { href: "/dashboard/borrower/repay",   label: "Repay Loan" },
-    { href: "/dashboard/borrower/tasks",   label: "Trust Tasks" },
-    { href: "/dashboard/borrower/profile", label: "Profile & Settings" },
-  ];
-
   return (
     <WorkspaceFrame
       roleLabel="Borrower Dashboard"
@@ -55,7 +48,7 @@ export default async function BorrowerLoansPage() {
       userName={String(user.user_metadata?.full_name ?? profile?.full_name ?? "")}
       metrics={presentBorrowerMetrics(metrics)}
       currentPath="/dashboard/borrower/loans"
-      links={borrowerLinks}
+      links={borrowerNavLinks}
     >
       <div className="workspace-stack">
         {!canApplyLoan && (

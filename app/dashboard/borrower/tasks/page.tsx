@@ -2,6 +2,7 @@ import { WorkspaceFrame } from "@/components/dashboard/WorkspaceFrame";
 import { TasksBoard } from "@/components/dashboard/TasksBoard";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { getBorrowerDashboardMetrics, presentBorrowerMetrics } from "@/lib/dashboard/metrics";
+import { borrowerNavLinks } from "@/lib/dashboard/borrower-links";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
 import { getPlatformTasks } from "@/app/api/tasks/complete/route";
 
@@ -52,13 +53,7 @@ export default async function BorrowerTasksPage() {
       userName={String(user.user_metadata?.full_name ?? profile?.full_name ?? "")}
       metrics={presentBorrowerMetrics(metrics)}
       currentPath="/dashboard/borrower/tasks"
-      links={[
-        { href: "/dashboard/borrower",         label: "Home" },
-        { href: "/dashboard/borrower/loans",   label: "Apply for Loan" },
-        { href: "/dashboard/borrower/repay",   label: "Repay Loan" },
-        { href: "/dashboard/borrower/tasks",   label: "Trust Tasks" },
-        { href: "/dashboard/borrower/profile", label: "Profile & Settings" },
-      ]}
+      links={borrowerNavLinks}
     >
       <div className="workspace-stack">
         {/* How the score works */}

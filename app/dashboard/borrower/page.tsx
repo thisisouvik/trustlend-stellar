@@ -22,7 +22,7 @@ export default async function BorrowerDashboardPage() {
     ? await Promise.all([
         supabase
           .from("profiles")
-          .select("full_name, phone, country_code, kyc_status, risk_status")
+          .select("full_name, phone, date_of_birth, country_code, kyc_status, risk_status, government_id_url, kyc_submitted_at")
           .eq("id", user.id)
           .maybeSingle(),
         supabase
@@ -54,16 +54,20 @@ export default async function BorrowerDashboardPage() {
     } catch { /* ignore */ }
   }
 
-  const isKycVerified = profile?.kyc_status === "verified";
+  const kycStatus = String(profile?.kyc_status ?? "pending");
+  const isKycVerified = kycStatus === "verified";
+  const hasGovIdSubmission = Boolean(profile?.government_id_url || profile?.kyc_submitted_at || kycStatus === "submitted" || isKycVerified);
 
   const verificationItems = [
-    { label: "Email Verified",          done: Boolean(user.email_confirmed_at) },
-    { label: "Legal Name Set",          done: Boolean(profile?.full_name) },
-    { label: "Phone Number",            done: Boolean(profile?.phone) },
-    { label: "Government ID (KYC)",     done: isKycVerified },
+    { label: "Email Verified",      done: Boolean(user.email_confirmed_at) },
+    { label: "Legal Name Set",      done: Boolean(profile?.full_name) },
+    { label: "Phone Number",        done: Boolean(profile?.phone) },
+    { label: "Date of Birth",       done: Boolean(profile?.date_of_birth) },
+    { label: "Government ID (KYC)", done: hasGovIdSubmission },
   ];
   const verificationProgress = Math.round((verificationItems.filter((i) => i.done).length / verificationItems.length) * 100);
-  const canApplyLoan = verificationProgress === 100;
+  const profileComplete = verificationProgress === 100;
+  const canApplyLoan = profileComplete && isKycVerified;
 
   // Active = any loan with money disbursed that still needs repayment
   const REPAYABLE_STATUSES = ["active", "funded", "approved"];
@@ -105,15 +109,15 @@ export default async function BorrowerDashboardPage() {
       }
       currentPath="/dashboard/borrower"
       profilePath="/dashboard/borrower/profile"
-      profileSummary={canApplyLoan ? undefined : {
+      profileSummary={profileComplete ? undefined : {
         completion: verificationProgress,
-        kycStatus: String(profile?.kyc_status ?? "pending"),
-        warningText: profile?.kyc_status === "submitted" && !isKycVerified
+        kycStatus,
+        warningText: kycStatus === "submitted" && !isKycVerified
           ? "Your documents are under admin review."
           : "Complete your profile to unlock borrowing.",
         requiredItems: verificationItems.filter((i) => !i.done).map((i) => i.label),
       }}
-      showProfileAlert={!canApplyLoan}
+      showProfileAlert={!profileComplete}
       links={borrowerNavLinks}
     >
       <div className="workspace-stack">
@@ -156,7 +160,7 @@ export default async function BorrowerDashboardPage() {
               </div>
             ))}
           </div>
-          {!canApplyLoan && (
+          {!profileComplete && (
             <a
               href="/dashboard/borrower/profile"
               style={{ display: "inline-block", marginTop: "1rem", fontSize: "0.82rem", color: "#7e2fd0", fontWeight: 600, textDecoration: "underline" }}
@@ -243,13 +247,15 @@ export default async function BorrowerDashboardPage() {
             <p className="workspace-card-copy" style={{ margin: "0.5rem auto", maxWidth: "380px" }}>
               {canApplyLoan
                 ? "You're verified and ready! Head to 'Apply for Loan' to submit your first loan request."
-                : "Complete your verification first, then you can apply for a loan."}
+                : profileComplete
+                  ? "Your profile is complete and KYC is under review. You can apply once verification is approved."
+                  : "Complete your verification first, then you can apply for a loan."}
             </p>
             <a
               href={canApplyLoan ? "/dashboard/borrower/loans" : "/dashboard/borrower/profile"}
               style={{ display: "inline-block", marginTop: "1rem", padding: "0.6rem 1.5rem", background: "#7e2fd0", color: "#fff", borderRadius: "0.5rem", fontSize: "0.875rem", fontWeight: 700, textDecoration: "none" }}
             >
-              {canApplyLoan ? "Apply for a Loan →" : "Complete Profile →"}
+              {canApplyLoan ? "Apply for a Loan →" : profileComplete ? "KYC Under Review" : "Complete Profile →"}
             </a>
           </article>
         )}

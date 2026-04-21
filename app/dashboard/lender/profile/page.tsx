@@ -5,6 +5,7 @@ import {
   getLenderDashboardMetrics,
   presentLenderMetrics,
 } from "@/lib/dashboard/metrics";
+import { lenderNavLinks } from "@/lib/dashboard/lender-links";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
 
 const KYC_CONFIG: Record<
@@ -43,13 +44,7 @@ export default async function LenderProfilePage() {
       userName={String(user.user_metadata?.full_name ?? profile?.full_name ?? "")}
       metrics={presentLenderMetrics(metrics)}
       currentPath="/dashboard/lender/profile"
-      links={[
-        { href: "/dashboard/lender",          label: "Home" },
-        { href: "/dashboard/lender/pools",    label: "Pools" },
-        { href: "/dashboard/lender/portfolio", label: "Portfolio" },
-        { href: "/dashboard/lender/risk",     label: "Risk" },
-        { href: "/dashboard/lender/profile",  label: "Profile & Settings" },
-      ]}
+      links={lenderNavLinks}
     >
       <div className="workspace-grid workspace-grid--two">
         <article className="workspace-card">

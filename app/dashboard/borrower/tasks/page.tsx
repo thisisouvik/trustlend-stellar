@@ -11,7 +11,7 @@ export default async function BorrowerTasksPage() {
   const metrics = await getBorrowerDashboardMetrics(user.id);
   const supabase = await getServerSupabaseClient();
 
-  const [profileRes, completedEventsRes, snapshotRes] = supabase
+  const [profileRes, completedEventsRes] = supabase
     ? await Promise.all([
         supabase
           .from("profiles")
@@ -24,20 +24,14 @@ export default async function BorrowerTasksPage() {
           .select("source_key, source_id")
           .eq("user_id", user.id)
           .eq("source_type", "task_completion"),
-        // Current trust score
-        supabase
-          .from("reputation_snapshots")
-          .select("score_total")
-          .eq("user_id", user.id)
-          .maybeSingle(),
       ])
-    : [{ data: null }, { data: [] }, { data: null }];
+    : [{ data: null }, { data: [] }];
 
   const profile          = profileRes.data;
   const completedTaskIds = new Set(
     (completedEventsRes.data ?? []).map((e) => String(e.source_key ?? e.source_id ?? ""))
   );
-  const currentScore     = snapshotRes.data?.score_total ?? 250;
+  const currentScore     = metrics.reputationScore;
 
   // Merge completion status into the canonical task list
   const platformTasks = getPlatformTasks().map((t) => ({

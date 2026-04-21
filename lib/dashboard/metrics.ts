@@ -23,11 +23,9 @@ export interface AdminDashboardMetrics {
 }
 
 function toCurrency(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
+  return `${new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
-  }).format(value);
+  }).format(value)} XLM`;
 }
 
 function toPercentage(value: number): string {
@@ -71,19 +69,20 @@ export async function getBorrowerDashboardMetrics(userId: string): Promise<Borro
   }
 
   try {
-    const [snapshotRes, loansRes] = await Promise.all([
+    const [eventsRes, loansRes] = await Promise.all([
       supabase
-        .from("reputation_snapshots")
-        .select("score_total")
-        .eq("user_id", userId)
-        .maybeSingle(),
+        .from("reputation_events")
+        .select("points_delta")
+        .eq("user_id", userId),
       supabase
         .from("loans")
         .select("status")
         .eq("borrower_id", userId),
     ]);
 
-    const reputation = snapshotRes.data?.score_total ?? 250;
+    const events = eventsRes.data ?? [];
+    const reputationPoints = events.reduce((sum, row) => sum + Number(row.points_delta ?? 0), 0);
+    const reputation = Math.max(0, 250 + reputationPoints);
     const loans = loansRes.data ?? [];
 
     const pendingLoans  = loans.filter((loan) => loan.status === "requested").length;
@@ -145,12 +144,38 @@ export async function getLenderDashboardMetrics(userId: string): Promise<LenderD
       } catch { return false; }
     });
 
+    // We must group by loan (ref_id) so a newly funded loan doesn't wipe out past profits!
+    const loanProfitMap = new Map<string, { deployed: number; received: number }>();
+
+    for (const tx of (p2pFunds ?? [])) {
+      const id = String(tx.ref_id);
+      const cur = loanProfitMap.get(id) ?? { deployed: 0, received: 0 };
+      cur.deployed += Number(tx.amount || 0);
+      loanProfitMap.set(id, cur);
+    }
+
+    for (const tx of lenderRepays) {
+      let id = "";
+      try {
+        const meta = JSON.parse(String(tx.metadata || "{}"));
+        id = meta.loanId ? String(meta.loanId) : "";
+      } catch {}
+      if (!id) continue;
+
+      const cur = loanProfitMap.get(id) ?? { deployed: 0, received: 0 };
+      cur.received += Number(tx.amount || 0);
+      loanProfitMap.set(id, cur);
+    }
+
+    let p2pProfit = 0;
+    for (const { deployed, received } of loanProfitMap.values()) {
+      p2pProfit += Math.max(0, received - deployed);
+    }
+
     const p2pDeployed = (p2pFunds ?? []).reduce((s, t) => s + Number(t.amount || 0), 0);
-    const p2pReceived = lenderRepays.reduce((s, t) => s + Number(t.amount || 0), 0);
-    const p2pProfit = Math.max(0, p2pReceived - p2pDeployed);
 
     // Get active loan count from the funded loans
-    const loanIds = Array.from(new Set((p2pFunds ?? []).map(t => String(t.ref_id))));
+    const loanIds = Array.from(loanProfitMap.keys());
     let p2pActiveCount = 0;
     if (loanIds.length > 0) {
       const { data: loans } = await srClient

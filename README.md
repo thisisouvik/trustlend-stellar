@@ -19,7 +19,7 @@
 
 **Project Overview Documentation:** [View in Google Docs](https://docs.google.com/document/d/1bnVoG9n4WajP-05TWVWZhFh036hFgK5KwmklnX8762I/edit?usp=sharing)
 
-## Demo Video : [Youtube Video Link](https://www.youtube.com/watch?v=Vmrn6shwWd4)
+## Demo Video : [Youtube Video Link](https://youtu.be/V-SQxunQLow)
 
 </div>
 

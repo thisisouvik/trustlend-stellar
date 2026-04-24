@@ -138,11 +138,11 @@
 
 | User Name | User Email | User Wallet Address | User Feedback | Overall Rating | NPS Score | Commit ID |
 |-----------|-----------|-------------------|---------------|---------|-----------|-----------|
-| Souvik Mandal | souvikmandals10@gmail.com | GAG3SUKHIF7VAWGTDRH52XETMLZXXNXBAZLLXHSLXAQPOBBCN43YLKR4 | **Critical: KYC verification must be strengthened with stricter validation and fraud detection mechanisms to prevent scams and ensure platform security.** | 5/5 | 9/10 | [daa8141](../../commit/daa8141) |
-| Saurav Suman | sauravsumanjnvm9@gmail.com | GAKJ6VMQSJQ7S55YNQUSBVETOTANGE3NTG4CHTW3IPOEAT7SXG6UZEWB | **Important: Enhanced security measures needed for lender protection in Pool section to safeguard interest preservation and mitigate default risks.** | 4/5 | 8/10 | [899efd2](../../commit/899efd2) |
-| Soumen Mandal | prosoumen27@gmail.com | GCJWSEXMUW3B2SHKMAGKQ5ZD56V2YHHTRGYETS3WV2IN3ISXKVRWLSP7 | Positive feedback - Platform functionality meets expectations and delivers core value proposition effectively. | 4/5 | 8/10 | [6fe3dec](../../commit/6fe3dec) |
-| Subham Singha | subhamsingha220706@gmail.com | GDFKLTB5WKKDDJ2NRU2V5OG476HYEGWT4UFV7BID7BNGWZGRZYL3LL6Z | **Important: Lender-side safety mechanisms must be prioritized to ensure fund protection and improve trust in the platform.** | 4/5 | 7/10 | [cfa799e](../../commit/cfa799e) |
-| Pritam Dey | deypritam201@gmail.com | GA4SXARZZ4RPF6N7VOAH3B5OKMFAP3FGY6M6TO3DZJL4TMU2KOVBHCIY | Positive feedback - Innovative platform concept with strong potential to revolutionize micro-lending ecosystem. | 5/5 | 9/10 | [6fe3dec](../../commit/6fe3dec) |
+| Souvik Mandal | souvikmandals10@gmail.com | GAG3SUKHIF7VAWGTDRH52XETMLZXXNXBAZLLXHSLXAQPOBBCN43YLKR4 | **Critical: KYC verification must be strengthened with stricter validation and fraud detection mechanisms to prevent scams and ensure platform security.** | 5/5 | 9/10 | [e816321](../../commit/e816321) |
+| Saurav Suman | sauravsumanjnvm9@gmail.com | GAKJ6VMQSJQ7S55YNQUSBVETOTANGE3NTG4CHTW3IPOEAT7SXG6UZEWB | **Important: Enhanced security measures needed for lender protection in Pool section to safeguard interest preservation and mitigate default risks.** | 4/5 | 8/10 | [f7d28b7](../../commit/f7d28b7) |
+| Soumen Mandal | prosoumen27@gmail.com | GCJWSEXMUW3B2SHKMAGKQ5ZD56V2YHHTRGYETS3WV2IN3ISXKVRWLSP7 | Positive feedback - Platform functionality meets expectations and delivers core value proposition effectively. | 4/5 | 8/10 | [c5d5541](../../commit/c5d5541) |
+| Subham Singha | subhamsingha220706@gmail.com | GDFKLTB5WKKDDJ2NRU2V5OG476HYEGWT4UFV7BID7BNGWZGRZYL3LL6Z | **Important: Lender-side safety mechanisms must be prioritized to ensure fund protection and improve trust in the platform.** | 4/5 | 7/10 | [32faa31](../../commit/32faa31) |
+| Pritam Dey | deypritam201@gmail.com | GA4SXARZZ4RPF6N7VOAH3B5OKMFAP3FGY6M6TO3DZJL4TMU2KOVBHCIY | Positive feedback - Innovative platform concept with strong potential to revolutionize micro-lending ecosystem. | 5/5 | 9/10 | [dc67c7c](../../commit/dc67c7c) |
 
 ---
 

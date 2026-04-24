@@ -488,6 +488,22 @@ This next phase is prioritized from collected user feedback around identity trus
 
 ---
 
+## Level 5: User Feedback Validation
+
+### User Testers & Contributors
+
+Special thanks to our Level 5 user onboarding cohort for valuable feedback:
+
+- **Souvik Mandal** (Borrower) - Critical insights on KYC security and fraud prevention
+- **Saurav Suman** (Lender) - Important feedback on pool security and lender protection
+- **Soumen Mandal** (Borrower) - Positive validation of platform functionality and core value
+- **Subham Singha** (Lender) - Critical recommendations for lender safety mechanisms
+- **Pritam Dey** (Borrower) - Encouragement on platform innovation and ecosystem potential
+
+Their feedback has directly shaped security improvements and validated our product-market fit.
+
+---
+
 ## License
 
 MIT (project-level license policy).

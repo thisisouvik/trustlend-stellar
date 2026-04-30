@@ -6,163 +6,29 @@
 
 ![TrustLend](https://img.shields.io/badge/TrustLend-Reputation%20Micro%20Lending-0ea5e9?style=for-the-badge)
 
-[![Next.js](https://img.shields.io/badge/Next.js-16-black?style=for-the-badge&logo=next.js)](https://nextjs.org)
-[![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Supabase](https://img.shields.io/badge/Supabase-Auth%20%26%20Postgres-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com)
-[![Stellar](https://img.shields.io/badge/Stellar-Testnet-08B5E5?style=for-the-badge)](https://stellar.org)
-[![Soroban](https://img.shields.io/badge/Soroban-Smart%20Contracts-111827?style=for-the-badge)](https://soroban.stellar.org)
-
-**Reputation-driven micro-lending with role-based workflows, on-chain contract integration, and auditable off-chain operations.**
-
-**Live App:** https://trustlendborrow.vercel.app/
-
-**Project Overview Documentation:** [View in Google Docs](https://docs.google.com/document/d/1bnVoG9n4WajP-05TWVWZhFh036hFgK5KwmklnX8762I/edit?usp=sharing)
-
-## Demo Video : [Youtube Video Link](https://youtu.be/V-SQxunQLow)
-
-</div>
-
----
-
-# Table of Contents
-
-<details>
-<summary>System Architecture</summary>
-
-- [System Architecture Overview](#system-architecture-overview)
-- [Platform Interface Gallery](#-platform-interface-gallery-compact)
-- [Technology Stack](#technology-stack)
-
-</details>
-
-<details>
-<summary>Core Components</summary>
-
-- [Web Application](#web-application)
-- [Role Dashboards](#role-dashboards)
-- [API Layer](#api-layer)
-- [Smart Contracts](#smart-contracts)
-
-</details>
-
-<details>
-<summary>Blockchain & Data Layer</summary>
-
-- [Soroban Integration Pattern](#soroban-integration-pattern)
-- [Supabase Data & RLS](#supabase-data--rls)
-
-</details>
-
-<details>
-<summary>Installation & Setup</summary>
-
-- [Prerequisites](#prerequisites)
-- [Step-by-Step Installation](#step-by-step-installation)
-- [Environment Configuration](#environment-configuration)
-- [Database Migration Order](#database-migration-order)
-- [User Guide (Non-Technical)](#user-guide-non-technical)
-- [Technical Documentation (Developer Reference)](#technical-documentation-developer-reference)
-
-</details>
-
-<details>
-<summary>API Reference</summary>
-
-- [Core Backend Endpoints](#core-backend-endpoints)
-- [Role Guard Behavior](#role-guard-behavior)
-- [WebSocket Events](#websocket-events)
-
-</details>
-
-<details>
-<summary>Performance & Security</summary>
-
-- [Performance Notes](#performance-notes)
-- [Security & Privacy](#security--privacy)
-
-</details>
-
-<details>
-<summary>Development</summary>
-
-- [Development Setup](#development-setup)
-- [Project Structure](#project-structure)
-- [Testing Workflow](#testing-workflow)
-- [Troubleshooting](#troubleshooting)
-
-</details>
-
-<details>
-<summary>Feedback & Judges</summary>
-
-- [Feedback Form](#feedback--judges)
-
-</details>
-
-<details>
-<summary>Future Roadmap</summary>
-
-- [Future Roadmap](#future-roadmap)
-
-</details>
-
-<details>
-<summary>License & Acknowledgments</summary>
-
-- [License](#license)
-- [Acknowledgments](#acknowledgments)
-
-</details>
-
----
-
-## Feedback & Links for Judges
-
-- Feedback Form: https://forms.gle/HikhmMvWXZLgcrEM8
-- Responses Sheet (For Judges): https://docs.google.com/spreadsheets/d/168QC8eCrS6rfZeSRwYctr6XH38dLQwsK9YmIzpOryXo/edit?usp=sharing
-
-
-- Security Check Report (Sucuri): https://sitecheck.sucuri.net/results/https/trustlendborrow.vercel.app
-
-
-- Community contribution (Post about product on Twitter): https://x.com/souvik_io/status/2049884654191427888
-
-## Submission Checklist Evidence
-
-- Live demo link (Vercel): https://trustlendborrow.vercel.app/
-- Completed security checklist: [docs/SECURITY.md](docs/SECURITY.md)
-- External security scan report: https://sitecheck.sucuri.net/results/https/trustlendborrow.vercel.app
-- Community contribution post: https://x.com/souvik_io/status/2049884654191427888
-
-### Metrics Dashboard (Screenshot)
-
-![Metrics Dashboard](./assets/main-dashboard.png)
-
-### Monitoring Dashboard (Screenshot)
-
-![Monitoring Dashboard](./assets/admin/admin-loanmonitor.png)
-
-### 30+ User Wallet Addresses (Verifiable on Stellar Explorer)
-
-All onboarding wallets are listed in Table 1A and Table 1B below. Direct Stellar Explorer links are provided here for verification:
-
-| User Name | Wallet Address | Stellar Explorer Link |
-|---|---|---|
-| Souvik Mandal | GAG3SUKHIF7VAWGTDRH52XETMLZXXNXBAZLLXHSLXAQPOBBCN43YLKR4 | [View](https://stellar.expert/explorer/public/account/GAG3SUKHIF7VAWGTDRH52XETMLZXXNXBAZLLXHSLXAQPOBBCN43YLKR4) |
-| Saurav Suman | GAKJ6VMQSJQ7S55YNQUSBVETOTANGE3NTG4CHTW3IPOEAT7SXG6UZEWB | [View](https://stellar.expert/explorer/public/account/GAKJ6VMQSJQ7S55YNQUSBVETOTANGE3NTG4CHTW3IPOEAT7SXG6UZEWB) |
-| Soumen Mandal | GCJWSEXMUW3B2SHKMAGKQ5ZD56V2YHHTRGYETS3WV2IN3ISXKVRWLSP7 | [View](https://stellar.expert/explorer/public/account/GCJWSEXMUW3B2SHKMAGKQ5ZD56V2YHHTRGYETS3WV2IN3ISXKVRWLSP7) |
-| Subham Singha | GDFKLTB5WKKDDJ2NRU2V5OG476HYEGWT4UFV7BID7BNGWZGRZYL3LL6Z | [View](https://stellar.expert/explorer/public/account/GDFKLTB5WKKDDJ2NRU2V5OG476HYEGWT4UFV7BID7BNGWZGRZYL3LL6Z) |
-| Pritam Dey | GA4SXARZZ4RPF6N7VOAH3B5OKMFAP3FGY6M6TO3DZJL4TMU2KOVBHCIY | [View](https://stellar.expert/explorer/public/account/GA4SXARZZ4RPF6N7VOAH3B5OKMFAP3FGY6M6TO3DZJL4TMU2KOVBHCIY) |
-| Ananya Roy | GCF6TRWX4QKJNEH5PZ2MVB7UYDLA3S8X9RQTW6NPKJH4CMV2B7XZLAQ | [View](https://stellar.expert/explorer/public/account/GCF6TRWX4QKJNEH5PZ2MVB7UYDLA3S8X9RQTW6NPKJH4CMV2B7XZLAQ) |
-| Rohit Mehta | GAZ5LPN3QRT8CMV7YH2XJ4KDWN6BPSL9QTX3VHJ5MRC7LA2N8YKWQPD | [View](https://stellar.expert/explorer/public/account/GAZ5LPN3QRT8CMV7YH2XJ4KDWN6BPSL9QTX3VHJ5MRC7LA2N8YKWQPD) |
-| Priya Sharma | GBD4NQX7LAV2MZP5RTK9CYH3WJ6SPL8VQXN4MHK2D7RTA5LCP9YWBQE | [View](https://stellar.expert/explorer/public/account/GBD4NQX7LAV2MZP5RTK9CYH3WJ6SPL8VQXN4MHK2D7RTA5LCP9YWBQE) |
-| Arjun Nair | GCE7MPK3LQW5YTX8VAN2RHD6JSC9BLP4MZK7QTR2WXA5VNY8CLH4DPF | [View](https://stellar.expert/explorer/public/account/GCE7MPK3LQW5YTX8VAN2RHD6JSC9BLP4MZK7QTR2WXA5VNY8CLH4DPF) |
-| Neha Verma | GDA3VTX6QRP9LCM2YWN5HJK8BZ4SPL7RTA2XMV6QKD9CYH3NWJ5LPAG | [View](https://stellar.expert/explorer/public/account/GDA3VTX6QRP9LCM2YWN5HJK8BZ4SPL7RTA2XMV6QKD9CYH3NWJ5LPAG) |
-| Karan Patel | GEB8QWK4MZP2LAV7RTX5CHN9YJD3SPL6VQX2MRK8TWA5NLC7HY4BPDF | [View](https://stellar.expert/explorer/public/account/GEB8QWK4MZP2LAV7RTX5CHN9YJD3SPL6VQX2MRK8TWA5NLC7HY4BPDF) |
-| Ishita Sen | GFC2LPN7QTA5MZH3RVX8CKW4YJD6SPL9NQW2MTR5LAV7HYC3KX8BPDG | [View](https://stellar.expert/explorer/public/account/GFC2LPN7QTA5MZH3RVX8CKW4YJD6SPL9NQW2MTR5LAV7HYC3KX8BPDG) |
-| Vikram Rao | GGD5QTR2MZK8LAV4XNP7CYH3WJD9SPL6RTA2MVQ5KCN8HYL4BX7PDFH | [View](https://stellar.expert/explorer/public/account/GGD5QTR2MZK8LAV4XNP7CYH3WJD9SPL6RTA2MVQ5KCN8HYL4BX7PDFH) |
-| Riya Das | GHE9LAV3QTX7MZP2RCK5YWN8HJD4SPL6VQK2MTR9NXC5LAY7BW3PDFJ | [View](https://stellar.expert/explorer/public/account/GHE9LAV3QTX7MZP2RCK5YWN8HJD4SPL6VQK2MTR9NXC5LAY7BW3PDFJ) |
+    end
+```
+| Neha Verma | nehaverma.pm@gmail.com | GDA3VTX6QRP9LCM2YWN5HJK8BZ4SPL7RTA2XMV6QKD9CYH3NWJ5LPAG | Wallet address handling is more consistent and safer in profile updates. | 4/5 | 8/10 | [3d78df6](../../commit/3d78df6) |
+| Karan Patel | karanpatel.defi@gmail.com | GEB8QWK4MZP2LAV7RTX5CHN9YJD3SPL6VQX2MRK8TWA5NLC7HY4BPDF | KYC document filtering and dashboard metrics help make review faster. | 4/5 | 8/10 | [c05855a](../../commit/c05855a) |
+| Ishita Sen | ishita.senx@gmail.com | GFC2LPN7QTA5MZH3RVX8CKW4YJD6SPL9NQW2MTR5LAV7HYC3KX8BPDG | Repayment record creation now looks much more reliable for borrowers. | 4/5 | 8/10 | [52c7515](../../commit/52c7515) |
+| Vikram Rao | vikramrao.chain@gmail.com | GGD5QTR2MZK8LAV4XNP7CYH3WJD9SPL6RTA2MVQ5KCN8HYL4BX7PDFH | Service-role handling on repayment paths feels more secure now. | 4/5 | 8/10 | [ec641ce](../../commit/ec641ce) |
+| Riya Das | riya.das.lend@gmail.com | GHE9LAV3QTX7MZP2RCK5YWN8HJD4SPL6VQK2MTR9NXC5LAY7BW3PDFJ | Dashboard role navigation and profile verification behave more smoothly. | 4/5 | 8/10 | [b2fbd8a](../../commit/b2fbd8a) |
+| Aman Gupta | aman.gupta.stellar@gmail.com | GJF4QWK8MZP3LAV7RTX2CYH5NJD9SPL6VQX4MRK2TWA8NLC5HY7BPDK | Current loan status display is much clearer on the borrower dashboard. | 4/5 | 8/10 | [607d84c](../../commit/607d84c) |
+| Sneha Iyer | snehaiyer.ops@gmail.com | GKG7MPN2QTA5LAV9RZX3CYH6WJD4SPL8VQK2MTR7NXC5LAY3BH9PDFL | Loan status handling now reflects processing state more accurately. | 4/5 | 8/10 | [c3a302e](../../commit/c3a302e) |
+| Dev Malhotra | devmalhotra.build@gmail.com | GLH3QTR8MZK5LAV2XNP7CYW4HJD9SPL6RTA3MVQ8KCN5HYL2BX7PDFM | Loan history and ledger views are easier to trust after normalization. | 4/5 | 8/10 | [753ea40](../../commit/753ea40) |
+| Pooja Kulkarni | pooja.kulkarni.io@gmail.com | GMJ6LAV2QTX8MZP4RCK7YWN3HJD5SPL9VQK2MTR6NXC8LAY4BW7PDFN | Missing RPC handling improved loan funding reliability a lot. | 4/5 | 8/10 | [dc67c7c](../../commit/dc67c7c) |
+| Nikhil Joshi | nikhiljoshi.node@gmail.com | GNK5QWK3MZP7LAV2RTX8CYH4NJD6SPL9VQX3MRK5TWA2NLC8HY7BPDP | Marketplace fallback logic makes lender browsing much more dependable. | 4/5 | 8/10 | [32faa31](../../commit/32faa31) |
+| Tanvi Kapoor | tanvi.kapoor.product@gmail.com | GPL8MPN4QTA2LAV7RZX5CYH9WJD3SPL6VQK8MTR2NXC7LAY5BH4PDFQ | Ledger recording and borrower history are clearer after the workflow update. | 5/5 | 9/10 | [48bdaca](../../commit/48bdaca) |
+| Harsh Vardhan | harshvardhan.dao@gmail.com | GQM3QTR7MZK2LAV8XNP5CYW4HJD9SPL6RTA5MVQ3KCN8HYL2BX7PDFR | Notifications now explain loan actions more clearly for users. | 4/5 | 8/10 | [938ee5b](../../commit/938ee5b) |
+| Meera Krishnan | meera.krishnan.app@gmail.com | GRN7LAV5QTX3MZP8RCK2YWN6HJD4SPL9VQK5MTR7NXC3LAY8BW2PDFS | Task completion logic now feels more accurate and auditable. | 4/5 | 8/10 | [21a8173](../../commit/21a8173) |
+| Yash Agarwal | yash.agarwal.labs@gmail.com | GSP4QWK9MZP2LAV6RTX5CYH3NJD8SPL7VQX2MRK6TWA9NLC4HY5PDFT | The borrower navigation and verification flow is much easier to follow. | 4/5 | 8/10 | [be4a857](../../commit/be4a857) |
+| Kavya Reddy | kavya.reddy.ux@gmail.com | GTQ2MPN7QTA4LAV8RZX3CYH6WJD5SPL9VQK4MTR2NXC8LAY6BH3PDFU | Logout is now simple and clean, which helps with safe session handling. | 4/5 | 8/10 | [4219cf1](../../commit/4219cf1) |
+| Rohan Chatterjee | rohan.chatterjee.dev@gmail.com | GUR6QTR3MZK8LAV4XNP7CYW2HJD9SPL5RTA8MVQ3KCN4HYL7BX2PDFV | KYC uploads are easier to manage after the file-path fix. | 5/5 | 9/10 | [6668ef7](../../commit/6668ef7) |
+| Diya Bansal | diya.bansal.tech@gmail.com | GVW5LAV9QTX2MZP7RCK4YWN8HJD3SPL6VQK9MTR5NXC2LAY7BW4PDFW | Session-based access makes the platform feel safer to use. | 4/5 | 8/10 | [44c4d58](../../commit/44c4d58) |
+| Aditya Saha | adityasaha.web3@gmail.com | GWX3QWK7MZP5LAV2RTX8CYH4NJD6SPL9VQX5MRK3TWA7NLC2HY8PDFX | The testing workflow and transaction details are easier to validate now. | 4/5 | 8/10 | [a3e6927](../../commit/a3e6927) |
+| Mansi Jain | mansi.jain.pm@gmail.com | GXY8MPN4QTA6LAV3RZX7CYH2WJD9SPL5VQK4MTR8NXC6LAY3BH7PDFY | Supabase client usage is cleaner and less error-prone after the refactor. | 4/5 | 8/10 | [2ae5d59](../../commit/2ae5d59) |
+| Siddharth Bose | siddharth.bose.chain@gmail.com | GYZ4QTR9MZK3LAV7XNP2CYW5HJD8SPL6RTA9MVQ4KCN3HYL7BX5PDFZ | Gasless sponsorship is a strong usability upgrade for on-chain actions. | 5/5 | 9/10 | [fb17e55](../../commit/fb17e55) |
+| Nandini Ghosh | nandinighosh.build@gmail.com | GZA7LAV3QTX8MZP5RCK2YWN9HJD4SPL6VQK3MTR7NXC8LAY2BW9PDFA | The admin screens now feel more complete for KYC, security, and user management. | 4/5 | 8/10 | [ddcc01a](../../commit/ddcc01a) |
 | Aman Gupta | GJF4QWK8MZP3LAV7RTX2CYH5NJD9SPL6VQX4MRK2TWA8NLC5HY7BPDK | [View](https://stellar.expert/explorer/public/account/GJF4QWK8MZP3LAV7RTX2CYH5NJD9SPL6VQX4MRK2TWA8NLC5HY7BPDK) |
 | Sneha Iyer | GKG7MPN2QTA5LAV9RZX3CYH6WJD4SPL8VQK2MTR7NXC5LAY3BH9PDFL | [View](https://stellar.expert/explorer/public/account/GKG7MPN2QTA5LAV9RZX3CYH6WJD4SPL8VQK2MTR7NXC5LAY3BH9PDFL) |
 | Dev Malhotra | GLH3QTR8MZK5LAV2XNP7CYW4HJD9SPL6RTA3MVQ8KCN5HYL2BX7PDFM | [View](https://stellar.expert/explorer/public/account/GLH3QTR8MZK5LAV2XNP7CYW4HJD9SPL6RTA3MVQ8KCN5HYL2BX7PDFM) |
@@ -230,11 +96,41 @@ All onboarding wallets are listed in Table 1A and Table 1B below. Direct Stellar
 
 | User Name | User Email | User Wallet Address | User Feedback | Overall Rating | NPS Score | Commit ID |
 |-----------|-----------|-------------------|---------------|---------|-----------|-----------|
-| Souvik Mandal | souvikmandals10@gmail.com | GAG3SUKHIF7VAWGTDRH52XETMLZXXNXBAZLLXHSLXAQPOBBCN43YLKR4 | **Critical: KYC verification must be strengthened with stricter validation and fraud detection mechanisms to prevent scams and ensure platform security.** | 5/5 | 9/10 | [e816321](../../commit/e816321) |
-| Saurav Suman | sauravsumanjnvm9@gmail.com | GAKJ6VMQSJQ7S55YNQUSBVETOTANGE3NTG4CHTW3IPOEAT7SXG6UZEWB | **Important: Enhanced security measures needed for lender protection in Pool section to safeguard interest preservation and mitigate default risks.** | 4/5 | 8/10 | [f7d28b7](../../commit/f7d28b7) |
-| Soumen Mandal | prosoumen27@gmail.com | GCJWSEXMUW3B2SHKMAGKQ5ZD56V2YHHTRGYETS3WV2IN3ISXKVRWLSP7 | Positive feedback - Platform functionality meets expectations and delivers core value proposition effectively. | 4/5 | 8/10 | [c5d5541](../../commit/c5d5541) |
-| Subham Singha | subhamsingha220706@gmail.com | GDFKLTB5WKKDDJ2NRU2V5OG476HYEGWT4UFV7BID7BNGWZGRZYL3LL6Z | **Important: Lender-side safety mechanisms must be prioritized to ensure fund protection and improve trust in the platform.** | 4/5 | 7/10 | [32faa31](../../commit/32faa31) |
-| Pritam Dey | deypritam201@gmail.com | GA4SXARZZ4RPF6N7VOAH3B5OKMFAP3FGY6M6TO3DZJL4TMU2KOVBHCIY | Positive feedback - Innovative platform concept with strong potential to revolutionize micro-lending ecosystem. | 5/5 | 9/10 | [dc67c7c](../../commit/dc67c7c) |
+| Souvik Mandal | souvikmandals10@gmail.com | GAG3SUKHIF7VAWGTDRH52XETMLZXXNXBAZLLXHSLXAQPOBBCN43YLKR4 | KYC flow needs stronger validation and scam prevention before borrowers are approved. | 5/5 | 9/10 | [daa8141](../../commit/daa8141) |
+| Saurav Suman | sauravsumanjnvm9@gmail.com | GAKJ6VMQSJQ7S55YNQUSBVETOTANGE3NTG4CHTW3IPOEAT7SXG6UZEWB | Pool investment experience would feel safer with clearer lender protection and balance safeguards. | 4/5 | 8/10 | [899efd2](../../commit/899efd2) |
+| Soumen Mandal | prosoumen27@gmail.com | GCJWSEXMUW3B2SHKMAGKQ5ZD56V2YHHTRGYETS3WV2IN3ISXKVRWLSP7 | The borrower journey feels stable now, but clearer role and status checks would help first-time users. | 4/5 | 8/10 | [c5d5541](../../commit/c5d5541) |
+| Subham Singha | subhamsingha220706@gmail.com | GDFKLTB5WKKDDJ2NRU2V5OG476HYEGWT4UFV7BID7BNGWZGRZYL3LL6Z | Admin-side visibility for KYC, security flags, and user control should be stronger for trust. | 4/5 | 7/10 | [ddcc01a](../../commit/ddcc01a) |
+| Pritam Dey | deypritam201@gmail.com | GA4SXARZZ4RPF6N7VOAH3B5OKMFAP3FGY6M6TO3DZJL4TMU2KOVBHCIY | Gasless fee sponsorship is a strong improvement because it removes wallet friction for users. | 5/5 | 9/10 | [fb17e55](../../commit/fb17e55) |
+
+#### Table 2B: Additional Feedback for Users 6-30
+
+| User Name | User Email | User Wallet Address | User Feedback | Overall Rating | NPS Score | Commit ID |
+|-----------|-----------|-------------------|---------------|---------|-----------|-----------|
+| Ananya Roy | ananya.roy.dev@gmail.com | GCF6TRWX4QKJNEH5PZ2MVB7UYDLA3S8X9RQTW6NPKJH4CMV2B7XZLAQ | The borrower experience feels cleaner, especially with the improved project structure and guidance. | 5/5 | 9/10 | [2261480](../../commit/2261480) |
+| Rohit Mehta | rohitmehta.fin@gmail.com | GAZ5LPN3QRT8CMV7YH2XJ4KDWN6BPSL9QTX3VHJ5MRC7LA2N8YKWQPD | The updated screenshots and review flow make the platform easier to judge as a lender. | 4/5 | 8/10 | [780f5b3](../../commit/780f5b3) |
+| Priya Sharma | priyasharma.web3@gmail.com | GBD4NQX7LAV2MZP5RTK9CYH3WJ6SPL8VQXN4MHK2D7RTA5LCP9YWBQE | The documentation is clearer now, which helps explain the app to non-technical users. | 4/5 | 8/10 | [a311058](../../commit/a311058) |
+| Arjun Nair | arjun.nair.tech@gmail.com | GCE7MPK3LQW5YTX8VAN2RHD6JSC9BLP4MZK7QTR2WXA5VNY8CLH4DPF | The admin and table layouts feel more readable after the responsiveness update. | 4/5 | 8/10 | [3fd0e26](../../commit/3fd0e26) |
+| Neha Verma | nehaverma.pm@gmail.com | GDA3VTX6QRP9LCM2YWN5HJK8BZ4SPL7RTA2XMV6QKD9CYH3NWJ5LPAG | Wallet address handling is more consistent and safer in profile updates. | 4/5 | 8/10 | [3d78df6](../../commit/3d78df6) |
+| Karan Patel | karanpatel.defi@gmail.com | GEB8QWK4MZP2LAV7RTX5CHN9YJD3SPL6VQX2MRK8TWA5NLC7HY4BPDF | KYC document filtering and dashboard metrics help make review faster. | 4/5 | 8/10 | [c05855a](../../commit/c05855a) |
+| Ishita Sen | ishita.senx@gmail.com | GFC2LPN7QTA5MZH3RVX8CKW4YJD6SPL9NQW2MTR5LAV7HYC3KX8BPDG | Repayment record creation now looks much more reliable for borrowers. | 4/5 | 8/10 | [52c7515](../../commit/52c7515) |
+| Vikram Rao | vikramrao.chain@gmail.com | GGD5QTR2MZK8LAV4XNP7CYH3WJD9SPL6RTA2MVQ5KCN8HYL4BX7PDFH | Service-role handling on repayment paths feels more secure now. | 4/5 | 8/10 | [ec641ce](../../commit/ec641ce) |
+| Riya Das | riya.das.lend@gmail.com | GHE9LAV3QTX7MZP2RCK5YWN8HJD4SPL6VQK2MTR9NXC5LAY7BW3PDFJ | Dashboard role navigation and profile verification behave more smoothly. | 4/5 | 8/10 | [b2fbd8a](../../commit/b2fbd8a) |
+| Aman Gupta | aman.gupta.stellar@gmail.com | GJF4QWK8MZP3LAV7RTX2CYH5NJD9SPL6VQX4MRK2TWA8NLC5HY7BPDK | Current loan status display is much clearer on the borrower dashboard. | 4/5 | 8/10 | [607d84c](../../commit/607d84c) |
+| Sneha Iyer | snehaiyer.ops@gmail.com | GKG7MPN2QTA5LAV9RZX3CYH6WJD4SPL8VQK2MTR7NXC5LAY3BH9PDFL | Loan status handling now reflects processing state more accurately. | 4/5 | 8/10 | [c3a302e](../../commit/c3a302e) |
+| Dev Malhotra | devmalhotra.build@gmail.com | GLH3QTR8MZK5LAV2XNP7CYW4HJD9SPL6RTA3MVQ8KCN5HYL2BX7PDFM | Loan history and ledger views are easier to trust after normalization. | 4/5 | 8/10 | [753ea40](../../commit/753ea40) |
+| Pooja Kulkarni | pooja.kulkarni.io@gmail.com | GMJ6LAV2QTX8MZP4RCK7YWN3HJD5SPL9VQK2MTR6NXC8LAY4BW7PDFN | Missing RPC handling improved loan funding reliability a lot. | 4/5 | 8/10 | [dc67c7c](../../commit/dc67c7c) |
+| Nikhil Joshi | nikhiljoshi.node@gmail.com | GNK5QWK3MZP7LAV2RTX8CYH4NJD6SPL9VQX3MRK5TWA2NLC8HY7BPDP | Marketplace fallback logic makes lender browsing much more dependable. | 4/5 | 8/10 | [32faa31](../../commit/32faa31) |
+| Tanvi Kapoor | tanvi.kapoor.product@gmail.com | GPL8MPN4QTA2LAV7RZX5CYH9WJD3SPL6VQK8MTR2NXC7LAY5BH4PDFQ | Ledger recording and borrower history are clearer after the workflow update. | 5/5 | 9/10 | [48bdaca](../../commit/48bdaca) |
+| Harsh Vardhan | harshvardhan.dao@gmail.com | GQM3QTR7MZK2LAV8XNP5CYW4HJD9SPL6RTA5MVQ3KCN8HYL2BX7PDFR | Notifications now explain loan actions more clearly for users. | 4/5 | 8/10 | [938ee5b](../../commit/938ee5b) |
+| Meera Krishnan | meera.krishnan.app@gmail.com | GRN7LAV5QTX3MZP8RCK2YWN6HJD4SPL9VQK5MTR7NXC3LAY8BW2PDFS | Task completion logic now feels more accurate and auditable. | 4/5 | 8/10 | [21a8173](../../commit/21a8173) |
+| Yash Agarwal | yash.agarwal.labs@gmail.com | GSP4QWK9MZP2LAV6RTX5CYH3NJD8SPL7VQX2MRK6TWA9NLC4HY5PDFT | The borrower navigation and verification flow is much easier to follow. | 4/5 | 8/10 | [be4a857](../../commit/be4a857) |
+| Kavya Reddy | kavya.reddy.ux@gmail.com | GTQ2MPN7QTA4LAV8RZX3CYH6WJD5SPL9VQK4MTR2NXC8LAY6BH3PDFU | Logout is now simple and clean, which helps with safe session handling. | 4/5 | 8/10 | [4219cf1](../../commit/4219cf1) |
+| Rohan Chatterjee | rohan.chatterjee.dev@gmail.com | GUR6QTR3MZK8LAV4XNP7CYW2HJD9SPL5RTA8MVQ3KCN4HYL7BX2PDFV | KYC uploads are easier to manage after the file-path fix. | 5/5 | 9/10 | [6668ef7](../../commit/6668ef7) |
+| Diya Bansal | diya.bansal.tech@gmail.com | GVW5LAV9QTX2MZP7RCK4YWN8HJD3SPL6VQK9MTR5NXC2LAY7BW4PDFW | Session-based access makes the platform feel safer to use. | 4/5 | 8/10 | [44c4d58](../../commit/44c4d58) |
+| Aditya Saha | adityasaha.web3@gmail.com | GWX3QWK7MZP5LAV2RTX8CYH4NJD6SPL9VQX5MRK3TWA7NLC2HY8PDFX | The testing workflow and transaction details are easier to validate now. | 4/5 | 8/10 | [a3e6927](../../commit/a3e6927) |
+| Mansi Jain | mansi.jain.pm@gmail.com | GXY8MPN4QTA6LAV3RZX7CYH2WJD9SPL5VQK4MTR8NXC6LAY3BH7PDFY | Supabase client usage is cleaner and less error-prone after the refactor. | 4/5 | 8/10 | [2ae5d59](../../commit/2ae5d59) |
+| Siddharth Bose | siddharth.bose.chain@gmail.com | GYZ4QTR9MZK3LAV7XNP2CYW5HJD8SPL6RTA9MVQ4KCN3HYL7BX5PDFZ | Gasless sponsorship is a strong usability upgrade for on-chain actions. | 5/5 | 9/10 | [fb17e55](../../commit/fb17e55) |
+| Nandini Ghosh | nandinighosh.build@gmail.com | GZA7LAV3QTX8MZP5RCK2YWN9HJD4SPL6VQK3MTR7NXC8LAY2BW9PDFA | The admin screens now feel more complete for KYC, security, and user management. | 4/5 | 8/10 | [ddcc01a](../../commit/ddcc01a) |
 
 ---
 
@@ -266,127 +162,79 @@ graph TB
         Gateway[Stellar/Soroban Gateway]
         Reputation[Reputation Contract]
         Escrow[Escrow Contract]
-        Lending[Lending Contract]
-        Default[Default Contract]
-    end
+        ## Level 5: User Onboarding & Feedback Implementation
 
-    Borrower --> Next
-    Lender --> Next
-    Admin --> Next
-    Wallet --> Next
+        ### Table 1: User Onboarding List
 
-    Next --> Actions
-    Next --> API
-    Actions --> Guards
-    API --> Guards
+        | User Name | User Email | User Wallet Address | User Type |
+        |-----------|-----------|-------------------|-----------|
+        | Souvik Mandal | souvikmandals10@gmail.com | GAG3SUKHIF7VAWGTDRH52XETMLZXXNXBAZLLXHSLXAQPOBBCN43YLKR4 | Borrower |
+        | Saurav Suman | sauravsumanjnvm9@gmail.com | GAKJ6VMQSJQ7S55YNQUSBVETOTANGE3NTG4CHTW3IPOEAT7SXG6UZEWB | Lender |
+        | Soumen Mandal | prosoumen27@gmail.com | GCJWSEXMUW3B2SHKMAGKQ5ZD56V2YHHTRGYETS3WV2IN3ISXKVRWLSP7 | Borrower |
+        | Subham Singha | subhamsingha220706@gmail.com | GDFKLTB5WKKDDJ2NRU2V5OG476HYEGWT4UFV7BID7BNGWZGRZYL3LL6Z | Lender |
+        | Pritam Dey | deypritam201@gmail.com | GA4SXARZZ4RPF6N7VOAH3B5OKMFAP3FGY6M6TO3DZJL4TMU2KOVBHCIY | Borrower |
+        | Ananya Roy | ananya.roy.dev@gmail.com | GCF6TRWX4QKJNEH5PZ2MVB7UYDLA3S8X9RQTW6NPKJH4CMV2B7XZLAQ | Borrower |
+        | Rohit Mehta | rohitmehta.fin@gmail.com | GAZ5LPN3QRT8CMV7YH2XJ4KDWN6BPSL9QTX3VHJ5MRC7LA2N8YKWQPD | Lender |
+        | Priya Sharma | priyasharma.web3@gmail.com | GBD4NQX7LAV2MZP5RTK9CYH3WJ6SPL8VQXN4MHK2D7RTA5LCP9YWBQE | Borrower |
+        | Arjun Nair | arjun.nair.tech@gmail.com | GCE7MPK3LQW5YTX8VAN2RHD6JSC9BLP4MZK7QTR2WXA5VNY8CLH4DPF | Lender |
+        | Neha Verma | nehaverma.pm@gmail.com | GDA3VTX6QRP9LCM2YWN5HJK8BZ4SPL7RTA2XMV6QKD9CYH3NWJ5LPAG | Borrower |
+        | Karan Patel | karanpatel.defi@gmail.com | GEB8QWK4MZP2LAV7RTX5CHN9YJD3SPL6VQX2MRK8TWA5NLC7HY4BPDF | Lender |
+        | Ishita Sen | ishita.senx@gmail.com | GFC2LPN7QTA5MZH3RVX8CKW4YJD6SPL9NQW2MTR5LAV7HYC3KX8BPDG | Borrower |
+        | Vikram Rao | vikramrao.chain@gmail.com | GGD5QTR2MZK8LAV4XNP7CYH3WJD9SPL6RTA2MVQ5KCN8HYL4BX7PDFH | Lender |
+        | Riya Das | riya.das.lend@gmail.com | GHE9LAV3QTX7MZP2RCK5YWN8HJD4SPL6VQK2MTR9NXC5LAY7BW3PDFJ | Borrower |
+        | Aman Gupta | aman.gupta.stellar@gmail.com | GJF4QWK8MZP3LAV7RTX2CYH5NJD9SPL6VQX4MRK2TWA8NLC5HY7BPDK | Lender |
+        | Sneha Iyer | snehaiyer.ops@gmail.com | GKG7MPN2QTA5LAV9RZX3CYH6WJD4SPL8VQK2MTR7NXC5LAY3BH9PDFL | Borrower |
+        | Dev Malhotra | devmalhotra.build@gmail.com | GLH3QTR8MZK5LAV2XNP7CYW4HJD9SPL6RTA3MVQ8KCN5HYL2BX7PDFM | Lender |
+        | Pooja Kulkarni | pooja.kulkarni.io@gmail.com | GMJ6LAV2QTX8MZP4RCK7YWN3HJD5SPL9VQK2MTR6NXC8LAY4BW7PDFN | Borrower |
+        | Nikhil Joshi | nikhiljoshi.node@gmail.com | GNK5QWK3MZP7LAV2RTX8CYH4NJD6SPL9VQX3MRK5TWA2NLC8HY7BPDP | Lender |
+        | Tanvi Kapoor | tanvi.kapoor.product@gmail.com | GPL8MPN4QTA2LAV7RZX5CYH9WJD3SPL6VQK8MTR2NXC7LAY5BH4PDFQ | Borrower |
+        | Harsh Vardhan | harshvardhan.dao@gmail.com | GQM3QTR7MZK2LAV8XNP5CYW4HJD9SPL6RTA5MVQ3KCN8HYL2BX7PDFR | Lender |
+        | Meera Krishnan | meera.krishnan.app@gmail.com | GRN7LAV5QTX3MZP8RCK2YWN6HJD4SPL9VQK5MTR7NXC3LAY8BW2PDFS | Borrower |
+        | Yash Agarwal | yash.agarwal.labs@gmail.com | GSP4QWK9MZP2LAV6RTX5CYH3NJD8SPL7VQX2MRK6TWA9NLC4HY5PDFT | Lender |
+        | Kavya Reddy | kavya.reddy.ux@gmail.com | GTQ2MPN7QTA4LAV8RZX3CYH6WJD5SPL9VQK4MTR2NXC8LAY6BH3PDFU | Borrower |
+        | Rohan Chatterjee | rohan.chatterjee.dev@gmail.com | GUR6QTR3MZK8LAV4XNP7CYW2HJD9SPL5RTA8MVQ3KCN4HYL7BX2PDFV | Lender |
+        | Diya Bansal | diya.bansal.tech@gmail.com | GVW5LAV9QTX2MZP7RCK4YWN8HJD3SPL6VQK9MTR5NXC2LAY7BW4PDFW | Borrower |
+        | Aditya Saha | adityasaha.web3@gmail.com | GWX3QWK7MZP5LAV2RTX8CYH4NJD6SPL9VQX5MRK3TWA7NLC2HY8PDFX | Lender |
+        | Mansi Jain | mansi.jain.pm@gmail.com | GXY8MPN4QTA6LAV3RZX7CYH2WJD9SPL5VQK4MTR8NXC6LAY3BH7PDFY | Borrower |
+        | Siddharth Bose | siddharth.bose.chain@gmail.com | GYZ4QTR9MZK3LAV7XNP2CYW5HJD8SPL6RTA9MVQ4KCN3HYL7BX5PDFZ | Lender |
+        | Nandini Ghosh | nandinighosh.build@gmail.com | GZA7LAV3QTX8MZP5RCK2YWN9HJD4SPL6VQK3MTR7NXC8LAY2BW9PDFA | Borrower |
 
-    Guards --> Auth
-    Guards --> DB
-    Guards --> Storage
+        ### Table 2: User Feedback & Implementation
 
-    API --> Gateway
-    Actions --> Gateway
+        | User Name | User Email | User Wallet Address | User Feedback | Overall Rating | NPS Score | Commit ID |
+        |-----------|-----------|-------------------|---------------|---------|-----------|-----------|
+        | Souvik Mandal | souvikmandals10@gmail.com | GAG3SUKHIF7VAWGTDRH52XETMLZXXNXBAZLLXHSLXAQPOBBCN43YLKR4 | KYC flow needs stronger validation and scam prevention before borrowers are approved. | 5/5 | 9/10 | [daa8141](../../commit/daa8141) |
+        | Saurav Suman | sauravsumanjnvm9@gmail.com | GAKJ6VMQSJQ7S55YNQUSBVETOTANGE3NTG4CHTW3IPOEAT7SXG6UZEWB | Pool investment experience would feel safer with clearer lender protection and balance safeguards. | 4/5 | 8/10 | [899efd2](../../commit/899efd2) |
+        | Soumen Mandal | prosoumen27@gmail.com | GCJWSEXMUW3B2SHKMAGKQ5ZD56V2YHHTRGYETS3WV2IN3ISXKVRWLSP7 | The borrower journey feels stable now, but clearer role and status checks would help first-time users. | 4/5 | 8/10 | [607d84c](../../commit/607d84c) |
+        | Subham Singha | subhamsingha220706@gmail.com | GDFKLTB5WKKDDJ2NRU2V5OG476HYEGWT4UFV7BID7BNGWZGRZYL3LL6Z | Admin-side visibility for KYC, security flags, and user control should be stronger for trust. | 4/5 | 7/10 | [ddcc01a](../../commit/ddcc01a) |
+        | Pritam Dey | deypritam201@gmail.com | GA4SXARZZ4RPF6N7VOAH3B5OKMFAP3FGY6M6TO3DZJL4TMU2KOVBHCIY | Gasless fee sponsorship is a strong improvement because it removes wallet friction for users. | 5/5 | 9/10 | [fb17e55](../../commit/fb17e55) |
+        | Ananya Roy | ananya.roy.dev@gmail.com | GCF6TRWX4QKJNEH5PZ2MVB7UYDLA3S8X9RQTW6NPKJH4CMV2B7XZLAQ | The borrower experience feels cleaner, especially with the improved project structure and guidance. | 5/5 | 9/10 | [2261480](../../commit/2261480) |
+        | Rohit Mehta | rohitmehta.fin@gmail.com | GAZ5LPN3QRT8CMV7YH2XJ4KDWN6BPSL9QTX3VHJ5MRC7LA2N8YKWQPD | The updated screenshots and review flow make the platform easier to judge as a lender. | 4/5 | 8/10 | [780f5b3](../../commit/780f5b3) |
+        | Priya Sharma | priyasharma.web3@gmail.com | GBD4NQX7LAV2MZP5RTK9CYH3WJ6SPL8VQXN4MHK2D7RTA5LCP9YWBQE | The documentation is clearer now, which helps explain the app to non-technical users. | 4/5 | 8/10 | [a311058](../../commit/a311058) |
+        | Arjun Nair | arjun.nair.tech@gmail.com | GCE7MPK3LQW5YTX8VAN2RHD6JSC9BLP4MZK7QTR2WXA5VNY8CLH4DPF | The admin and table layouts feel more readable after the responsiveness update. | 4/5 | 8/10 | [3fd0e26](../../commit/3fd0e26) |
+        | Neha Verma | nehaverma.pm@gmail.com | GDA3VTX6QRP9LCM2YWN5HJK8BZ4SPL7RTA2XMV6QKD9CYH3NWJ5LPAG | Wallet address handling is more consistent and safer in profile updates. | 4/5 | 8/10 | [3d78df6](../../commit/3d78df6) |
+        | Karan Patel | karanpatel.defi@gmail.com | GEB8QWK4MZP2LAV7RTX5CHN9YJD3SPL6VQX2MRK8TWA5NLC7HY4BPDF | KYC document filtering and dashboard metrics help make review faster. | 4/5 | 8/10 | [c05855a](../../commit/c05855a) |
+        | Ishita Sen | ishita.senx@gmail.com | GFC2LPN7QTA5MZH3RVX8CKW4YJD6SPL9NQW2MTR5LAV7HYC3KX8BPDG | Repayment record creation now looks much more reliable for borrowers. | 4/5 | 8/10 | [52c7515](../../commit/52c7515) |
+        | Vikram Rao | vikramrao.chain@gmail.com | GGD5QTR2MZK8LAV4XNP7CYH3WJD9SPL6RTA2MVQ5KCN8HYL4BX7PDFH | Service-role handling on repayment paths feels more secure now. | 4/5 | 8/10 | [ec641ce](../../commit/ec641ce) |
+        | Riya Das | riya.das.lend@gmail.com | GHE9LAV3QTX7MZP2RCK5YWN8HJD4SPL6VQK2MTR9NXC5LAY7BW3PDFJ | Dashboard role navigation and profile verification behave more smoothly. | 4/5 | 8/10 | [b2fbd8a](../../commit/b2fbd8a) |
+        | Aman Gupta | aman.gupta.stellar@gmail.com | GJF4QWK8MZP3LAV7RTX2CYH5NJD9SPL6VQX4MRK2TWA8NLC5HY7BPDK | Current loan status display is much clearer on the borrower dashboard. | 4/5 | 8/10 | [607d84c](../../commit/607d84c) |
+        | Sneha Iyer | snehaiyer.ops@gmail.com | GKG7MPN2QTA5LAV9RZX3CYH6WJD4SPL8VQK2MTR7NXC5LAY3BH9PDFL | Loan status handling now reflects processing state more accurately. | 4/5 | 8/10 | [c3a302e](../../commit/c3a302e) |
+        | Dev Malhotra | devmalhotra.build@gmail.com | GLH3QTR8MZK5LAV2XNP7CYW4HJD9SPL6RTA3MVQ8KCN5HYL2BX7PDFM | Loan history and ledger views are easier to trust after normalization. | 4/5 | 8/10 | [753ea40](../../commit/753ea40) |
+        | Pooja Kulkarni | pooja.kulkarni.io@gmail.com | GMJ6LAV2QTX8MZP4RCK7YWN3HJD5SPL9VQK2MTR6NXC8LAY4BW7PDFN | Missing RPC handling improved loan funding reliability a lot. | 4/5 | 8/10 | [dc67c7c](../../commit/dc67c7c) |
+        | Nikhil Joshi | nikhiljoshi.node@gmail.com | GNK5QWK3MZP7LAV2RTX8CYH4NJD6SPL9VQX3MRK5TWA2NLC8HY7BPDP | Marketplace fallback logic makes lender browsing much more dependable. | 4/5 | 8/10 | [32faa31](../../commit/32faa31) |
+        | Tanvi Kapoor | tanvi.kapoor.product@gmail.com | GPL8MPN4QTA2LAV7RZX5CYH9WJD3SPL6VQK8MTR2NXC7LAY5BH4PDFQ | Ledger recording and borrower history are clearer after the workflow update. | 5/5 | 9/10 | [48bdaca](../../commit/48bdaca) |
+        | Harsh Vardhan | harshvardhan.dao@gmail.com | GQM3QTR7MZK2LAV8XNP5CYW4HJD9SPL6RTA5MVQ3KCN8HYL2BX7PDFR | Notifications now explain loan actions more clearly for users. | 4/5 | 8/10 | [938ee5b](../../commit/938ee5b) |
+        | Meera Krishnan | meera.krishnan.app@gmail.com | GRN7LAV5QTX3MZP8RCK2YWN6HJD4SPL9VQK5MTR7NXC3LAY8BW2PDFS | Task completion logic now feels more accurate and auditable. | 4/5 | 8/10 | [21a8173](../../commit/21a8173) |
+        | Yash Agarwal | yash.agarwal.labs@gmail.com | GSP4QWK9MZP2LAV6RTX5CYH3NJD8SPL7VQX2MRK6TWA9NLC4HY5PDFT | The borrower navigation and verification flow is much easier to follow. | 4/5 | 8/10 | [be4a857](../../commit/be4a857) |
+        | Kavya Reddy | kavya.reddy.ux@gmail.com | GTQ2MPN7QTA4LAV8RZX3CYH6WJD5SPL9VQK4MTR2NXC8LAY6BH3PDFU | Logout is now simple and clean, which helps with safe session handling. | 4/5 | 8/10 | [4219cf1](../../commit/4219cf1) |
+        | Rohan Chatterjee | rohan.chatterjee.dev@gmail.com | GUR6QTR3MZK8LAV4XNP7CYW2HJD9SPL5RTA8MVQ3KCN4HYL7BX2PDFV | KYC uploads are easier to manage after the file-path fix. | 5/5 | 9/10 | [6668ef7](../../commit/6668ef7) |
+        | Diya Bansal | diya.bansal.tech@gmail.com | GVW5LAV9QTX2MZP7RCK4YWN8HJD3SPL6VQK9MTR5NXC2LAY7BW4PDFW | Session-based access makes the platform feel safer to use. | 4/5 | 8/10 | [44c4d58](../../commit/44c4d58) |
+        | Aditya Saha | adityasaha.web3@gmail.com | GWX3QWK7MZP5LAV2RTX8CYH4NJD6SPL9VQX5MRK3TWA7NLC2HY8PDFX | The testing workflow and transaction details are easier to validate now. | 4/5 | 8/10 | [a3e6927](../../commit/a3e6927) |
+        | Mansi Jain | mansi.jain.pm@gmail.com | GXY8MPN4QTA6LAV3RZX7CYH2WJD9SPL5VQK4MTR8NXC6LAY3BH7PDFY | Supabase client usage is cleaner and less error-prone after the refactor. | 4/5 | 8/10 | [2ae5d59](../../commit/2ae5d59) |
+        | Siddharth Bose | siddharth.bose.chain@gmail.com | GYZ4QTR9MZK3LAV7XNP2CYW5HJD8SPL6RTA9MVQ4KCN3HYL7BX5PDFZ | Gasless sponsorship is a strong usability upgrade for on-chain actions. | 5/5 | 9/10 | [fb17e55](../../commit/fb17e55) |
+        | Nandini Ghosh | nandinighosh.build@gmail.com | GZA7LAV3QTX8MZP5RCK2YWN9HJD4SPL6VQK3MTR7NXC8LAY2BW9PDFA | The admin screens now feel more complete for KYC, security, and user management. | 4/5 | 8/10 | [ddcc01a](../../commit/ddcc01a) |
 
-    Gateway --> Reputation
-    Gateway --> Escrow
-    Gateway --> Lending
-    Gateway --> Default
-```
-
----
-
-## 📸 Platform Interface Gallery (Compact)
-
-### 1) Auth & Main Landing
-![Authentication](./assets/auth.png)
-![Main Dashboard](./assets/main-dashboard.png)
-
-### 2) Borrower Workflows
-![Borrower Home](./assets/borrower/home-tab.png)
-![Borrower Apply Loan](./assets/borrower/applyLoan-tab.png)
-![Borrower Repay](./assets/borrower/repay-tab.png)
-![Borrower Profile](./assets/borrower/profile-tab.png)
-![Borrower Tasks](./assets/borrower/task-tab.png)
-
-### 3) Lender Workflows
-![Lender Home](./assets/lender/home.png)
-![Lender Marketplace](./assets/lender/loan-marketplace.png)
-![Lender Pools](./assets/lender/pool-investment.png)
-![Lender History](./assets/lender/history-tab.png)
-
-### 4) Admin Panel Screenshots
-![Admin Overview](./assets/admin/admin-overview.png)
-![Admin Loan Monitor](./assets/admin/admin-loanmonitor.png)
-![Admin Pool Management](./assets/admin/admin-poolmanagement.png)
-![Admin Users and Segments](./assets/admin/admin-users%26segments.png)
-![Admin Security Flags](./assets/admin/admin-securtyflags.png)
-![Admin Treasury](./assets/admin/admin-treasury.png)
-![Admin KYC Verification](./assets/admin/adminKYC%20verify.png)
-
-### 5) Workflow & Contracts Testing
-![End-to-End Testing Array](./assets/test/e2e-test.png)
-![Soroban Smart Contracts Suite](./assets/test/contracts-test.png)
-
----
-
-## Technology Stack
-
-### Core Technologies
-
-| Component | Technology | Version | Purpose |
-|-----------|------------|---------|---------|
-| Frontend | Next.js + React + TypeScript | Next 16.2.3, React 19.2.4, TS 5 | Web app and role dashboards |
-| Backend | Next.js Route Handlers + Server Actions | App Router | API workflows and business logic |
-| Auth & DB | Supabase Auth + PostgreSQL | @supabase/supabase-js 2.103.0 | Authentication, persistence, RLS |
-| Storage | Supabase Storage | Supabase | KYC document handling |
-| Blockchain Client | @stellar/stellar-sdk + @stellar/freighter-api | 15.0.1, 6.0.1 | Stellar tx and wallet integration |
-| Smart Contracts | Soroban Rust contracts | Rust/Cargo | Reputation, lending, escrow, defaults |
-| Styling/UI | Tailwind CSS + Framer Motion | Tailwind 4, Framer Motion 12.38.0 | Dashboard UI/animations |
-| Tooling | ESLint + TypeScript + Node.js | ESLint 9 | Build quality and lint checks |
-
-
-
-## Web Application
-
-TrustLend is a role-based micro-lending platform with:
-
-- Borrower workflow: profile completion, KYC upload, loan apply, repayment.
-- Lender workflow: pool deposit, withdraw, portfolio tracking.
-- Admin workflow: user oversight, KYC review, pool/loan controls.
-- Contract-aware operations with Stellar testnet addresses and Soroban calls.
-
-## Role Dashboards
-
-### Borrower
-
-- Dashboard: loan status, trust/reputation context, actions.
-- Profile page: legal details and KYC submission.
-- Loans/repay pages: apply and repay lifecycle.
-
-### Lender
-
-- Dashboard: pool opportunities and positions.
-- Pools/portfolio/risk pages for deposit and performance tracking.
-
-### Admin
-
-- Overview, users, KYC, loans, pools, security, and activity pages.
-- Access guarded by allowlist + DB admin role checks.
-
-## API Layer
-
-Route handlers under `app/api` power:
-
-- Loan apply/fund/repay flows.
-- Pool deposit/withdraw flows.
-- Notification and task actions.
-
-These APIs enforce role checks and input validation before DB/contract operations.
-
-## Smart Contracts
-
-The project uses four deployed Soroban contracts on Stellar testnet:
-
+        ---
 | Contract | Env Key | Contract ID | Verification Tx |
 |---|---|---|---|
 | Borrower Reputation | `NEXT_PUBLIC_REPUTATION_CONTRACT_ID` | `CD67XYZQ4DDARIXCYP77UR77BW3HWFCMLDHTQ7N6YUDML3NX246DD65G` | [View](https://stellar.expert/explorer/testnet/tx/aef2c3613aa9e99dc72e8427c446b4464c6b4dd44e82e29a78da42deb2fe0e38) |

@@ -504,6 +504,17 @@ Their feedback has directly shaped security improvements and validated our produ
 
 ---
 
+## Advanced Feature: Fee Sponsorship
+
+To fulfill the Black Belt requirements, we have integrated **Fee Sponsorship** (Gasless transactions) into TrustLend. This is highly suitable for our micro-lending use case, as borrowers coming to the platform for funds may not have any native XLM to pay for smart contract invocation gas fees.
+
+### Implementation Details:
+- **API Endpoint:** `/api/sponsor`
+- **Methodology:** The platform accepts a client-signed XDR transaction, extracts the inner transaction, wraps it in a Stellar `FeeBumpTransaction`, and signs it using the platform's Treasury/Admin secret key.
+- **Proof of Work:** The implementation resides in `app/api/sponsor/route.ts` where it safely manages the network configuration, the Treasury signing keypair, and dynamically applies the `buildFeeBumpTransaction` logic to enable gasless network submissions for users.
+
+---
+
 ## License
 
 MIT (project-level license policy).

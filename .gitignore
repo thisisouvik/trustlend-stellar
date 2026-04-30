@@ -50,3 +50,5 @@ contracts/target/
 lib/contracts/generated/
 # Temp env file produced by deploy.sh (copy contents into .env.local)
 .env.contracts
+
+/docs

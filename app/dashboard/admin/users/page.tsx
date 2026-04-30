@@ -6,7 +6,7 @@ import {
   getAdminDashboardMetrics,
   presentAdminMetrics,
 } from "@/lib/dashboard/metrics";
-import { getServerSupabaseClient } from "@/lib/supabase/server";
+import { getServiceRoleClient } from "@/lib/supabase/server";
 
 export default async function AdminUsersPage() {
   const { user } = await requireTradeVaultAdmin();
@@ -14,9 +14,9 @@ export default async function AdminUsersPage() {
   const walletAddress = String(user.user_metadata?.wallet_address ?? "") || null;
   const walletConnected = Boolean(walletAddress);
 
-  const supabase = await getServerSupabaseClient();
-  const { data: users } = supabase
-    ? await supabase
+  const srClient = getServiceRoleClient();
+  const { data: users } = srClient
+    ? await srClient
         .from("profiles")
         .select("id, full_name, role, kyc_status, risk_status, created_at")
         .order("created_at", { ascending: false })
@@ -48,6 +48,8 @@ export default async function AdminUsersPage() {
           pending={Number(flagged)}
           inLoansLabel="Users"
           compact
+          inLoansIsCurrency={false}
+          pendingIsCurrency={false}
         />
       )}
     >

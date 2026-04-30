@@ -6,7 +6,7 @@ import {
   getAdminDashboardMetrics,
   presentAdminMetrics,
 } from "@/lib/dashboard/metrics";
-import { getServerSupabaseClient } from "@/lib/supabase/server";
+import { getServiceRoleClient } from "@/lib/supabase/server";
 import Link from "next/link";
 
 function formatAmount(value: number) {
@@ -27,36 +27,38 @@ export default async function AdminDashboardPage() {
   const metrics = await getAdminDashboardMetrics();
   const walletAddress = String(user.user_metadata?.wallet_address ?? "") || null;
   const walletConnected = Boolean(walletAddress);
-  const supabase = await getServerSupabaseClient();
+  
+  // Use service role client to bypass RLS and view platform-wide aggregates
+  const srClient = getServiceRoleClient();
 
-  const [profilesRes, loansRes, repaymentsRes, ledgerRes, fraudRes, poolsRes] = supabase
+  const [profilesRes, loansRes, repaymentsRes, ledgerRes, fraudRes, poolsRes] = srClient
     ? await Promise.all([
-        supabase
+        srClient
           .from("profiles")
           .select("id, role, kyc_status, risk_status, full_name, phone, country_code, created_at")
           .order("created_at", { ascending: false })
           .limit(10),
-        supabase
+        srClient
           .from("loans")
           .select("id, borrower_id, status, principal_amount, requested_at")
           .order("requested_at", { ascending: false })
           .limit(10),
-        supabase
+        srClient
           .from("loan_repayments")
           .select("id, payer_id, amount, paid_at, tx_ref")
           .order("paid_at", { ascending: false })
           .limit(120),
-        supabase
+        srClient
           .from("ledger_transactions")
           .select("id, user_id, amount, category, status, created_at, metadata")
           .order("created_at", { ascending: false })
           .limit(400),
-        supabase
+        srClient
           .from("fraud_signals")
           .select("id, user_id, signal_type, severity, resolved, created_at")
           .order("created_at", { ascending: false })
           .limit(120),
-        supabase
+        srClient
           .from("lending_pools")
           .select("id, name, status, total_liquidity, apr_bps, created_at")
           .order("created_at", { ascending: false })

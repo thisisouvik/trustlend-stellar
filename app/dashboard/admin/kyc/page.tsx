@@ -36,6 +36,8 @@ export default async function AdminKYCPage() {
           pending={0}
           inLoansLabel="Pending Docs"
           compact
+          inLoansIsCurrency={false}
+          pendingIsCurrency={false}
         />
       )}
     >

@@ -14,6 +14,8 @@ interface WalletCardProps {
   inLoansLabel?: string;
   pendingLabel?: string;
   compact?: boolean;
+  inLoansIsCurrency?: boolean;
+  pendingIsCurrency?: boolean;
 }
 
 export function WalletCard({
@@ -24,6 +26,8 @@ export function WalletCard({
   inLoansLabel = "In Loans",
   pendingLabel = "Pending",
   compact = false,
+  inLoansIsCurrency = true,
+  pendingIsCurrency = true,
 }: WalletCardProps) {
   const [walletAddress, setWalletAddress] = useState<string | null>(address);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
@@ -196,11 +200,11 @@ export function WalletCard({
           </div>
           <div className="wallet-card-compact-metric">
             <span>{inLoansLabel}</span>
-            <strong>{formatCurrency(inLoansOrPools)}</strong>
+            <strong>{inLoansIsCurrency ? formatCurrency(inLoansOrPools) : inLoansOrPools}</strong>
           </div>
           <div className="wallet-card-compact-metric">
             <span>{pendingLabel}</span>
-            <strong>{formatCurrency(pending)}</strong>
+            <strong>{pendingIsCurrency ? formatCurrency(pending) : pending}</strong>
           </div>
         </div>
 
@@ -236,11 +240,11 @@ export function WalletCard({
         </div>
         <div className="wallet-card-metric">
           <span>{inLoansLabel}</span>
-          <strong>{formatCurrency(inLoansOrPools)}</strong>
+          <strong>{inLoansIsCurrency ? formatCurrency(inLoansOrPools) : inLoansOrPools}</strong>
         </div>
         <div className="wallet-card-metric">
           <span>{pendingLabel}</span>
-          <strong>{formatCurrency(pending)}</strong>
+          <strong>{pendingIsCurrency ? formatCurrency(pending) : pending}</strong>
         </div>
       </div>
 

@@ -6,7 +6,7 @@ import {
   getAdminDashboardMetrics,
   presentAdminMetrics,
 } from "@/lib/dashboard/metrics";
-import { getServerSupabaseClient } from "@/lib/supabase/server";
+import { getServiceRoleClient } from "@/lib/supabase/server";
 
 export default async function AdminSecurityPage() {
   const { user } = await requireTradeVaultAdmin();
@@ -14,7 +14,7 @@ export default async function AdminSecurityPage() {
   const walletAddress = String(user.user_metadata?.wallet_address ?? "") || null;
   const walletConnected = Boolean(walletAddress);
 
-  const supabase = await getServerSupabaseClient();
+  const supabase = getServiceRoleClient();
   const [signalsRes, riskRes, profilesRes] = supabase
     ? await Promise.all([
         supabase
@@ -68,6 +68,8 @@ export default async function AdminSecurityPage() {
           pending={Number(maliciousIds.size)}
           inLoansLabel="Flagged"
           compact
+          inLoansIsCurrency={false}
+          pendingIsCurrency={false}
         />
       )}
     >
@@ -87,6 +89,24 @@ export default async function AdminSecurityPage() {
                   <li><span>Malicious indicators</span><strong>{maliciousIds.size}</strong></li>
                   <li><span>Open fraud signals</span><strong>{signals.filter((signal) => !signal.resolved).length}</strong></li>
                   <li><span>KYC incomplete</span><strong>{pendingKycProfiles.length}</strong></li>
+                </ul>
+              </article>
+
+              <article className="workspace-card workspace-card--full">
+                <h2 className="workspace-card-title">Pre-Flight Security Checklist</h2>
+                <ul className="workspace-list workspace-list--compact">
+                  <li style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    {walletConnected ? "✅" : "❌"} <span style={{ opacity: walletConnected ? 1 : 0.7 }}>Treasury Wallet Connected</span>
+                  </li>
+                  <li style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    {maliciousIds.size === 0 ? "✅" : "⚠️"} <span style={{ opacity: maliciousIds.size === 0 ? 1 : 0.7 }}>No Active Malicious Indicators</span>
+                  </li>
+                  <li style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    {signals.filter(s => !s.resolved).length === 0 ? "✅" : "⚠️"} <span style={{ opacity: signals.filter(s => !s.resolved).length === 0 ? 1 : 0.7 }}>All Fraud Signals Resolved</span>
+                  </li>
+                  <li style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    {pendingKycProfiles.length === 0 ? "✅" : "⚠️"} <span style={{ opacity: pendingKycProfiles.length === 0 ? 1 : 0.7 }}>KYC Queue Cleared</span>
+                  </li>
                 </ul>
               </article>
             </section>

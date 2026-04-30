@@ -2,13 +2,13 @@ import { WorkspaceFrame } from "@/components/dashboard/WorkspaceFrame";
 import { adminNavLinks } from "@/lib/dashboard/admin-links";
 import { requireTradeVaultAdmin } from "@/lib/auth/session";
 import { getAdminDashboardMetrics, presentAdminMetrics } from "@/lib/dashboard/metrics";
-import { getServerSupabaseClient } from "@/lib/supabase/server";
+import { getServiceRoleClient } from "@/lib/supabase/server";
 import AdminPoolsClient from "./pools-client";
 
 export default async function AdminPoolsPage() {
   const { user } = await requireTradeVaultAdmin();
   const metrics = await getAdminDashboardMetrics();
-  const admin = await getServerSupabaseClient();
+  const admin = getServiceRoleClient();
 
   const [poolsRes, pendingLoansRes] = admin
     ? await Promise.all([

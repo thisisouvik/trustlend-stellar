@@ -88,15 +88,15 @@ export async function proxy(request: NextRequest) {
     },
   });
 
-  // ✅ getSession() = local cookie read, NO network round-trip
-  const { data: { session } } = await supabase.auth.getSession();
+  // Securely get user via Supabase Auth server to prevent session spoofing warnings
+  const { data: { user } } = await supabase.auth.getUser();
 
   const effectiveUser = bypassActive
     ? {
         id: bypassUserId,
         user_metadata: { account_type: normalizeUserRole(bypassRoleRaw) },
       }
-    : session?.user ?? null;
+    : user ?? null;
 
   const isDashboardPath = pathname === "/dashboard" || pathname.startsWith("/dashboard/");
   const isAuthEntryPath = pathname === "/auth";

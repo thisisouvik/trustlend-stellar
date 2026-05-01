@@ -195,8 +195,8 @@ Security evidence: [Sucuri SiteCheck Proof](https://sitecheck.sucuri.net/results
 ### Mobile Views
 
 <p align="center">
-   <img src="assets/landing-mobile-view.png" alt="TrustLend Landing Mobile" width="45%" />
-   <img src="assets/auth-mobile.png" alt="TrustLend Auth Mobile" width="45%" />
+   <img src="assets/mobile/landing-mobile-view.png" alt="TrustLend Landing Mobile" width="45%" />
+   <img src="assets/mobile/auth-mobile.png" alt="TrustLend Auth Mobile" width="45%" />
 </p>
 
 ## 🛠️ Tech Stack

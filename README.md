@@ -192,11 +192,12 @@ Security evidence: [Sucuri SiteCheck Proof](https://sitecheck.sucuri.net/results
 | Security flags | ![Admin security flags](assets/admin/admin-securtyflags.png) |
 | Treasury | ![Admin treasury](assets/admin/admin-treasury.png) |
 
-### Mobile Screen
+### Mobile Views
 
-| View | Screenshot |
-|---|---|
-| Mobile responsive home preview | ![Mobile home preview](assets/mobile/home-mobile.png) |
+<p align="center">
+   <img src="assets/landing-mobile-view.png" alt="TrustLend Landing Mobile" width="45%" />
+   <img src="assets/auth-mobile.png" alt="TrustLend Auth Mobile" width="45%" />
+</p>
 
 ## 🛠️ Tech Stack
 

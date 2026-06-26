@@ -12,16 +12,21 @@ interface PoolOption {
 
 interface DepositFormProps {
   pools: PoolOption[];
+  walletBalance: number;
   onSubmit: (poolId: string, amount: number) => Promise<void>;
 }
 
-export function DepositForm({ pools, onSubmit }: DepositFormProps) {
+export function DepositForm({ pools, walletBalance, onSubmit }: DepositFormProps) {
   const [poolId, setPoolId] = useState(pools[0]?.id ?? "");
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const selectedPool = pools.find((p) => p.id === poolId);
+  const amountNum = parseFloat(amount) || 0;
+  const balanceAfter = Math.max(0, walletBalance - amountNum);
+  const showProjection = amountNum > 0 && walletBalance > 0;
+  const exceedsBalance = amountNum > walletBalance && walletBalance > 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,8 +34,8 @@ export function DepositForm({ pools, onSubmit }: DepositFormProps) {
     setLoading(true);
 
     try {
-      const amountNum = parseFloat(amount);
-      if (!amountNum || amountNum <= 0) {
+      const parsed = parseFloat(amount);
+      if (!parsed || parsed <= 0) {
         setError("Amount must be greater than 0");
         return;
       }
@@ -38,7 +43,7 @@ export function DepositForm({ pools, onSubmit }: DepositFormProps) {
         setError("Please select a pool");
         return;
       }
-      await onSubmit(poolId, amountNum);
+      await onSubmit(poolId, parsed);
       setAmount("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Deposit failed");
@@ -66,7 +71,9 @@ export function DepositForm({ pools, onSubmit }: DepositFormProps) {
           ))}
         </select>
         {selectedPool && (
-          <p className="workspace-hint">Available: {(Number(selectedPool.available_liquidity ?? 0)).toFixed(2)} XLM</p>
+          <p className="workspace-hint">
+            Pool liquidity: {(Number(selectedPool.available_liquidity ?? 0)).toFixed(2)} XLM
+          </p>
         )}
       </div>
 
@@ -82,15 +89,76 @@ export function DepositForm({ pools, onSubmit }: DepositFormProps) {
           placeholder="Enter amount"
           className="workspace-input"
           disabled={loading}
+          style={exceedsBalance ? { borderColor: "rgba(255,107,107,0.6)" } : undefined}
           suppressHydrationWarning
         />
+        {exceedsBalance && (
+          <p style={{ fontSize: "0.78rem", color: "#ff6b6b", marginTop: "0.3rem" }}>
+            ⚠️ Amount exceeds your wallet balance of {walletBalance.toFixed(2)} XLM
+          </p>
+        )}
       </div>
+
+      {/* Before / After balance projection */}
+      {showProjection && (
+        <div
+          style={{
+            background: "rgba(34,207,157,0.06)",
+            border: "1px solid rgba(34,207,157,0.18)",
+            borderRadius: "0.65rem",
+            padding: "0.85rem 1rem",
+            display: "grid",
+            gridTemplateColumns: "1fr auto 1fr",
+            alignItems: "center",
+            gap: "0.5rem",
+            fontSize: "0.82rem",
+          }}
+        >
+          <div style={{ textAlign: "center" }}>
+            <p
+              style={{
+                opacity: 0.55,
+                marginBottom: "0.2rem",
+                fontSize: "0.73rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              }}
+            >
+              Wallet Balance Before
+            </p>
+            <p style={{ fontWeight: 700, fontSize: "1rem" }}>{walletBalance.toFixed(2)} XLM</p>
+          </div>
+          <span style={{ color: "#22cf9d", fontWeight: 700, fontSize: "1.1rem" }}>→</span>
+          <div style={{ textAlign: "center" }}>
+            <p
+              style={{
+                opacity: 0.55,
+                marginBottom: "0.2rem",
+                fontSize: "0.73rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              }}
+            >
+              Wallet Balance After
+            </p>
+            <p
+              style={{
+                fontWeight: 700,
+                fontSize: "1rem",
+                color: exceedsBalance ? "#ff6b6b" : "#22cf9d",
+              }}
+            >
+              {balanceAfter.toFixed(2)} XLM
+            </p>
+          </div>
+        </div>
+      )}
 
       {error && <p className="workspace-error">{error}</p>}
 
       <button
         type="submit"
-        disabled={loading || !amount || !poolId}
+        disabled={loading || !amount || !poolId || exceedsBalance}
         className="workspace-button workspace-button--primary"
         style={{ width: "100%" }}
         suppressHydrationWarning
@@ -221,20 +289,29 @@ interface PositionOption {
 interface LenderFormsProps {
   pools: PoolOption[];
   positions: PositionOption[];
+  walletBalance?: number;
   /** Platform Stellar wallet address that receives the lender's deposit */
   platformAddress?: string;
 }
 
-export function LenderForms({ pools, positions, platformAddress }: LenderFormsProps) {
+export function LenderForms({
+  pools,
+  positions,
+  walletBalance = 0,
+  platformAddress,
+}: LenderFormsProps) {
   const router = useRouter();
-  const [successTx, setSuccessTx] = useState<{poolName: string; amount: number; hash: string} | null>(null);
+  const [successTx, setSuccessTx] = useState<{
+    poolName: string;
+    amount: number;
+    hash: string;
+    balanceBefore: number;
+  } | null>(null);
+  const [currentWalletBalance, setCurrentWalletBalance] = useState(walletBalance);
 
   const PLATFORM_WALLET =
-    platformAddress ??
-    process.env.NEXT_PUBLIC_PLATFORM_STELLAR_ADDRESS ??
-    "";
+    platformAddress ?? process.env.NEXT_PUBLIC_PLATFORM_STELLAR_ADDRESS ?? "";
 
-  // ── Real Stellar deposit via Freighter ──────────────────────────────────────
   const handleDeposit = async (poolId: string, amount: number) => {
     setSuccessTx(null);
     if (!PLATFORM_WALLET) {
@@ -243,7 +320,6 @@ export function LenderForms({ pools, positions, platformAddress }: LenderFormsPr
       );
     }
 
-    // Step 1: Get lender wallet address from Freighter
     const { isConnected, getAddress, signTransaction } = await import(
       "@stellar/freighter-api"
     );
@@ -258,20 +334,13 @@ export function LenderForms({ pools, positions, platformAddress }: LenderFormsPr
     }
     const lenderAddress = addressResult.address;
 
-    // Step 2: Build the Stellar payment transaction
-    const {
-      TransactionBuilder,
-      Networks,
-      Operation,
-      Asset,
-      Memo,
-    } = await import("@stellar/stellar-sdk");
+    const { TransactionBuilder, Networks, Operation, Asset, Memo } = await import(
+      "@stellar/stellar-sdk"
+    );
 
     const horizonUrl =
-      process.env.NEXT_PUBLIC_STELLAR_HORIZON_URL ??
-      "https://horizon-testnet.stellar.org";
+      process.env.NEXT_PUBLIC_STELLAR_HORIZON_URL ?? "https://horizon-testnet.stellar.org";
 
-    // Fetch lender account sequence number from Horizon
     const accountRes = await fetch(`${horizonUrl}/accounts/${lenderAddress}`);
     if (!accountRes.ok) {
       throw new Error(
@@ -284,7 +353,7 @@ export function LenderForms({ pools, positions, platformAddress }: LenderFormsPr
     const account = new Account(lenderAddress, accountData.sequence);
 
     const tx = new TransactionBuilder(account, {
-      fee: "1000000", // 0.1 XLM max fee
+      fee: "1000000",
       networkPassphrase: Networks.TESTNET,
     })
       .addOperation(
@@ -300,16 +369,16 @@ export function LenderForms({ pools, positions, platformAddress }: LenderFormsPr
 
     const txXdr = tx.toXDR();
 
-    // Step 3: Sign with Freighter
     const signResult = await signTransaction(txXdr, {
       networkPassphrase: Networks.TESTNET,
     });
 
     if (signResult.error || !signResult.signedTxXdr) {
-      throw new Error(signResult.error?.message ?? "User rejected the transaction in Freighter.");
+      throw new Error(
+        signResult.error?.message ?? "User rejected the transaction in Freighter."
+      );
     }
 
-    // Step 4: Submit to Stellar network
     const submitRes = await fetch(`${horizonUrl}/transactions`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -327,7 +396,6 @@ export function LenderForms({ pools, positions, platformAddress }: LenderFormsPr
 
     const txHash: string = submitData.hash;
 
-    // Step 5: Record confirmed deposit on TrustLend backend
     const apiRes = await fetch("/api/pools/deposit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -339,8 +407,15 @@ export function LenderForms({ pools, positions, platformAddress }: LenderFormsPr
       throw new Error(apiErr.error ?? "Backend recording failed");
     }
 
-    const depositedPool = pools.find(p => p.id === poolId);
-    setSuccessTx({ poolName: depositedPool?.name ?? "Pool", amount, hash: txHash });
+    const depositedPool = pools.find((p) => p.id === poolId);
+    const balanceBefore = currentWalletBalance;
+    setSuccessTx({
+      poolName: depositedPool?.name ?? "Pool",
+      amount,
+      hash: txHash,
+      balanceBefore,
+    });
+    setCurrentWalletBalance((prev) => Math.max(0, prev - amount));
 
     router.refresh();
   };
@@ -367,50 +442,133 @@ export function LenderForms({ pools, positions, platformAddress }: LenderFormsPr
 
   return (
     <>
-      <article className="workspace-card workspace-card--full" style={{ position: "relative" }}>
-        
-        {successTx && (
-          <div style={{
-            position: "absolute", top: "-1.5rem", left: "50%", transform: "translateX(-50%)", zIndex: 10,
-            background: "linear-gradient(135deg, rgba(34,207,157,0.1), rgba(34,207,157,0.2))",
-            border: "1px solid rgba(34,207,157,0.4)",
-            borderRadius: "0.8rem", padding: "1rem 1.5rem",
-            boxShadow: "0 8px 32px rgba(34,207,157,0.15)",
-            backdropFilter: "blur(12px)", minWidth: "300px", textAlign: "center",
-            animation: "slideDown 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)"
-          }}>
-             <h4 style={{ color: "#22cf9d", margin: "0 0 0.5rem 0", fontSize: "1rem" }}>✅ Deposit Successful!</h4>
-             <p style={{ margin: "0 0 0.75rem 0", fontSize: "0.85rem", opacity: 0.9 }}>
-                You successfully deployed <strong>{successTx.amount} XLM</strong> into the <strong>{successTx.poolName}</strong>.
-             </p>
-             <div style={{ display: "flex", gap: "0.75rem", justifyContent: "center" }}>
-               <a 
-                 href={`https://stellar.expert/explorer/testnet/tx/${successTx.hash}`} 
-                 target="_blank" rel="noopener noreferrer"
-                 className="workspace-nav-link"
-                 style={{ background: "rgba(34,207,157,0.15)", padding: "0.4rem 0.8rem", borderRadius: "9999px", fontSize: "0.8rem", fontWeight: 600, color: "#22cf9d" }}
-               >
-                 Verify on Stellar ↗
-               </a>
-               <button 
-                 onClick={() => setSuccessTx(null)}
-                 style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "white", padding: "0.4rem 0.8rem", borderRadius: "9999px", fontSize: "0.8rem", cursor: "pointer" }}
-               >
-                 Dismiss
-               </button>
-             </div>
+      {/* ── Success Toast ─────────────────────────────────────── */}
+      {successTx && (
+        <div
+          role="alert"
+          aria-live="polite"
+          style={{
+            position: "fixed",
+            bottom: "2rem",
+            right: "2rem",
+            zIndex: 9999,
+            background:
+              "linear-gradient(135deg, rgba(18,18,28,0.97), rgba(24,24,38,0.97))",
+            border: "1px solid rgba(34,207,157,0.45)",
+            borderRadius: "1rem",
+            padding: "1.25rem 1.5rem",
+            boxShadow: "0 8px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(34,207,157,0.1)",
+            backdropFilter: "blur(16px)",
+            minWidth: "320px",
+            maxWidth: "400px",
+            animation: "toastSlideIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              marginBottom: "0.75rem",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <span style={{ fontSize: "1.3rem" }}>✅</span>
+              <h4 style={{ color: "#22cf9d", margin: 0, fontSize: "0.95rem", fontWeight: 700 }}>
+                Deposit Successful!
+              </h4>
+            </div>
+            <button
+              onClick={() => setSuccessTx(null)}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "rgba(255,255,255,0.4)",
+                cursor: "pointer",
+                fontSize: "1rem",
+                lineHeight: 1,
+                padding: "0.1rem 0.3rem",
+              }}
+              aria-label="Dismiss notification"
+            >
+              ✕
+            </button>
           </div>
-        )}
 
+          <p style={{ margin: "0 0 0.85rem 0", fontSize: "0.85rem", opacity: 0.85 }}>
+            You deployed{" "}
+            <strong style={{ color: "white" }}>{successTx.amount} XLM</strong> into{" "}
+            <strong style={{ color: "white" }}>{successTx.poolName}</strong>.
+          </p>
+
+          {/* Before / after in toast */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr auto 1fr",
+              alignItems: "center",
+              gap: "0.4rem",
+              background: "rgba(255,255,255,0.04)",
+              borderRadius: "0.5rem",
+              padding: "0.6rem 0.75rem",
+              marginBottom: "0.85rem",
+              fontSize: "0.78rem",
+            }}
+          >
+            <div style={{ textAlign: "center" }}>
+              <p style={{ opacity: 0.5, marginBottom: "0.15rem", fontSize: "0.7rem" }}>Before</p>
+              <p style={{ fontWeight: 600, margin: 0 }}>
+                {successTx.balanceBefore.toFixed(2)} XLM
+              </p>
+            </div>
+            <span style={{ color: "#22cf9d", fontWeight: 700 }}>→</span>
+            <div style={{ textAlign: "center" }}>
+              <p style={{ opacity: 0.5, marginBottom: "0.15rem", fontSize: "0.7rem" }}>After</p>
+              <p style={{ fontWeight: 600, margin: 0, color: "#22cf9d" }}>
+                {Math.max(0, successTx.balanceBefore - successTx.amount).toFixed(2)} XLM
+              </p>
+            </div>
+          </div>
+
+          
+            href={`https://stellar.expert/explorer/testnet/tx/${successTx.hash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: "block",
+              textAlign: "center",
+              background: "rgba(34,207,157,0.12)",
+              border: "1px solid rgba(34,207,157,0.25)",
+              color: "#22cf9d",
+              padding: "0.45rem",
+              borderRadius: "0.5rem",
+              fontSize: "0.78rem",
+              fontWeight: 600,
+              textDecoration: "none",
+            }}
+          >
+            Verify on Stellar Explorer ↗
+          </a>
+        </div>
+      )}
+
+      <article className="workspace-card workspace-card--full">
         <h2 className="workspace-card-title">Manage Your Deposits</h2>
         <div className="workspace-grid workspace-grid--two">
           <div>
             <h3 className="workspace-subheading">Deposit to Pool</h3>
-            <p className="workspace-card-copy" style={{ fontSize: "0.82rem", opacity: 0.7, marginBottom: "0.75rem" }}>
-              Your XLM will be sent directly to TrustLend&apos;s Stellar escrow via Freighter.
-              A real on-chain transaction is required — no mock deposits.
+            <p
+              className="workspace-card-copy"
+              style={{ fontSize: "0.82rem", opacity: 0.7, marginBottom: "0.75rem" }}
+            >
+              Your XLM will be sent directly to TrustLend&apos;s Stellar escrow via Freighter. A
+              real on-chain transaction is required — no mock deposits.
             </p>
-            <DepositForm pools={pools} onSubmit={handleDeposit} />
+            <DepositForm
+              pools={pools}
+              walletBalance={currentWalletBalance}
+              onSubmit={handleDeposit}
+            />
           </div>
           <div>
             <h3 className="workspace-subheading">Withdraw from Position</h3>
@@ -418,12 +576,17 @@ export function LenderForms({ pools, positions, platformAddress }: LenderFormsPr
           </div>
         </div>
       </article>
-      <style dangerouslySetInnerHTML={{__html:`
-        @keyframes slideDown {
-          from { opacity: 0; transform: translate(-50%, -20px); }
-          to { opacity: 1; transform: translate(-50%, 0); }
-        }
-      `}}/>
+
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+            @keyframes toastSlideIn {
+              from { opacity: 0; transform: translateY(20px) scale(0.95); }
+              to   { opacity: 1; transform: translateY(0)    scale(1);    }
+            }
+          `,
+        }}
+      />
     </>
   );
 }

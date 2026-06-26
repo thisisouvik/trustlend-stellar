@@ -17,6 +17,8 @@ type RateLimitResult = {
   reset: number;
 };
 
+const MAX_LOCAL_BUCKETS = 10_000;
+
 const DEFAULT_POLICY: RateLimitPolicy = { limit: 20, window: "1 m" };
 
 const ROUTE_POLICIES: Record<string, RateLimitPolicy> = {
@@ -60,14 +62,35 @@ function getWindowMs(window: WindowString): number {
   }
 }
 
+function pruneLocalWindowStore(now: number) {
+  for (const [key, value] of localWindowStore) {
+    if (value.reset <= now) {
+      localWindowStore.delete(key);
+    }
+  }
+
+  if (localWindowStore.size <= MAX_LOCAL_BUCKETS) {
+    return;
+  }
+
+  const entriesByReset = [...localWindowStore.entries()].sort((a, b) => a[1].reset - b[1].reset);
+  const overflow = localWindowStore.size - MAX_LOCAL_BUCKETS;
+
+  for (const [key] of entriesByReset.slice(0, overflow)) {
+    localWindowStore.delete(key);
+  }
+}
+
 function getLocalRateLimit(identifier: string, policy: RateLimitPolicy): RateLimitResult {
   const now = Date.now();
   const windowMs = getWindowMs(policy.window);
+  pruneLocalWindowStore(now);
   const current = localWindowStore.get(identifier);
 
   if (!current || current.reset <= now) {
     const reset = now + windowMs;
     localWindowStore.set(identifier, { count: 1, reset });
+    pruneLocalWindowStore(now);
 
     return {
       success: true,
@@ -79,6 +102,7 @@ function getLocalRateLimit(identifier: string, policy: RateLimitPolicy): RateLim
 
   current.count += 1;
   localWindowStore.set(identifier, current);
+  pruneLocalWindowStore(now);
 
   return {
     success: current.count <= policy.limit,
@@ -110,36 +134,41 @@ async function getUpstashRateLimit(
     return null;
   }
 
-  const result = await limiter.limit(identifier);
-  await result.pending;
+  try {
+    const result = await limiter.limit(identifier);
+    await result.pending;
 
-  return {
-    success: result.success,
-    limit: result.limit,
-    remaining: result.remaining,
-    reset: result.reset,
-  };
+    return {
+      success: result.success,
+      limit: result.limit,
+      remaining: result.remaining,
+      reset: result.reset,
+    };
+  } catch (error) {
+    console.error("Upstash rate limit check failed:", error);
+    return null;
+  }
 }
 
 function getRequestIdentifier(request: NextRequest): string {
-  const forwardedFor = request.headers.get("x-forwarded-for");
   const ip =
-    forwardedFor?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
+    request.headers.get("x-vercel-ip-address") ||
     request.headers.get("cf-connecting-ip") ||
     "unknown";
-  const userAgent = request.headers.get("user-agent") ?? "unknown";
-
-  return `${ip}:${userAgent}`;
+  return ip;
 }
 
 export async function enforceRouteRateLimit(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const policy = getPolicy(pathname);
   const identifier = `${pathname}:${getRequestIdentifier(request)}`;
-  const result =
-    (redis ? await getUpstashRateLimit(identifier, pathname, policy) : null) ??
-    getLocalRateLimit(identifier, policy);
+  const result = redis
+    ? await getUpstashRateLimit(identifier, pathname, policy)
+    : getLocalRateLimit(identifier, policy);
+
+  if (!result) {
+    return null;
+  }
 
   if (!result.success) {
     const retryAfterSeconds = Math.max(1, Math.ceil((result.reset - Date.now()) / 1_000));

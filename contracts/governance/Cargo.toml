@@ -1,0 +1,21 @@
+[package]
+name    = "governance"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+testutils = ["soroban-sdk/testutils"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+# Real sibling contracts so the integration test exercises the actual
+# governance → lending link and reputation-weighted voting power.
+lending = { path = "../lending", features = ["testutils"] }
+borrower-reputation = { path = "../borrower_reputation", features = ["testutils"] }

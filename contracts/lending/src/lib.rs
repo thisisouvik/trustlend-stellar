@@ -61,7 +61,17 @@ pub enum DataKey {
     Payment(u32, u32), // (loan_id, payment_index)
     PaymentCount(u32), // per loan
     Admin,
+    /// Platform fee as basis-points of interest (100 = 1.00 %). DAO-controlled.
+    PlatformFeeBps,
+    /// Address of the Governance contract authorised to change the fee.
+    Governance,
 }
+
+/// Default platform fee = 1 % of interest (100 bps) until governance changes it.
+const DEFAULT_PLATFORM_FEE_BPS: u32 = 100;
+/// Safety ceiling: the fee can never exceed 10 % of interest (1000 bps),
+/// even via a passed proposal.
+const MAX_PLATFORM_FEE_BPS: u32 = 1000;
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
 
@@ -85,6 +95,55 @@ impl LendingContract {
             .instance()
             .get(&DataKey::Admin)
             .expect("Contract not initialised")
+    }
+
+    // ── DAO governance of the platform fee ──────────────────────────────────────
+
+    /// Link the Governance contract (admin only, one-time bootstrap).
+    /// Once set, the platform fee can ONLY be changed by this contract — i.e.
+    /// by a successful on-chain vote.
+    pub fn set_governance(env: Env, admin: Address, governance: Address) {
+        admin.require_auth();
+        Self::assert_admin(&env, &admin);
+        env.storage().instance().set(&DataKey::Governance, &governance);
+    }
+
+    pub fn get_governance(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::Governance)
+            .expect("Governance not configured")
+    }
+
+    /// Current platform fee in basis-points of interest (default 100 = 1 %).
+    pub fn get_platform_fee_bps(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::PlatformFeeBps)
+            .unwrap_or(DEFAULT_PLATFORM_FEE_BPS)
+    }
+
+    /// Update the platform fee. Callable ONLY by the linked Governance contract,
+    /// which invokes this after a proposal passes. This is the single on-chain
+    /// path to changing the fee — there is intentionally no admin override.
+    pub fn set_platform_fee_bps(env: Env, caller: Address, new_fee_bps: u32) {
+        caller.require_auth();
+
+        let governance: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Governance)
+            .expect("Governance not configured");
+        if caller != governance {
+            panic!("Unauthorised: only Governance can change the platform fee");
+        }
+        if new_fee_bps > MAX_PLATFORM_FEE_BPS {
+            panic!("Fee exceeds MAX_PLATFORM_FEE_BPS");
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::PlatformFeeBps, &new_fee_bps);
     }
 
     // ── Loan lifecycle ────────────────────────────────────────────────────────
@@ -115,8 +174,12 @@ impl LendingContract {
 
         // interest = principal × rate_bps × days / (10_000 × 365)
         let interest = Self::calculate_interest(amount, interest_rate_bps, duration_days);
-        // Platform fee = 1 % of interest
-        let platform_fee = interest / 100;
+        // Platform fee = (governance-controlled) fee_bps of interest.
+        let fee_bps = Self::get_platform_fee_bps(env.clone());
+        let platform_fee = interest
+            .checked_mul(fee_bps as i128)
+            .expect("Overflow: interest × fee_bps")
+            / 10_000;
         let total_due = amount
             .checked_add(interest)
             .expect("Overflow computing total_due");

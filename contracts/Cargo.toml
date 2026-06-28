@@ -4,6 +4,7 @@ members = [
     "escrow",
     "lending",
     "default_management",
+    "governance",
 ]
 resolver = "2"
 

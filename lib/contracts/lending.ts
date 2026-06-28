@@ -100,7 +100,42 @@ export async function getPayment(
   return decodePayment(raw);
 }
 
+/** Current platform fee in basis-points of interest (default 100 = 1 %). */
+export async function getPlatformFeeBps(callerAddress: string): Promise<number> {
+  const result = await simulateContractCall({
+    contractId: CONTRACT_ID,
+    method: "get_platform_fee_bps",
+    args: [],
+    callerAddress,
+  });
+  return Number(result);
+}
+
+/** Address of the linked Governance contract (the only fee changer). */
+export async function getGovernance(callerAddress: string): Promise<string> {
+  const result = await simulateContractCall({
+    contractId: CONTRACT_ID,
+    method: "get_governance",
+    args: [],
+    callerAddress,
+  });
+  return result as string;
+}
+
 // ─── Write functions ──────────────────────────────────────────────────────────
+
+/**
+ * One-time admin bootstrap: link the Governance contract. After this, the
+ * platform fee can only be changed by a passed on-chain vote.
+ */
+export async function setGovernance(adminAddress: string, governanceAddress: string) {
+  return callContract({
+    contractId: CONTRACT_ID,
+    method: "set_governance",
+    args: [addressToScVal(adminAddress), addressToScVal(governanceAddress)],
+    callerAddress: adminAddress,
+  });
+}
 
 /**
  * Borrower creates a loan request.

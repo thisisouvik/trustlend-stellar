@@ -54,6 +54,35 @@ export const TIER_INTEREST_BPS: Record<ReputationTier, number> = {
   Platinum: 800,
 };
 
+// ── Credit Oracle ───────────────────────────────────────────────────────────────
+
+/** Verified off-chain credit data posted by the Decentralized Credit Oracle. */
+export interface OracleCreditData {
+  /** Normalised off-chain credit score, 0..1000 */
+  creditScore: number;
+  /** Number of distinct verified Web2 data sources backing the score */
+  dataSources: number;
+  /** Resulting max-loan boost in basis-points (10_000 = +100 %) */
+  loanLimitBoostBps: number;
+  /** Provider tag, e.g. "mobile-money", "plaid" */
+  provider: string;
+  /** Ledger timestamp when the oracle posted this record */
+  updatedAt: bigint;
+}
+
+/** Maximum normalised credit score the oracle may post (mirrors the contract). */
+export const MAX_ORACLE_SCORE = 1000;
+/** Hard cap on the oracle max-loan boost in basis-points (mirrors the contract). */
+export const MAX_LIMIT_BOOST_BPS = 10_000;
+/** Oracle record freshness window in seconds (90 days; mirrors the contract). */
+export const ORACLE_VALIDITY_SECONDS = 90 * 24 * 60 * 60;
+
+/** Deterministic score → loan-boost mapping (mirrors the contract). */
+export function scoreToBoostBps(creditScore: number): number {
+  const score = Math.max(0, Math.min(MAX_ORACLE_SCORE, Math.trunc(creditScore)));
+  return Math.trunc((score * MAX_LIMIT_BOOST_BPS) / MAX_ORACLE_SCORE);
+}
+
 // ── Escrow ────────────────────────────────────────────────────────────────────
 
 export type EscrowStatus = "Held" | "Transferred" | "Revoked";
@@ -147,6 +176,50 @@ export function stroopsToXlm(stroops: bigint): string {
 export function xlmToStroops(xlm: number): bigint {
   return BigInt(Math.round(xlm * 10_000_000));
 }
+
+// ── DAO Governance ────────────────────────────────────────────────────────────
+
+export type ProposalStatus = "Active" | "Passed" | "Rejected" | "Executed";
+
+export type ProposalKind = "SetPlatformFeeBps";
+
+export interface Proposal {
+  id: number;
+  proposer: string;
+  kind: ProposalKind;
+  /** Proposed parameter value (for SetPlatformFeeBps: new fee in bps). */
+  newValue: number;
+  /** Sum of reputation-weighted voting power in favour. */
+  votesFor: bigint;
+  /** Sum of reputation-weighted voting power against. */
+  votesAgainst: bigint;
+  createdAt: bigint;
+  /** Ledger timestamp when voting closes. */
+  endAt: bigint;
+  status: ProposalStatus;
+}
+
+export interface GovConfig {
+  admin: string;
+  lending: string;
+  reputation: string;
+  votingPeriodSecs: bigint;
+  quorumVotes: bigint;
+  minProposerPower: bigint;
+  maxFeeBps: number;
+}
+
+/** Default lending platform fee in bps of interest (mirrors the contract). */
+export const DEFAULT_PLATFORM_FEE_BPS = 100;
+/** Hard ceiling on the platform fee in bps (mirrors the lending contract). */
+export const MAX_PLATFORM_FEE_BPS = 1000;
+
+export const PROPOSAL_STATUS_LABEL: Record<ProposalStatus, string> = {
+  Active: "Voting Open",
+  Passed: "Passed – Awaiting Execution",
+  Rejected: "Rejected",
+  Executed: "Executed",
+};
 
 /**
  * Calculate interest in stroops.

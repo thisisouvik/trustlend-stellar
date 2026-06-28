@@ -1,10 +1,19 @@
 import { WorkspaceFrame } from "@/components/dashboard/WorkspaceFrame";
 import { LoanMarketplace } from "@/components/dashboard/LoanMarketplace";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
-import { getLenderDashboardMetrics, presentLenderMetrics } from "@/lib/dashboard/metrics";
+import {
+  getLenderDashboardMetrics,
+  presentLenderMetrics,
+} from "@/lib/dashboard/metrics";
 import { lenderNavLinks } from "@/lib/dashboard/lender-links";
-import { buildStellarTxVerificationUrl, isLikelyTxHash } from "@/lib/stellar/explorer";
-import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
+import {
+  buildStellarTxVerificationUrl,
+  isLikelyTxHash,
+} from "@/lib/stellar/explorer";
+import {
+  getServerSupabaseClient,
+  getServiceRoleClient,
+} from "@/lib/supabase/server";
 
 type MarketplaceSortOption = "apr_desc" | "apr_asc" | "term_desc" | "term_asc";
 
@@ -26,7 +35,7 @@ const HIGH_REPUTATION_THRESHOLD = 500;
 
 function readSearchParam(
   params: Record<string, string | string[] | undefined>,
-  key: string
+  key: string,
 ) {
   const value = params[key];
   return Array.isArray(value) ? value[0] : value;
@@ -44,10 +53,9 @@ function parseSortOption(value: string | undefined): MarketplaceSortOption {
   }
 }
 
-function sortMarketplaceLoans<T extends { apr_bps: number; duration_days: number }>(
-  loans: T[],
-  sort: MarketplaceSortOption
-) {
+function sortMarketplaceLoans<
+  T extends { apr_bps: number; duration_days: number },
+>(loans: T[], sort: MarketplaceSortOption) {
   return [...loans].sort((left, right) => {
     switch (sort) {
       case "apr_asc":
@@ -70,10 +78,12 @@ export default async function LenderMarketplacePage({
 }) {
   const resolvedSearchParams = (await searchParams) ?? {};
   const sort = parseSortOption(readSearchParam(resolvedSearchParams, "sort"));
-  const highReputationOnly = readSearchParam(resolvedSearchParams, "highReputation") === "true";
+  const highReputationOnly =
+    readSearchParam(resolvedSearchParams, "highReputation") === "true";
 
   const { user } = await requireAuthenticatedUser("lender");
-  const walletAddress = String(user.user_metadata?.wallet_address ?? "") || null;
+  const walletAddress =
+    String(user.user_metadata?.wallet_address ?? "") || null;
   const metrics = await getLenderDashboardMetrics(user.id);
 
   const supabase = await getServerSupabaseClient();
@@ -103,29 +113,39 @@ export default async function LenderMarketplacePage({
       .select("id, principal_amount, apr_bps, duration_days, borrower_id")
       .in("status", ["requested", "approved"])
       .order(
-        sort === "term_asc" || sort === "term_desc" ? "duration_days" : "apr_bps",
-        { ascending: sort === "apr_asc" || sort === "term_asc" }
+        sort === "term_asc" || sort === "term_desc"
+          ? "duration_days"
+          : "apr_bps",
+        { ascending: sort === "apr_asc" || sort === "term_asc" },
       );
 
     const fallbackLoans = fallbackLoansRes.data ?? [];
-    const borrowerIds = Array.from(new Set(fallbackLoans.map((loan) => String(loan.borrower_id))));
+    const borrowerIds = Array.from(
+      new Set(fallbackLoans.map((loan) => String(loan.borrower_id))),
+    );
 
-    const [profilesRes, snapshotsRes] = borrowerIds.length > 0
-      ? await Promise.all([
-          srClient
-            .from("profiles")
-            .select("id, full_name, wallet_address")
-            .in("id", borrowerIds),
-          srClient
-            .from("reputation_snapshots")
-            .select("user_id, score_total")
-            .in("user_id", borrowerIds),
-        ])
-      : [{ data: [] }, { data: [] }];
+    const [profilesRes, snapshotsRes] =
+      borrowerIds.length > 0
+        ? await Promise.all([
+            srClient
+              .from("profiles")
+              .select("id, full_name, wallet_address")
+              .in("id", borrowerIds),
+            srClient
+              .from("reputation_snapshots")
+              .select("user_id, score_total")
+              .in("user_id", borrowerIds),
+          ])
+        : [{ data: [] }, { data: [] }];
 
-    const profileMap = new Map((profilesRes.data ?? []).map((profile) => [String(profile.id), profile]));
+    const profileMap = new Map(
+      (profilesRes.data ?? []).map((profile) => [String(profile.id), profile]),
+    );
     const scoreMap = new Map(
-      (snapshotsRes.data ?? []).map((snapshot) => [String(snapshot.user_id), Number(snapshot.score_total ?? 250)])
+      (snapshotsRes.data ?? []).map((snapshot) => [
+        String(snapshot.user_id),
+        Number(snapshot.score_total ?? 250),
+      ]),
     );
 
     openLoans = fallbackLoans.map((loan) => {
@@ -155,19 +175,27 @@ export default async function LenderMarketplacePage({
     apr_bps: Number(loan.apr_bps ?? 0),
     duration_days: Number(loan.duration_days ?? 30),
     trust_score: Number(loan.trust_score ?? 250),
-    borrower_name: String(loan.borrower_name ?? `Borrower ${String(loan.borrower_id).slice(0, 6)}`),
+    borrower_name: String(
+      loan.borrower_name ?? `Borrower ${String(loan.borrower_id).slice(0, 6)}`,
+    ),
     borrower_wallet: String(loan.borrower_wallet ?? ""),
   }));
 
   const visibleMarketplaceLoans = sortMarketplaceLoans(
     highReputationOnly
-      ? marketplaceLoans.filter((loan) => loan.trust_score >= HIGH_REPUTATION_THRESHOLD)
+      ? marketplaceLoans.filter(
+          (loan) => loan.trust_score >= HIGH_REPUTATION_THRESHOLD,
+        )
       : marketplaceLoans,
-    sort
+    sort,
   );
 
   const profileRes = supabase
-    ? await supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle()
+    ? await supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("id", user.id)
+        .maybeSingle()
     : { data: null };
   const profile = profileRes.data;
 
@@ -175,9 +203,11 @@ export default async function LenderMarketplacePage({
     <WorkspaceFrame
       roleLabel="Lender Dashboard"
       heading="Loan Marketplace"
-      description="Browse open borrower requests. Fund directly via Freighter - XLM goes straight to the borrower's Stellar wallet. Full on-chain transparency."
+      description="Browse open borrower requests. Fund directly with Freighter or Albedo - XLM goes straight to the borrower's Stellar wallet. Full on-chain transparency."
       email={user.email ?? null}
-      userName={String(user.user_metadata?.full_name ?? profile?.full_name ?? "")}
+      userName={String(
+        user.user_metadata?.full_name ?? profile?.full_name ?? "",
+      )}
       metrics={presentLenderMetrics(metrics)}
       currentPath="/dashboard/lender/marketplace"
       profilePath="/dashboard/lender/profile"
@@ -189,14 +219,18 @@ export default async function LenderMarketplacePage({
           <article className="workspace-card workspace-card--full">
             <h2 className="workspace-card-title">Wallet Required</h2>
             <p className="workspace-card-copy">
-              Connect your Stellar wallet in Profile & Settings before funding loans.
+              Connect your Stellar wallet in Profile & Settings before funding
+              loans.
             </p>
           </article>
         ) : (
           <>
             <article
               className="workspace-card workspace-card--full"
-              style={{ background: "rgba(126,47,208,0.06)", border: "1px solid rgba(126,47,208,0.2)" }}
+              style={{
+                background: "rgba(126,47,208,0.06)",
+                border: "1px solid rgba(126,47,208,0.2)",
+              }}
             >
               <h2 className="workspace-card-title">How Direct Lending Works</h2>
               <div
@@ -208,12 +242,31 @@ export default async function LenderMarketplacePage({
                 }}
               >
                 {[
-                  { step: "1", label: "Browse", desc: "Review open borrower requests - trust score, amount, APR, and duration." },
-                  { step: "2", label: "Fund", desc: "Click Fund. Freighter opens and asks you to sign the Stellar payment." },
-                  { step: "3", label: "On-chain", desc: "XLM goes directly to the borrower's wallet with a TL-FUND memo on Stellar." },
-                  { step: "4", label: "Earn", desc: "When the borrower repays, you receive principal plus interest back to your wallet." },
+                  {
+                    step: "1",
+                    label: "Browse",
+                    desc: "Review open borrower requests - trust score, amount, APR, and duration.",
+                  },
+                  {
+                    step: "2",
+                    label: "Fund",
+                    desc: "Click Fund, then sign the Stellar payment with your selected wallet.",
+                  },
+                  {
+                    step: "3",
+                    label: "On-chain",
+                    desc: "XLM goes directly to the borrower's wallet with a TL-FUND memo on Stellar.",
+                  },
+                  {
+                    step: "4",
+                    label: "Earn",
+                    desc: "When the borrower repays, you receive principal plus interest back to your wallet.",
+                  },
                 ].map((step) => (
-                  <div key={step.step} style={{ display: "flex", gap: "0.75rem" }}>
+                  <div
+                    key={step.step}
+                    style={{ display: "flex", gap: "0.75rem" }}
+                  >
                     <span
                       style={{
                         width: "1.75rem",
@@ -231,8 +284,24 @@ export default async function LenderMarketplacePage({
                       {step.step}
                     </span>
                     <div>
-                      <p style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.25rem" }}>{step.label}</p>
-                      <p style={{ fontSize: "0.8rem", opacity: 0.6, lineHeight: 1.4 }}>{step.desc}</p>
+                      <p
+                        style={{
+                          fontWeight: 600,
+                          fontSize: "0.88rem",
+                          marginBottom: "0.25rem",
+                        }}
+                      >
+                        {step.label}
+                      </p>
+                      <p
+                        style={{
+                          fontSize: "0.8rem",
+                          opacity: 0.6,
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        {step.desc}
+                      </p>
                     </div>
                   </div>
                 ))}
@@ -254,7 +323,10 @@ export default async function LenderMarketplacePage({
                   border: "1px solid rgba(126,47,208,0.12)",
                 }}
               >
-                <label className="workspace-form-group" style={{ minWidth: "220px", flex: "1 1 220px" }}>
+                <label
+                  className="workspace-form-group"
+                  style={{ minWidth: "220px", flex: "1 1 220px" }}
+                >
                   <span
                     style={{
                       fontSize: "0.8rem",
@@ -266,7 +338,11 @@ export default async function LenderMarketplacePage({
                   >
                     Sort by
                   </span>
-                  <select name="sort" defaultValue={sort} className="workspace-input">
+                  <select
+                    name="sort"
+                    defaultValue={sort}
+                    className="workspace-input"
+                  >
                     <option value="apr_desc">Interest Rate: High to Low</option>
                     <option value="apr_asc">Interest Rate: Low to High</option>
                     <option value="term_desc">Loan Term: Long to Short</option>
@@ -298,21 +374,38 @@ export default async function LenderMarketplacePage({
                   </span>
                 </label>
 
-                <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-                  <button type="submit" className="workspace-button workspace-button--primary">
+                <div
+                  style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}
+                >
+                  <button
+                    type="submit"
+                    className="workspace-button workspace-button--primary"
+                  >
                     Apply
                   </button>
                   <a
                     href="/dashboard/lender/marketplace"
                     className="workspace-button workspace-button--secondary"
-                    style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+                    style={{
+                      textDecoration: "none",
+                      display: "inline-flex",
+                      alignItems: "center",
+                    }}
                   >
                     Reset
                   </a>
                 </div>
               </form>
 
-              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.75rem",
+                  marginBottom: "1rem",
+                  flexWrap: "wrap",
+                }}
+              >
                 <h2 className="workspace-card-title" style={{ margin: 0 }}>
                   Open Requests
                 </h2>
@@ -343,7 +436,8 @@ export default async function LenderMarketplacePage({
                     0 matches
                   </span>
                 )}
-                {(sort !== DEFAULT_SORT || highReputationOnly) && marketplaceLoans.length > 0 ? (
+                {(sort !== DEFAULT_SORT || highReputationOnly) &&
+                marketplaceLoans.length > 0 ? (
                   <span style={{ fontSize: "0.78rem", opacity: 0.65 }}>
                     from {marketplaceLoans.length} total requests
                   </span>
@@ -370,11 +464,15 @@ export default async function LenderMarketplacePage({
               <h2 className="workspace-card-title">Loans You Funded</h2>
               {fundedTxs.length === 0 ? (
                 <p className="workspace-card-copy" style={{ opacity: 0.6 }}>
-                  You haven&apos;t directly funded any loans yet. Pick a request above to get started.
+                  You haven&apos;t directly funded any loans yet. Pick a request
+                  above to get started.
                 </p>
               ) : (
                 <div className="workspace-table-wrap">
-                  <table className="workspace-table" aria-label="Loans you funded">
+                  <table
+                    className="workspace-table"
+                    aria-label="Loans you funded"
+                  >
                     <thead>
                       <tr>
                         <th>Loan ID</th>
@@ -397,14 +495,25 @@ export default async function LenderMarketplacePage({
 
                         return (
                           <tr key={String(tx.id)}>
-                            <td style={{ fontFamily: "monospace", fontSize: "0.82rem" }}>
+                            <td
+                              style={{
+                                fontFamily: "monospace",
+                                fontSize: "0.82rem",
+                              }}
+                            >
                               {String(tx.ref_id ?? "").slice(0, 8)}
                             </td>
                             <td>
-                              <strong>{Number(tx.amount ?? 0).toFixed(2)} XLM</strong>
+                              <strong>
+                                {Number(tx.amount ?? 0).toFixed(2)} XLM
+                              </strong>
                             </td>
                             <td style={{ fontSize: "0.82rem", opacity: 0.7 }}>
-                              {tx.created_at ? new Date(String(tx.created_at)).toLocaleDateString() : "-"}
+                              {tx.created_at
+                                ? new Date(
+                                    String(tx.created_at),
+                                  ).toLocaleDateString()
+                                : "-"}
                             </td>
                             <td>
                               {isLikelyTxHash(txHash) ? (
@@ -418,7 +527,11 @@ export default async function LenderMarketplacePage({
                                   Verify on Stellar -&gt;
                                 </a>
                               ) : (
-                                <span style={{ opacity: 0.4, fontSize: "0.8rem" }}>-</span>
+                                <span
+                                  style={{ opacity: 0.4, fontSize: "0.8rem" }}
+                                >
+                                  -
+                                </span>
                               )}
                             </td>
                           </tr>

@@ -7,9 +7,11 @@
     "build": "next build",
     "start": "cross-env NODE_OPTIONS=--dns-result-order=ipv4first next start",
     "lint": "eslint",
-    "e2e:seed": "node scripts/e2e-seed-and-run.mjs"
+    "e2e:seed": "node scripts/e2e-seed-and-run.mjs",
+    "oracle:post": "node scripts/oracle-post-credit-score.mjs"
   },
   "dependencies": {
+    "@albedo-link/intent": "^0.13.0",
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^16.0.1",
     "@supabase/ssr": "^0.10.2",
@@ -31,10 +33,12 @@
     "@types/pdfkit": "^0.17.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitest/coverage-v8": "^4.1.9",
     "cross-env": "^10.1.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.3",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "4.1.9"
   }
 }

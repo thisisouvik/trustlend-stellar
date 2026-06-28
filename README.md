@@ -191,6 +191,59 @@ TrustLend utilizes the standard Soroban `Contract` class flow for integrations (
 
 ---
 
+## 🔔 Payment Due Webhook Scheduler
+
+TrustLend includes an automated scheduler that checks for loans with payment deadlines approaching within **48 hours** and dispatches webhook notifications to a configured notification service.
+
+### How It Works
+
+1. An external scheduler (Vercel Cron or any HTTP trigger) calls `POST /api/cron/payment-due` hourly.
+2. The route queries Supabase for `active` or `funded` loans with `due_at` between now and +48 hours.
+3. A POST webhook is sent to `WEBHOOK_NOTIFICATION_URL` for each qualifying loan.
+4. The loan's `metadata.payment_due_notified_at` is set to prevent duplicate notifications.
+5. Per-loan errors are logged without stopping the rest of the batch.
+
+### Required Environment Variables
+
+| Variable | Description |
+|---|---|
+| `WEBHOOK_NOTIFICATION_URL` | URL of the notification service that receives payment-due webhook POSTs |
+| `CRON_SECRET` | Secret token used to authenticate scheduler requests (`Authorization: Bearer <value>`) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service-role key (required for RLS-bypassing loan queries) |
+
+### Webhook Payload
+
+```json
+{
+  "borrowerId": "uuid",
+  "loanId": "uuid",
+  "dueDate": "2026-07-01T12:00:00.000Z",
+  "paymentAmount": 800.00
+}
+```
+
+`paymentAmount` is `principal_amount − repaid_amount` (outstanding balance).
+
+### Triggering the Scheduler
+
+**Vercel Cron (automatic, hourly):** Configured in `vercel.json` — no additional setup needed.
+
+**Manual trigger:**
+```bash
+curl -X POST https://your-app.vercel.app/api/cron/payment-due \
+  -H "Authorization: Bearer $CRON_SECRET"
+```
+
+**Local development (no secret set):** The `Authorization` check is skipped when `CRON_SECRET` is not configured.
+
+### Failure Handling
+
+- Individual loan failures are logged and do not block other loans in the same run.
+- The scheduler returns a JSON summary: `{ processed, succeeded, failed, errors }`.
+- Webhook requests time out after 10 seconds.
+
+---
+
 ## 🤝 Contributing
 
 We love open-source contributors! Whether you're fixing bugs, improving documentation, or proposing new features, your help is welcome.

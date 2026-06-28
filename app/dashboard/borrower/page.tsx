@@ -9,6 +9,7 @@ import {
 import { getServerSupabaseClient, getServiceRoleClient } from "@/lib/supabase/server";
 import { buildStellarTxVerificationUrl, extractPossibleTxHash, isLikelyTxHash } from "@/lib/stellar/explorer";
 import { BorrowerRepayWidget } from "@/components/dashboard/BorrowerRepayWidget";
+import { WithdrawToFiatButton } from "@/components/dashboard/WithdrawToFiatButton";
 import { borrowerNavLinks } from "@/lib/dashboard/borrower-links";
 
 export default async function BorrowerDashboardPage() {
@@ -322,6 +323,9 @@ export default async function BorrowerDashboardPage() {
             dueAmount={dueAmount}
           />
         )}
+
+        {/* ── Cash out to fiat via Stellar Anchor (SEP-24) ── */}
+        <WithdrawToFiatButton walletAddress={walletAddress} />
 
         {/* ── Empty state (no loans) ── */}
         {normalizedLoans.length === 0 && (

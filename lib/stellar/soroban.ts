@@ -10,7 +10,7 @@ import {
   nativeToScVal,
   scValToNative,
 } from "@stellar/stellar-sdk";
-import { signTransaction } from "@stellar/freighter-api";
+import { signTransactionWithWallet } from "@/lib/stellar/wallet";
 
 // ─── Network config ───────────────────────────────────────────────────────────
 
@@ -85,7 +85,7 @@ export interface CallContractOptions {
  */
 async function sorobanRpc<T = Record<string, unknown>>(
   method: string,
-  params: Record<string, unknown>
+  params: Record<string, unknown>,
 ): Promise<T> {
   const res = await fetch(SOROBAN_RPC_URL, {
     method: "POST",
@@ -93,11 +93,15 @@ async function sorobanRpc<T = Record<string, unknown>>(
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
   });
   if (!res.ok) {
-    throw new Error(`Soroban RPC transport error (${method}): ${res.statusText}`);
+    throw new Error(
+      `Soroban RPC transport error (${method}): ${res.statusText}`,
+    );
   }
   const json = (await res.json()) as { result?: T; error?: unknown };
   if (json.error) {
-    throw new Error(`Soroban RPC error (${method}): ${JSON.stringify(json.error)}`);
+    throw new Error(
+      `Soroban RPC error (${method}): ${JSON.stringify(json.error)}`,
+    );
   }
   return json.result as T;
 }
@@ -112,8 +116,8 @@ async function getAccountSequence(address: string): Promise<string> {
     if (res.status === 404) {
       throw new Error(
         `Account ${address} not found on Stellar network. ` +
-        `Make sure this wallet has been funded with at least 1 XLM on testnet ` +
-        `(visit https://friendbot.stellar.org?addr=${address}).`
+          `Make sure this wallet has been funded with at least 1 XLM on testnet ` +
+          `(visit https://friendbot.stellar.org?addr=${address}).`,
       );
     }
     throw new Error(`Horizon account fetch failed: ${res.statusText}`);
@@ -134,7 +138,6 @@ export async function callContract({
   args,
   callerAddress,
 }: CallContractOptions): Promise<unknown> {
-
   // ── 1. Fetch account sequence from Horizon REST API ──────────────────────
   // (Soroban RPC has no getAccount — account data lives on Horizon)
   const originalSequence = await getAccountSequence(callerAddress);
@@ -153,8 +156,8 @@ export async function callContract({
   // ── 3. Simulate via raw RPC ────────────────────────────────────────────────
   const simData = await sorobanRpc<{
     error?: string;
-    transactionData: string;           // base64 SorobanTransactionData XDR
-    minResourceFee: string;            // stroops to add on top of base fee
+    transactionData: string; // base64 SorobanTransactionData XDR
+    minResourceFee: string; // stroops to add on top of base fee
     results: Array<{ auth: string[]; xdr: string }>;
     latestLedger: number;
   }>("simulateTransaction", { transaction: simTx.toXDR() });
@@ -163,16 +166,20 @@ export async function callContract({
     throw new Error(`Soroban simulation failed: ${simData.error}`);
   }
   if (!simData.results?.length || !simData.transactionData) {
-    throw new Error("Simulation returned no results — contract may not exist on this network.");
+    throw new Error(
+      "Simulation returned no results — contract may not exist on this network.",
+    );
   }
 
   // ── 4. Assemble: build a FRESH tx with simulation results ─────────────────
-  const authEntries = (simData.results[0]?.auth ?? []).map(
-    (a: string) => xdr.SorobanAuthorizationEntry.fromXDR(a, "base64")
+  const authEntries = (simData.results[0]?.auth ?? []).map((a: string) =>
+    xdr.SorobanAuthorizationEntry.fromXDR(a, "base64"),
   );
 
   // Fee = base fee + simulation's minResourceFee
-  const assembledFee = String(Number(BASE_FEE) + Number(simData.minResourceFee));
+  const assembledFee = String(
+    Number(BASE_FEE) + Number(simData.minResourceFee),
+  );
 
   // Extract the HostFunction from the first operation of our sim tx
   // tx.operations returns decoded JS objects; func is the raw xdr.HostFunction
@@ -196,33 +203,29 @@ export async function callContract({
       Operation.invokeHostFunction({
         func: originalOp.func,
         auth: authEntries,
-      })
+      }),
     )
     .setTimeout(30)
     .build();
 
-  // ── 5. Sign with Freighter ─────────────────────────────────────────────────
-  // signTransaction returns { signedTxXdr, signerAddress, error? }
-  const freighterResult = await signTransaction(assembledTx.toXDR(), {
+  // ── 5. Sign with selected wallet ───────────────────────────────────────────
+  const signedResult = await signTransactionWithWallet({
+    xdr: assembledTx.toXDR(),
     networkPassphrase: NETWORK_PASSPHRASE,
     address: callerAddress,
   });
-  if (freighterResult.error) {
-    throw new Error(`Freighter signing failed: ${JSON.stringify(freighterResult.error)}`);
-  }
-  if (!freighterResult.signedTxXdr) {
-    throw new Error("Freighter returned no signed XDR — user may have cancelled.");
-  }
 
   // ── 6. Submit via raw RPC ──────────────────────────────────────────────────
   const sendData = await sorobanRpc<{
     status: string;
     hash: string;
     errorResult?: unknown;
-  }>("sendTransaction", { transaction: freighterResult.signedTxXdr });
+  }>("sendTransaction", { transaction: signedResult.signedTxXdr });
 
   if (sendData.status === "ERROR") {
-    throw new Error(`Transaction submission failed: ${JSON.stringify(sendData.errorResult)}`);
+    throw new Error(
+      `Transaction submission failed: ${JSON.stringify(sendData.errorResult)}`,
+    );
   }
 
   // ── 7. Poll for finality via raw RPC ──────────────────────────────────────
@@ -231,7 +234,7 @@ export async function callContract({
     await sleep(1000);
     const txResult = await sorobanRpc<{
       status: string;
-      returnValue?: string;  // base64 XDR SCVal when SUCCESS
+      returnValue?: string; // base64 XDR SCVal when SUCCESS
     }>("getTransaction", { hash });
 
     if (txResult.status === "SUCCESS") {
@@ -285,9 +288,7 @@ export async function simulateContractCall({
 
   // results[0].xdr is the base64-encoded SCVal return value
   const retvalXdr = simData.results?.[0]?.xdr;
-  return retvalXdr
-    ? decodeScVal(xdr.ScVal.fromXDR(retvalXdr, "base64"))
-    : null;
+  return retvalXdr ? decodeScVal(xdr.ScVal.fromXDR(retvalXdr, "base64")) : null;
 }
 
 // ─── Internal ─────────────────────────────────────────────────────────────────

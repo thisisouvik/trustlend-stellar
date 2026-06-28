@@ -11,8 +11,13 @@ import {
   addressToScVal,
   stringToScVal,
   enumToScVal,
+  u32ToScVal,
 } from "@/lib/stellar/soroban";
-import type { BorrowerProfile, ReputationEvent } from "@/types/contracts";
+import type {
+  BorrowerProfile,
+  OracleCreditData,
+  ReputationEvent,
+} from "@/types/contracts";
 
 const CONTRACT_ID = process.env.NEXT_PUBLIC_REPUTATION_CONTRACT_ID!;
 
@@ -173,6 +178,94 @@ export async function unfreezeAccount(
   });
 }
 
+// ─── Credit Oracle ────────────────────────────────────────────────────────────
+
+/**
+ * Read the currently authorized oracle address.
+ */
+export async function getOracle(callerAddress: string): Promise<string> {
+  const result = await simulateContractCall({
+    contractId: CONTRACT_ID,
+    method: "get_oracle",
+    args: [],
+    callerAddress,
+  });
+  return result as string;
+}
+
+/**
+ * Whether a borrower has any oracle credit data on-chain.
+ */
+export async function hasOracleData(
+  borrowerAddress: string,
+  callerAddress: string
+): Promise<boolean> {
+  const result = await simulateContractCall({
+    contractId: CONTRACT_ID,
+    method: "has_oracle_data",
+    args: [addressToScVal(borrowerAddress)],
+    callerAddress,
+  });
+  return result as boolean;
+}
+
+/**
+ * Fetch a borrower's latest oracle credit data.
+ */
+export async function getOracleData(
+  borrowerAddress: string,
+  callerAddress: string
+): Promise<OracleCreditData> {
+  const raw = await simulateContractCall({
+    contractId: CONTRACT_ID,
+    method: "get_oracle_data",
+    args: [addressToScVal(borrowerAddress)],
+    callerAddress,
+  });
+  return decodeOracleData(raw);
+}
+
+/**
+ * Register / rotate the authorized oracle (admin only — admin wallet signs).
+ */
+export async function setOracle(adminAddress: string, oracleAddress: string) {
+  return callContract({
+    contractId: CONTRACT_ID,
+    method: "set_oracle",
+    args: [addressToScVal(adminAddress), addressToScVal(oracleAddress)],
+    callerAddress: adminAddress,
+  });
+}
+
+/**
+ * Post verified off-chain credit data on-chain (oracle only — oracle wallet signs).
+ *
+ * NOTE: In production the credit score is posted by the trusted backend oracle
+ * via `scripts/oracle-post-credit-score.mjs` (signed with the oracle secret key).
+ * This browser-side wrapper exists for admin tooling / manual review flows where
+ * the oracle key is held in a connected wallet.
+ */
+export async function submitCreditScore(
+  oracleAddress: string,
+  borrowerAddress: string,
+  creditScore: number,
+  dataSources: number,
+  provider: string
+) {
+  return callContract({
+    contractId: CONTRACT_ID,
+    method: "submit_credit_score",
+    args: [
+      addressToScVal(oracleAddress),
+      addressToScVal(borrowerAddress),
+      u32ToScVal(creditScore),
+      u32ToScVal(dataSources),
+      stringToScVal(provider),
+    ],
+    callerAddress: oracleAddress,
+  });
+}
+
 // ─── Decoder helpers ──────────────────────────────────────────────────────────
 
 function decodeProfile(raw: unknown): BorrowerProfile {
@@ -189,6 +282,17 @@ function decodeProfile(raw: unknown): BorrowerProfile {
     createdAt: BigInt(r.created_at as string | number),
     isFrozen: r.is_frozen as boolean,
     freezeReason: r.freeze_reason as string,
+  };
+}
+
+function decodeOracleData(raw: unknown): OracleCreditData {
+  const r = raw as Record<string, unknown>;
+  return {
+    creditScore: Number(r.credit_score),
+    dataSources: Number(r.data_sources),
+    loanLimitBoostBps: Number(r.loan_limit_boost_bps),
+    provider: r.provider as string,
+    updatedAt: BigInt(r.updated_at as string | number),
   };
 }
 

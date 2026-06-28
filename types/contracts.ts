@@ -54,6 +54,35 @@ export const TIER_INTEREST_BPS: Record<ReputationTier, number> = {
   Platinum: 800,
 };
 
+// ── Credit Oracle ───────────────────────────────────────────────────────────────
+
+/** Verified off-chain credit data posted by the Decentralized Credit Oracle. */
+export interface OracleCreditData {
+  /** Normalised off-chain credit score, 0..1000 */
+  creditScore: number;
+  /** Number of distinct verified Web2 data sources backing the score */
+  dataSources: number;
+  /** Resulting max-loan boost in basis-points (10_000 = +100 %) */
+  loanLimitBoostBps: number;
+  /** Provider tag, e.g. "mobile-money", "plaid" */
+  provider: string;
+  /** Ledger timestamp when the oracle posted this record */
+  updatedAt: bigint;
+}
+
+/** Maximum normalised credit score the oracle may post (mirrors the contract). */
+export const MAX_ORACLE_SCORE = 1000;
+/** Hard cap on the oracle max-loan boost in basis-points (mirrors the contract). */
+export const MAX_LIMIT_BOOST_BPS = 10_000;
+/** Oracle record freshness window in seconds (90 days; mirrors the contract). */
+export const ORACLE_VALIDITY_SECONDS = 90 * 24 * 60 * 60;
+
+/** Deterministic score → loan-boost mapping (mirrors the contract). */
+export function scoreToBoostBps(creditScore: number): number {
+  const score = Math.max(0, Math.min(MAX_ORACLE_SCORE, Math.trunc(creditScore)));
+  return Math.trunc((score * MAX_LIMIT_BOOST_BPS) / MAX_ORACLE_SCORE);
+}
+
 // ── Escrow ────────────────────────────────────────────────────────────────────
 
 export type EscrowStatus = "Held" | "Transferred" | "Revoked";

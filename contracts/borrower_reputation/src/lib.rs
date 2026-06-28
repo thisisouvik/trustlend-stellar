@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,13 +48,50 @@ pub struct BorrowerProfile {
     pub freeze_reason: String,
 }
 
+/// Verified off-chain credit data ingested from a Decentralized Credit Oracle.
+///
+/// An authorized off-chain oracle (a Node service — see `scripts/oracle-post-credit-score.mjs`)
+/// aggregates Web2 signals (utility-bill history, mobile-money / telecom payments,
+/// banking history, etc.), normalises them to a single `credit_score` and posts it
+/// on-chain. The contract uses it to *increase* a borrower's maximum loan limit.
+#[contracttype]
+#[derive(Clone)]
+pub struct OracleCreditData {
+    /// Normalised off-chain credit score, 0..=`MAX_ORACLE_SCORE`.
+    pub credit_score: u32,
+    /// Number of distinct verified Web2 data sources backing this score
+    /// (e.g. 3 = utility + telecom + banking).
+    pub data_sources: u32,
+    /// Resulting max-loan boost in basis-points (10_000 = +100 %), derived
+    /// deterministically from `credit_score` and capped at `MAX_LIMIT_BOOST_BPS`.
+    pub loan_limit_boost_bps: u32,
+    /// Free-form provider tag, e.g. "plaid", "mobile-money", "experian".
+    pub provider: String,
+    /// Ledger timestamp when the oracle posted this record.
+    pub updated_at: u64,
+}
+
 /// Ledger storage keys.
 #[contracttype]
 pub enum DataKey {
     BorrowerProfile(Address),
     /// Stores the contract admin Address
     Admin,
+    /// Stores the authorized Credit Oracle Address (set by admin)
+    Oracle,
+    /// Stores the latest OracleCreditData for a borrower
+    OracleData(Address),
 }
+
+// ─── Oracle constants ───────────────────────────────────────────────────────────
+
+/// Maximum normalised credit score the oracle may post.
+const MAX_ORACLE_SCORE: u32 = 1000;
+/// Hard cap on the max-loan boost an oracle score can grant (10_000 bps = +100 %).
+const MAX_LIMIT_BOOST_BPS: u32 = 10_000;
+/// How long an oracle record is considered fresh (90 days, in seconds).
+/// Stale records are ignored when computing the max loan.
+const ORACLE_VALIDITY_SECONDS: u64 = 90 * 24 * 60 * 60;
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
 
@@ -120,15 +157,101 @@ impl BorrowerReputationContract {
     // ── Loan eligibility ──────────────────────────────────────────────────────
 
     /// Max loan in stroops (1 XLM = 10_000_000 stroops).
+    ///
+    /// Base limit comes from the borrower's reputation tier. If the borrower has
+    /// *fresh* oracle credit data, the limit is boosted by
+    /// `base * loan_limit_boost_bps / 10_000`. Stale records are ignored.
     pub fn calculate_max_loan(env: Env, borrower: Address) -> i128 {
-        let profile = Self::get_profile(env, borrower);
-        Self::tier_max_loan(&profile.reputation_tier)
+        let profile = Self::get_profile(env.clone(), borrower.clone());
+        let base = Self::tier_max_loan(&profile.reputation_tier);
+        if profile.is_frozen {
+            return base; // frozen accounts get no oracle boost
+        }
+        Self::apply_oracle_boost(&env, &borrower, base)
     }
 
     /// Interest rate in basis-points (1500 = 15.00 % APY).
     pub fn calculate_interest_rate(env: Env, borrower: Address) -> u32 {
         let profile = Self::get_profile(env, borrower);
         Self::tier_interest_rate(&profile.reputation_tier)
+    }
+
+    // ── Decentralized Credit Oracle ────────────────────────────────────────────
+
+    /// Register / rotate the authorized Credit Oracle address (admin only).
+    /// Only this address may call `submit_credit_score`.
+    pub fn set_oracle(env: Env, admin: Address, oracle: Address) {
+        admin.require_auth();
+        Self::assert_admin(&env, &admin);
+        env.storage().instance().set(&DataKey::Oracle, &oracle);
+        env.events()
+            .publish((symbol_short!("oracle"), symbol_short!("set")), oracle);
+    }
+
+    /// Read the currently authorized oracle address.
+    pub fn get_oracle(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::Oracle)
+            .expect("Oracle not configured")
+    }
+
+    /// Ingest verified off-chain credit data for a borrower.
+    ///
+    /// Must be signed by the authorized oracle (see `set_oracle`). The off-chain
+    /// service is responsible for verifying the Web2 sources and normalising them
+    /// to `credit_score` (0..=`MAX_ORACLE_SCORE`). The resulting boost is derived
+    /// deterministically on-chain so the mapping is auditable.
+    pub fn submit_credit_score(
+        env: Env,
+        oracle: Address,
+        borrower: Address,
+        credit_score: u32,
+        data_sources: u32,
+        provider: String,
+    ) {
+        oracle.require_auth();
+        Self::assert_oracle(&env, &oracle);
+
+        if credit_score > MAX_ORACLE_SCORE {
+            panic!("credit_score exceeds MAX_ORACLE_SCORE");
+        }
+
+        // Borrower must have an on-chain profile, and must not be frozen.
+        let profile = Self::get_profile(env.clone(), borrower.clone());
+        if profile.is_frozen {
+            panic!("Cannot post oracle data for a frozen account");
+        }
+
+        let boost_bps = Self::score_to_boost_bps(credit_score);
+        let data = OracleCreditData {
+            credit_score,
+            data_sources,
+            loan_limit_boost_bps: boost_bps,
+            provider,
+            updated_at: env.ledger().timestamp(),
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::OracleData(borrower.clone()), &data);
+
+        env.events().publish(
+            (symbol_short!("oracle"), symbol_short!("score")),
+            (borrower, credit_score, boost_bps),
+        );
+    }
+
+    pub fn has_oracle_data(env: Env, borrower: Address) -> bool {
+        env.storage()
+            .persistent()
+            .has(&DataKey::OracleData(borrower))
+    }
+
+    pub fn get_oracle_data(env: Env, borrower: Address) -> OracleCreditData {
+        env.storage()
+            .persistent()
+            .get(&DataKey::OracleData(borrower))
+            .expect("No oracle data for borrower")
     }
 
     // ── Mutations (admin-only for MVP) ────────────────────────────────────────
@@ -279,6 +402,42 @@ impl BorrowerReputationContract {
             ReputationTier::Silver   => 1200, // 12.00 %
             ReputationTier::Gold     => 1000, // 10.00 %
             ReputationTier::Platinum =>  800, //  8.00 %
+        }
+    }
+
+    /// Map a normalised credit score (0..=MAX_ORACLE_SCORE) to a max-loan boost
+    /// in basis-points, linearly, capped at `MAX_LIMIT_BOOST_BPS`.
+    /// e.g. score 1000 -> +100 %, score 500 -> +50 %, score 0 -> +0 %.
+    fn score_to_boost_bps(credit_score: u32) -> u32 {
+        let score = credit_score.min(MAX_ORACLE_SCORE);
+        // score * MAX_LIMIT_BOOST_BPS / MAX_ORACLE_SCORE — both ≤ 10_000 so no u32 overflow.
+        (score * MAX_LIMIT_BOOST_BPS) / MAX_ORACLE_SCORE
+    }
+
+    /// Apply a fresh oracle boost to a base limit. Returns `base` unchanged when
+    /// there is no oracle record or the record is stale.
+    fn apply_oracle_boost(env: &Env, borrower: &Address, base: i128) -> i128 {
+        let key = DataKey::OracleData(borrower.clone());
+        let data: OracleCreditData = match env.storage().persistent().get(&key) {
+            Some(d) => d,
+            None => return base,
+        };
+        if env.ledger().timestamp() > data.updated_at + ORACLE_VALIDITY_SECONDS {
+            return base; // stale — ignore
+        }
+        // base ≤ 1e12, boost_bps ≤ 10_000 → product ≤ 1e16, well within i128.
+        let boost = base * (data.loan_limit_boost_bps as i128) / 10_000;
+        base + boost
+    }
+
+    fn assert_oracle(env: &Env, caller: &Address) {
+        let oracle: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Oracle)
+            .expect("Oracle not configured");
+        if *caller != oracle {
+            panic!("Unauthorised: caller is not the registered oracle");
         }
     }
 

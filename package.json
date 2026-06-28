@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "cross-env NODE_OPTIONS=--dns-result-order=ipv4first next start",
     "lint": "eslint",
-    "e2e:seed": "node scripts/e2e-seed-and-run.mjs"
+    "e2e:seed": "node scripts/e2e-seed-and-run.mjs",
+    "oracle:post": "node scripts/oracle-post-credit-score.mjs"
   },
   "dependencies": {
     "@stellar/freighter-api": "^6.0.1",

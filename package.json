@@ -7,10 +7,11 @@
     "build": "next build",
     "start": "cross-env NODE_OPTIONS=--dns-result-order=ipv4first next start",
     "lint": "eslint",
-    "test": "vitest run",
-    "e2e:seed": "node scripts/e2e-seed-and-run.mjs"
+    "e2e:seed": "node scripts/e2e-seed-and-run.mjs",
+    "oracle:post": "node scripts/oracle-post-credit-score.mjs"
   },
   "dependencies": {
+    "@albedo-link/intent": "^0.13.0",
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^16.0.1",
     "@supabase/ssr": "^0.10.2",

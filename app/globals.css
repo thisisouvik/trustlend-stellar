@@ -3272,3 +3272,121 @@ a {
   color: rgba(255, 255, 255, 0.85);
   font-size: 0.78rem;
 }
+
+/* ─── Error Fallback ─────────────────────────────────── */
+.error-fallback-shell {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1rem;
+  background:
+    radial-gradient(1200px 450px at 15% -15%, rgba(126, 47, 208, 0.2), transparent),
+    radial-gradient(800px 400px at 95% 0%, rgba(45, 211, 159, 0.19), transparent),
+    #f4f6fd;
+}
+
+.dark .error-fallback-shell {
+  background:
+    radial-gradient(1200px 450px at 15% -15%, rgba(126, 47, 208, 0.15), transparent),
+    radial-gradient(800px 400px at 95% 0%, rgba(45, 211, 159, 0.14), transparent),
+    #0b0d1a;
+}
+
+.error-fallback-card {
+  width: min(480px, 100%);
+  border-radius: 1.5rem;
+  border: 1px solid rgba(129, 97, 182, 0.25);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 22px 36px rgba(40, 26, 84, 0.14);
+  padding: 2.5rem 2rem;
+  text-align: center;
+  display: grid;
+  gap: 0.75rem;
+  justify-items: center;
+}
+
+.dark .error-fallback-card {
+  border: 1px solid rgba(160, 167, 197, 0.25);
+  background: rgba(20, 24, 46, 0.95);
+  box-shadow: 0 22px 36px rgba(0, 0, 0, 0.3);
+}
+
+.error-fallback-icon-wrap {
+  position: relative;
+  width: 4rem;
+  height: 4rem;
+  display: grid;
+  place-items: center;
+}
+
+.error-fallback-orb {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: radial-gradient(circle at 40% 35%, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0) 55%),
+    linear-gradient(145deg, rgba(239, 68, 68, 0.5), rgba(185, 28, 28, 0.6));
+  box-shadow: 0 10px 24px rgba(185, 28, 28, 0.3);
+  animation: errorPulse 2s ease-in-out infinite;
+}
+
+@keyframes errorPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.1); opacity: 0.85; }
+}
+
+.error-fallback-icon {
+  position: relative;
+  z-index: 1;
+  color: #ffffff;
+  font-size: 1.6rem;
+  font-weight: 900;
+  font-family: var(--font-sora), sans-serif;
+  line-height: 1;
+}
+
+.error-fallback-title {
+  margin: 0;
+  font-family: var(--font-sora), sans-serif;
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #1d254a;
+  letter-spacing: -0.02em;
+}
+
+.dark .error-fallback-title {
+  color: #e6e8f0;
+}
+
+.error-fallback-message {
+  margin: 0;
+  color: #6f7696;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  max-width: 36ch;
+}
+
+.error-fallback-detail {
+  margin: 0;
+  padding: 0.65rem 1rem;
+  border-radius: 0.65rem;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  color: #b91c1c;
+  font-size: 0.78rem;
+  font-family: monospace;
+  max-width: 100%;
+  overflow-x: auto;
+  word-break: break-all;
+}
+
+.dark .error-fallback-detail {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+}
+
+.error-fallback-btn {
+  margin-top: 0.5rem;
+  min-height: 46px;
+  padding: 0 2rem;
+  font-size: 0.9rem;
+}

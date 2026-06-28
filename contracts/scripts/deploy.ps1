@@ -38,6 +38,14 @@ $DEFAULT_ID = Deploy-Contract "DefaultManagement" "target/wasm32v1-none/release/
 Write-Host "Initializing Reputation..."
 stellar contract invoke --id $REPUTATION_ID --source $ADMIN_KEY --network $NETWORK -- initialize --admin $ADMIN_ADDRESS
 
+# Optional: register the Credit Oracle (set $env:ORACLE_ADDRESS to enable).
+if ($env:ORACLE_ADDRESS) {
+    Write-Host "Registering Credit Oracle ($env:ORACLE_ADDRESS)..."
+    stellar contract invoke --id $REPUTATION_ID --source $ADMIN_KEY --network $NETWORK -- set_oracle --admin $ADMIN_ADDRESS --oracle $env:ORACLE_ADDRESS
+} else {
+    Write-Host "Skipping oracle registration (set `$env:ORACLE_ADDRESS to enable)."
+}
+
 Write-Host "Initializing Escrow..."
 stellar contract invoke --id $ESCROW_ID --source $ADMIN_KEY --network $NETWORK -- initialize --admin $ADMIN_ADDRESS
 
@@ -54,6 +62,7 @@ NEXT_PUBLIC_ESCROW_CONTRACT_ID=$ESCROW_ID
 NEXT_PUBLIC_LENDING_CONTRACT_ID=$LENDING_ID
 NEXT_PUBLIC_DEFAULT_CONTRACT_ID=$DEFAULT_ID
 NEXT_PUBLIC_ADMIN_ADDRESS=$ADMIN_ADDRESS
+NEXT_PUBLIC_ORACLE_ADDRESS=$env:ORACLE_ADDRESS
 "@
 $envFile | Out-File -FilePath ../.env.contracts -Encoding utf8
 Write-Host "Saved to .env.contracts!"

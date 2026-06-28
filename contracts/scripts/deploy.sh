@@ -83,6 +83,25 @@ stellar contract invoke \
   -- initialize \
   --admin "$ADMIN_ADDRESS"
 
+# ── Optional: register the Credit Oracle ──────────────────────────────────────
+# Set ORACLE_ADDRESS in your shell to auto-authorize the oracle that may post
+# off-chain credit scores (see scripts/oracle-post-credit-score.mjs).
+#   export ORACLE_ADDRESS=$(stellar keys address trustlend-oracle)
+if [ -n "${ORACLE_ADDRESS:-}" ]; then
+  echo "▶ Registering Credit Oracle ($ORACLE_ADDRESS)…"
+  stellar contract invoke \
+    --id "$REPUTATION_ID" \
+    --source "$ADMIN_KEY" \
+    --network "$NETWORK" \
+    -- set_oracle \
+    --admin "$ADMIN_ADDRESS" \
+    --oracle "$ORACLE_ADDRESS"
+  echo "  ✔ Oracle authorized"
+else
+  echo "ℹ Skipping oracle registration (set ORACLE_ADDRESS to enable). Run later:"
+  echo "    stellar contract invoke --id $REPUTATION_ID --source $ADMIN_KEY --network $NETWORK -- set_oracle --admin $ADMIN_ADDRESS --oracle <ORACLE_ADDRESS>"
+fi
+
 echo "▶ Initialising EscrowContract…"
 stellar contract invoke \
   --id "$ESCROW_ID" \
@@ -151,6 +170,7 @@ NEXT_PUBLIC_ESCROW_CONTRACT_ID=$ESCROW_ID
 NEXT_PUBLIC_LENDING_CONTRACT_ID=$LENDING_ID
 NEXT_PUBLIC_DEFAULT_CONTRACT_ID=$DEFAULT_ID
 NEXT_PUBLIC_ADMIN_ADDRESS=$ADMIN_ADDRESS
+NEXT_PUBLIC_ORACLE_ADDRESS=${ORACLE_ADDRESS:-}
 EOF
 
 echo ""

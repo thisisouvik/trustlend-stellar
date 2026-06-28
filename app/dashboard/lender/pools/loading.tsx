@@ -1,4 +1,4 @@
-import { PoolCardSkeleton } from "@/components/dashboard/PoolCardSkeleton";
+import { LenderPoolsPageSkeleton } from "@/components/dashboard/PoolCardSkeleton";
 import { lenderNavLinks } from "@/lib/dashboard/lender-links";
 import { WorkspaceFrame } from "@/components/dashboard/WorkspaceFrame";
 
@@ -29,7 +29,7 @@ export default function LenderPoolsLoading() {
       showProfileAlert={false}
       links={lenderNavLinks}
     >
-      <PoolCardSkeleton />
+      <LenderPoolsPageSkeleton />
     </WorkspaceFrame>
   );
 }

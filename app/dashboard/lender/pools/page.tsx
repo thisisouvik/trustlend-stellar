@@ -341,7 +341,15 @@ export default async function LenderPoolsPage() {
           </article>
         </section>
 
-        {/* ── Available pools table ─────────────────────────────── */}
+        {/* ── Available pools – rendered client-side with skeleton loading ── */}
+        {/*
+          AvailablePools is a Client Component that:
+          1. Starts with isLoading = true and renders <PoolCardSkeleton />
+          2. Fetches lending_pools from Supabase browser client
+          3. Sets isLoading = false and renders animated pool cards
+          This eliminates the blank-screen delay caused by the old
+          server-side blocking table render.
+        */}
         <article className="workspace-card workspace-card--full">
           <h2 className="workspace-card-title">Available Lending Pools</h2>
           {pools.length === 0 ? (

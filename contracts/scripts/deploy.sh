@@ -72,6 +72,14 @@ DEFAULT_ID=$(stellar contract deploy \
   --source "$ADMIN_KEY")
 echo "  ✔ DEFAULT_CONTRACT_ID = $DEFAULT_ID"
 
+echo ""
+echo "▶ Deploying GovernanceContract…"
+GOVERNANCE_ID=$(stellar contract deploy \
+  --wasm target/wasm32v1-none/release/governance.wasm \
+  --network "$NETWORK" \
+  --source "$ADMIN_KEY")
+echo "  ✔ GOVERNANCE_CONTRACT_ID = $GOVERNANCE_ID"
+
 # ── Step 3: Initialise contracts ──────────────────────────────────────────────
 
 echo ""
@@ -127,6 +135,31 @@ stellar contract invoke \
   --admin "$ADMIN_ADDRESS" \
   --initial_insurance_balance 0
 
+# Governance: 3-day voting window, quorum 500, min proposer power 150 (Silver),
+# fee cap 1000 bps (10 %). Voting power = reputation score.
+echo "▶ Initialising GovernanceContract…"
+stellar contract invoke \
+  --id "$GOVERNANCE_ID" \
+  --source "$ADMIN_KEY" \
+  --network "$NETWORK" \
+  -- initialize \
+  --admin "$ADMIN_ADDRESS" \
+  --lending "$LENDING_ID" \
+  --reputation "$REPUTATION_ID" \
+  --voting_period_secs 259200 \
+  --quorum_votes 500 \
+  --min_proposer_power 150 \
+  --max_fee_bps 1000
+
+echo "▶ Linking Governance → Lending (only votes can change the fee)…"
+stellar contract invoke \
+  --id "$LENDING_ID" \
+  --source "$ADMIN_KEY" \
+  --network "$NETWORK" \
+  -- set_governance \
+  --admin "$ADMIN_ADDRESS" \
+  --governance "$GOVERNANCE_ID"
+
 echo ""
 echo "✔ All contracts initialised"
 
@@ -158,6 +191,11 @@ stellar contract bindings typescript \
   --id "$DEFAULT_ID" \
   --output-dir "$BINDINGS_OUT/default_management"
 
+stellar contract bindings typescript \
+  --network "$NETWORK" \
+  --id "$GOVERNANCE_ID" \
+  --output-dir "$BINDINGS_OUT/governance"
+
 echo "  ✔ Bindings written to lib/contracts/generated/"
 
 # ── Step 5: Write .env.local snippet ─────────────────────────────────────────
@@ -169,6 +207,7 @@ NEXT_PUBLIC_REPUTATION_CONTRACT_ID=$REPUTATION_ID
 NEXT_PUBLIC_ESCROW_CONTRACT_ID=$ESCROW_ID
 NEXT_PUBLIC_LENDING_CONTRACT_ID=$LENDING_ID
 NEXT_PUBLIC_DEFAULT_CONTRACT_ID=$DEFAULT_ID
+NEXT_PUBLIC_GOVERNANCE_CONTRACT_ID=$GOVERNANCE_ID
 NEXT_PUBLIC_ADMIN_ADDRESS=$ADMIN_ADDRESS
 NEXT_PUBLIC_ORACLE_ADDRESS=${ORACLE_ADDRESS:-}
 EOF
@@ -185,4 +224,5 @@ echo "    Reputation  : $REPUTATION_ID"
 echo "    Escrow      : $ESCROW_ID"
 echo "    Lending     : $LENDING_ID"
 echo "    Default Mgmt: $DEFAULT_ID"
+echo "    Governance  : $GOVERNANCE_ID"
 echo "═══════════════════════════════════════════════════"

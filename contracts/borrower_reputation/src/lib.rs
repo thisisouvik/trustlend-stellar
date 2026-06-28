@@ -154,6 +154,16 @@ impl BorrowerReputationContract {
             .expect("Profile not found")
     }
 
+    /// Raw reputation score, or 0 if the borrower has no profile.
+    /// Used by the Governance contract as reputation-weighted voting power.
+    pub fn get_reputation_score(env: Env, borrower: Address) -> i128 {
+        env.storage()
+            .persistent()
+            .get::<DataKey, BorrowerProfile>(&DataKey::BorrowerProfile(borrower))
+            .map(|p| p.reputation_score)
+            .unwrap_or(0)
+    }
+
     // ── Loan eligibility ──────────────────────────────────────────────────────
 
     /// Max loan in stroops (1 XLM = 10_000_000 stroops).

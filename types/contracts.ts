@@ -177,6 +177,50 @@ export function xlmToStroops(xlm: number): bigint {
   return BigInt(Math.round(xlm * 10_000_000));
 }
 
+// ── DAO Governance ────────────────────────────────────────────────────────────
+
+export type ProposalStatus = "Active" | "Passed" | "Rejected" | "Executed";
+
+export type ProposalKind = "SetPlatformFeeBps";
+
+export interface Proposal {
+  id: number;
+  proposer: string;
+  kind: ProposalKind;
+  /** Proposed parameter value (for SetPlatformFeeBps: new fee in bps). */
+  newValue: number;
+  /** Sum of reputation-weighted voting power in favour. */
+  votesFor: bigint;
+  /** Sum of reputation-weighted voting power against. */
+  votesAgainst: bigint;
+  createdAt: bigint;
+  /** Ledger timestamp when voting closes. */
+  endAt: bigint;
+  status: ProposalStatus;
+}
+
+export interface GovConfig {
+  admin: string;
+  lending: string;
+  reputation: string;
+  votingPeriodSecs: bigint;
+  quorumVotes: bigint;
+  minProposerPower: bigint;
+  maxFeeBps: number;
+}
+
+/** Default lending platform fee in bps of interest (mirrors the contract). */
+export const DEFAULT_PLATFORM_FEE_BPS = 100;
+/** Hard ceiling on the platform fee in bps (mirrors the lending contract). */
+export const MAX_PLATFORM_FEE_BPS = 1000;
+
+export const PROPOSAL_STATUS_LABEL: Record<ProposalStatus, string> = {
+  Active: "Voting Open",
+  Passed: "Passed – Awaiting Execution",
+  Rejected: "Rejected",
+  Executed: "Executed",
+};
+
 /**
  * Calculate interest in stroops.
  * formula: principal × rate_bps × days / (10_000 × 365)

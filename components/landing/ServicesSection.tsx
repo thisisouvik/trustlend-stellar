@@ -1,4 +1,7 @@
+"use client";
+
 import { MonitorPlay, TrendingUp, ShieldCheck, Zap } from "lucide-react";
+import Image from "next/image";
 import { motion } from "framer-motion";
 import type { HighlightContent, MetricItem } from "@/types/landing";
 

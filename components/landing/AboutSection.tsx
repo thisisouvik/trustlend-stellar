@@ -1,3 +1,5 @@
+"use client";
+
 import { motion } from "framer-motion";
 import type { AboutContent, P2PStep } from "@/types/landing";
 
@@ -38,8 +40,7 @@ export function AboutSection({ content, steps }: AboutSectionProps) {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: "-100px" }}
               transition={{ duration: 0.6, delay: i * 0.15, ease: "easeOut" }}
-              whileHover={{ scale: 1.05, y: -10 }}
-              transition={{ type: "spring", stiffness: 400, damping: 10 }}
+              whileHover={{ scale: 1.05, y: -10, transition: { type: "spring", stiffness: 400, damping: 10 } }}
             >
               <motion.span
                 className="p2p-badge"

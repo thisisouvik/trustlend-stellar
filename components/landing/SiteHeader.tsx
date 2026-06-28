@@ -1,3 +1,5 @@
+"use client";
+
 import Image from "next/image";
 import { motion } from "framer-motion";
 import type { NavItem } from "@/types/landing";
@@ -47,8 +49,7 @@ export function SiteHeader({ items, isAuthenticated = false }: SiteHeaderProps) 
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.3 + i * 0.05, ease: "easeOut" }}
-              whileHover={{ scale: 1.1, color: "#7f2fd1" }}
-              transition={{ type: "spring", stiffness: 400, damping: 10 }}
+              whileHover={{ scale: 1.1, color: "#7f2fd1", transition: { type: "spring", stiffness: 400, damping: 10 } }}
             >
               {item.label}
             </motion.a>

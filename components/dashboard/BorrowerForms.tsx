@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { formatCurrency } from "@/lib/utils/formatting";
+import { formatTokenBalance } from "@/lib/utils/formatting";
 import {
   LendingContract,
   ReputationContract,
@@ -346,7 +346,7 @@ export function BorrowerForms({
                   </p>
                 </div>
                 <div style={{ textAlign: "right" }}>
-                  <p style={{ margin: 0, fontWeight: 800, color: "#7e2fd0" }}>{formatCurrency(Number(loan.principal_amount ?? 0))}</p>
+                  <p style={{ margin: 0, fontWeight: 800, color: "#7e2fd0" }}>{formatTokenBalance(Number(loan.principal_amount ?? 0))}</p>
                   <p style={{ fontSize: "0.75rem", color: "#f59e0b", fontWeight: 700, margin: "0.15rem 0 0" }}>REQUESTED</p>
                 </div>
               </div>
@@ -369,7 +369,7 @@ export function BorrowerForms({
         ) : (
           <>
             <p className="workspace-card-copy">Loan #{String(selectedRepaymentLoan.id).slice(0, 8)}</p>
-            <p className="workspace-card-copy">Still owe: {formatCurrency(dueAmount)}</p>
+            <p className="workspace-card-copy">Still owe: {formatTokenBalance(dueAmount)}</p>
             <p className="workspace-card-copy">
               Next due: {selectedRepaymentLoan.due_at ? new Date(String(selectedRepaymentLoan.due_at)).toLocaleDateString() : "-"}
             </p>

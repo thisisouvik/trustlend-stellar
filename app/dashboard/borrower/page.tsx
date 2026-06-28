@@ -87,8 +87,8 @@ export default async function BorrowerDashboardPage() {
   const REPAYABLE_STATUSES = ["active", "funded", "approved"];
   const activeLoans  = normalizedLoans.filter((l) => REPAYABLE_STATUSES.includes(String(l.effectiveStatus)));
   const pendingLoans = normalizedLoans.filter((l) => String(l.effectiveStatus) === "requested");
-  const inLoansXlm   = activeLoans.reduce((sum, l) => sum + Math.max(0, Number(l.principal_amount ?? 0) - Number(l.repaid_amount ?? 0)), 0);
-  const pendingXlm   = pendingLoans.reduce((sum, l) => sum + Number(l.principal_amount ?? 0), 0);
+  const inLoansXlm   = activeLoans.reduce((sum, l) => sum + Math.max(0, Number(l.principal_amount ?? 0) - Number(l.repaid_amount ?? 0)), 0) / 10000000;
+  const pendingXlm   = pendingLoans.reduce((sum, l) => sum + Number(l.principal_amount ?? 0), 0) / 10000000;
 
   // Pick first repayable loan for the quick repayment widget on home
   const repayableLoan = activeLoans[0] ?? null;
@@ -257,7 +257,7 @@ export default async function BorrowerDashboardPage() {
                     return (
                       <tr key={loanId} style={{ borderBottom: "1px solid #f9fafb" }}>
                         <td style={{ padding: "0.75rem", fontFamily: "monospace", fontSize: "0.8rem", color: "#6b7280" }}>{loanId.slice(0, 8)}</td>
-                        <td style={{ padding: "0.75rem", fontWeight: 700 }}>{Number(loan.principal_amount).toFixed(2)} XLM</td>
+                        <td style={{ padding: "0.75rem", fontWeight: 700 }}>{(Number(loan.principal_amount) / 10000000).toFixed(2)} XLM</td>
                           <td style={{ padding: "0.75rem" }}>
                             <Badge variant={statusBadge(status)}>{status.toUpperCase()}</Badge>
                           </td>

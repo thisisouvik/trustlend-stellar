@@ -22,10 +22,11 @@ export interface AdminDashboardMetrics {
   highRiskUsers: number;
 }
 
-function toCurrency(value: number): string {
+function toCurrency(valueInStroops: number): string {
+  const adjustedValue = valueInStroops / 10000000;
   return `${new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
-  }).format(value)} XLM`;
+  }).format(adjustedValue)} XLM`;
 }
 
 function toPercentage(value: number): string {

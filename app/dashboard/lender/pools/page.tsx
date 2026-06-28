@@ -8,7 +8,7 @@ import {
 } from "@/lib/dashboard/metrics";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
 import { lenderNavLinks } from "@/lib/dashboard/lender-links";
-import { formatCurrency } from "@/lib/utils/formatting";
+import { formatCurrency, formatTokenBalance } from "@/lib/utils/formatting";
 import {
   isLikelyTxHash,
   buildStellarTxVerificationUrl,
@@ -401,10 +401,10 @@ export default async function LenderPoolsPage() {
                         </td>
                         <td>{(Number(pool.apr_bps ?? 0) / 100).toFixed(2)}%</td>
                         <td>
-                          {formatCurrency(Number(pool.total_liquidity ?? 0))}
+                          {formatTokenBalance(Number(pool.total_liquidity ?? 0))}
                         </td>
                         <td>
-                          {Number(pool.available_liquidity ?? 0).toFixed(2)} XLM
+                          {formatTokenBalance(Number(pool.available_liquidity ?? 0))}
                         </td>
                         <td
                           style={{
@@ -413,7 +413,7 @@ export default async function LenderPoolsPage() {
                           }}
                         >
                           {myPos
-                            ? `${Number(myPos.principal_amount ?? 0).toFixed(2)} XLM ✅`
+                            ? `${formatTokenBalance(Number(myPos.principal_amount ?? 0))} ✅`
                             : "—"}
                         </td>
                       </tr>

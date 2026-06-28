@@ -9,7 +9,7 @@ import {
   getServerSupabaseClient,
   getServiceRoleClient,
 } from "@/lib/supabase/server";
-import { formatCurrency } from "@/lib/utils/formatting";
+import { formatCurrency, formatTokenBalance } from "@/lib/utils/formatting";
 import { lenderNavLinks } from "@/lib/dashboard/lender-links";
 import Link from "next/link";
 
@@ -247,12 +247,12 @@ export default async function LenderHomePage() {
           {[
             {
               label: "Total Deployed",
-              value: `${metrics.deployedCapital.toFixed(2)} XLM`,
+              value: formatTokenBalance(metrics.deployedCapital),
               sub: `${metrics.activePositions} active pool position${metrics.activePositions !== 1 ? "s" : ""}`,
             },
             {
               label: "Net Earnings",
-              value: formatCurrency(netEarnings),
+              value: formatTokenBalance(netEarnings),
               sub: "Total accumulated interest",
               highlight: true,
               positive: netEarnings >= 0,
@@ -361,11 +361,11 @@ export default async function LenderHomePage() {
                         </td>
                         <td>
                           <strong>
-                            {Number(pos.principal_amount ?? 0).toFixed(2)} XLM
+                            {formatTokenBalance(Number(pos.principal_amount ?? 0))}
                           </strong>
                         </td>
                         <td style={{ color: "#22cf9d" }}>
-                          {Number(pos.earned_interest ?? 0).toFixed(4)} XLM
+                          {formatTokenBalance(Number(pos.earned_interest ?? 0))}
                         </td>
                       </tr>
                     ))}
@@ -457,7 +457,7 @@ export default async function LenderHomePage() {
                           </td>
                           <td>
                             <strong>
-                              {Number(tx.amount ?? 0).toFixed(2)} XLM
+                              {formatTokenBalance(Number(tx.amount ?? 0))}
                             </strong>
                           </td>
                           <td>

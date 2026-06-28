@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -106,6 +106,11 @@ impl EscrowContract {
             .instance()
             .set(&DataKey::EscrowCount, &new_id);
 
+        env.events().publish(
+            (symbol_short!("escrow"), symbol_short!("deposit")),
+            (lender, loan_id, amount),
+        );
+
         new_id
     }
 
@@ -139,6 +144,11 @@ impl EscrowContract {
         env.storage()
             .persistent()
             .set(&DataKey::Hold(escrow_id), &hold);
+
+        env.events().publish(
+            (symbol_short!("escrow"), symbol_short!("withdraw")),
+            (lender, hold.loan_id, hold.amount),
+        );
     }
 
     /// Mark escrow as disbursed once the on-chain payment to the borrower

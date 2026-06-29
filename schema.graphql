@@ -1,0 +1,35 @@
+# SubQuery Schema definition for TrustLend events
+# TODO (SubQuery Indexer Migration):
+# Define schema mappings for Deposit, Borrow, and Liquidation events.
+
+type Deposit @entity {
+  id: ID! # Transaction Hash + Event Index
+  poolId: String! @index
+  lenderAddress: String! @index
+  amount: BigInt!
+  ledgerHeight: Int!
+  timestamp: Date!
+}
+
+type Borrow @entity {
+  id: ID! # Transaction Hash + Event Index
+  loanId: String! @index
+  borrowerAddress: String! @index
+  amount: BigInt!
+  durationDays: Int!
+  interestRateBps: Int!
+  totalDue: BigInt!
+  ledgerHeight: Int!
+  timestamp: Date!
+}
+
+type Liquidation @entity {
+  id: ID! # Transaction Hash + Event Index
+  loanId: String! @index
+  borrowerAddress: String! @index
+  liquidatorAddress: String!
+  repaidAmount: BigInt!
+  collateralSeized: BigInt!
+  ledgerHeight: Int!
+  timestamp: Date!
+}

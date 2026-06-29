@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Vec};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -222,6 +222,19 @@ impl LendingContract {
         // Track per-borrower list
         Self::push_loan_id_for_borrower(&env, &borrower, loan_id);
 
+        env.events().publish(
+            (symbol_short!("loan"), symbol_short!("request")),
+            (
+                loan_id,
+                borrower,
+                amount,
+                duration_days,
+                interest_rate_bps,
+                total_due,
+                due_at,
+            ),
+        );
+
         loan_id
     }
 
@@ -245,6 +258,11 @@ impl LendingContract {
 
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
         Self::push_loan_id_for_lender(&env, &lender, loan_id);
+
+        env.events().publish(
+            (symbol_short!("loan"), symbol_short!("approved")),
+            (loan_id, lender, escrow_id),
+        );
     }
 
     /// Lender revokes an approved loan (within the 1-hour escrow window).
@@ -264,6 +282,9 @@ impl LendingContract {
         loan.lender = env.current_contract_address();
         loan.escrow_id = 0;
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+
+        env.events()
+            .publish((symbol_short!("loan"), symbol_short!("revoked")), loan_id);
     }
 
     /// Admin/backend activates the loan once escrow disbursement is confirmed.
@@ -277,6 +298,9 @@ impl LendingContract {
         }
         loan.status = LoanStatus::Active;
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+
+        env.events()
+            .publish((symbol_short!("loan"), symbol_short!("active")), loan_id);
     }
 
     /// Record a repayment (partial or full).
@@ -326,6 +350,10 @@ impl LendingContract {
         }
 
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+        env.events().publish(
+            (symbol_short!("loan"), symbol_short!("payment")),
+            (loan_id, amount, loan.remaining_due, loan.status.clone()),
+        );
         loan.status
     }
 
@@ -340,6 +368,9 @@ impl LendingContract {
         }
         loan.status = LoanStatus::Defaulted;
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+
+        env.events()
+            .publish((symbol_short!("loan"), symbol_short!("default")), loan_id);
     }
 
     // ── Queries ───────────────────────────────────────────────────────────────

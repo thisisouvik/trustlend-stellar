@@ -11,6 +11,11 @@ import { buildStellarTxVerificationUrl, extractPossibleTxHash, isLikelyTxHash } 
 import { BorrowerRepayWidget } from "@/components/dashboard/BorrowerRepayWidget";
 import { WithdrawToFiatButton } from "@/components/dashboard/WithdrawToFiatButton";
 import { borrowerNavLinks } from "@/lib/dashboard/borrower-links";
+import {
+  getIndexedBorrowerReadModel,
+  isIndexerConfigured,
+  isIndexerRequired,
+} from "@/lib/indexer/read-model";
 
 // ── Inline SVG illustrations ───────────────────────────────────────────────
 function EmptyLoansIllustration() {
@@ -39,7 +44,7 @@ function EmptyLoansIllustration() {
 export default async function BorrowerDashboardPage() {
   const { user } = await requireAuthenticatedUser("borrower");
   const walletAddress = String(user.user_metadata?.wallet_address ?? "") || null;
-  const metrics = await getBorrowerDashboardMetrics(user.id);
+  const metrics = await getBorrowerDashboardMetrics(user.id, walletAddress);
 
   const supabase = await getServerSupabaseClient();
   const srClient = getServiceRoleClient();
@@ -61,7 +66,30 @@ export default async function BorrowerDashboardPage() {
     : [{ data: null }, { data: [] }];
 
   const profile = profileRes.data;
-  const loans = loansRes.data ?? [];
+  const dbLoans = loansRes.data ?? [];
+  let indexedLoans: typeof dbLoans | null = null;
+  if (isIndexerConfigured() && walletAddress) {
+    try {
+      const indexed = await getIndexedBorrowerReadModel({
+        userId: user.id,
+        walletAddress,
+        limit: 20,
+      });
+      indexedLoans = indexed.loans.map((loan) => ({
+        id: loan.id,
+        status: loan.status === "pending" ? "requested" : loan.status,
+        principal_amount: loan.principalAmount / 10000000,
+        repaid_amount: loan.repaidAmount / 10000000,
+        apr_bps: loan.aprBps,
+        duration_days: loan.durationDays,
+        due_at: loan.dueAt,
+        created_at: loan.createdAt,
+      })) as typeof dbLoans;
+    } catch (error) {
+      if (isIndexerRequired()) throw error;
+    }
+  }
+  const loans = indexedLoans?.length ? indexedLoans : dbLoans;
 
   // Stellar TX lookups
   const loanIds = loans.map((l) => String(l.id));

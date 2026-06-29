@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Tests for optimized pool database queries
  * 
@@ -11,7 +12,7 @@
  * Run with: npm test -- pools.test.ts
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { SupabaseClient } from "@supabase/supabase-js";
 import {
   fetchPools,

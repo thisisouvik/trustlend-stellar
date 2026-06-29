@@ -279,11 +279,24 @@ export async function fetchAdminDashboardPools(
 // HELPER FUNCTIONS
 // ─────────────────────────────────────────────────────────────────────────────
 
+interface RawPool {
+  id: unknown;
+  name?: unknown;
+  description?: unknown;
+  status?: unknown;
+  apr_bps?: unknown;
+  total_liquidity?: unknown;
+  available_liquidity?: unknown;
+  total_borrowed?: unknown;
+  created_at?: unknown;
+  updated_at?: unknown;
+}
+
 /**
  * Transform raw database row to typed Pool object.
  * Ensures consistent type coercion across all fetch functions.
  */
-function mapRawPoolToPool(raw: any): Pool {
+function mapRawPoolToPool(raw: RawPool): Pool {
   return {
     id: String(raw.id),
     name: String(raw.name ?? ""),

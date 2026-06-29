@@ -1,5 +1,6 @@
 import { WorkspaceFrame } from "@/components/dashboard/WorkspaceFrame";
 import { WalletCard } from "@/components/dashboard/WalletCard";
+import { Badge } from "@/components/ui/Badge";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import {
   getBorrowerDashboardMetrics,
@@ -117,27 +118,12 @@ export default async function BorrowerDashboardPage() {
     ? Math.max(0, Number(repayableLoan.principal_amount ?? 0) - Number(repayableLoan.repaid_amount ?? 0))
     : 0;
 
-  // Header gradient class by status
-  const cardHeaderClass = (s: string) => {
-    if (s === "requested") return "borrower-loan-card__header--requested";
-    if (s === "approved")  return "borrower-loan-card__header--approved";
-    if (s === "repaid")    return "borrower-loan-card__header--repaid";
-    return "borrower-loan-card__header--active"; // active / funded
+  const statusBadge = (s: string): "yellow" | "blue" | "green" | "gold" => {
+    if (s === "requested")                    return "yellow";
+    if (s === "approved")                     return "blue";
+    if (s === "active" || s === "funded")     return "green";
+    return "gold";
   };
-
-  // Human-readable status label
-  const statusLabel = (s: string) => {
-    const map: Record<string, string> = {
-      requested: "Pending Review",
-      approved:  "Approved",
-      funded:    "Funded",
-      active:    "Active",
-      repaid:    "Fully Repaid",
-    };
-    return map[s] ?? s.charAt(0).toUpperCase() + s.slice(1);
-  };
-
-  const isLive = (s: string) => s === "active" || s === "funded";
 
   return (
     <WorkspaceFrame

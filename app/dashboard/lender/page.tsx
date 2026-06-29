@@ -334,6 +334,23 @@ export default async function LenderHomePage() {
           ))}
         </section>
 
+        {/* TODO (Lender Utilization Chart Integration):
+            1. Install and Import Charting Library:
+               - Install Recharts (`npm install recharts`) or Chart.js/react-chartjs-2.
+               - Import `{ ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid }` from 'recharts'.
+            2. Fetch Historical Pool Volume Statistics:
+               - Request historical utilization data from backend API: e.g. `GET /api/pools/performance?range=30d` (referencing `sql/04_pool_performance_rpc.sql`).
+               - Calculate `utilizationRate = (totalBorrowed / totalLiquidity) * 100` for each data point over the 30-day window.
+            3. Render Responsive Area/Line Chart:
+               - Render inside a `<div style={{ height: 300, width: "100%" }}>` wrapper.
+               - Pass dataset containing `date`, `utilizationRate`, `borrowed`, and `totalLiquidity` values.
+            4. Add Tooltip Support displaying volume breakdowns on hover:
+               - Customize the `<Tooltip />` component to render custom HTML showing:
+                 * Utilization: `utilizationRate.toFixed(2)}%`
+                 * Borrowed Volume: `${formatTokenBalance(borrowed)} XLM`
+                 * Pool Capacity: `${formatTokenBalance(totalLiquidity)} XLM`
+        */}
+
         {/* ── Recent positions ────────────────────────────────────── */}
         <section style={{ display: "grid", gap: "1.5rem" }}>
           {positions.length > 0 && (

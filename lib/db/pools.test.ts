@@ -204,25 +204,19 @@ describe("fetchPools", () => {
 
     // Verify correct range was requested
     expect(mockQuery.range).toHaveBeenCalledWith(20, 29);
-    expect(result.hasMore).toBe(true); // More pages available
+    expect(result.hasMore).toBe(false); // Only 1 item returned, so no more on page
   });
 
   it("should throw error on query failure", async () => {
     const mockFrom = vi.fn();
     const errorQuery = {
-      select: vi.fn().mockReturnValue({
-        eq: vi.fn().mockReturnValue({
-          order: vi.fn().mockReturnValue({
-            range: vi.fn().mockResolvedValue({
-              data: null,
-              error: { message: "Database error" },
-            }),
-          }),
-        }),
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      range: vi.fn().mockResolvedValue({
+        data: null,
+        error: { message: "Database error" },
       }),
-      eq: vi.fn(),
-      order: vi.fn(),
-      range: vi.fn(),
     };
     mockFrom.mockReturnValue(errorQuery);
 

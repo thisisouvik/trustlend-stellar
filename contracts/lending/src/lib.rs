@@ -80,6 +80,16 @@ pub struct LendingContract;
 
 #[contractimpl]
 impl LendingContract {
+    // TODO (RWA Collateral Integration):
+    // 1. Compatibility Check for Customized Asset Contracts:
+    //    - Implement a validation helper `validate_rwa_token_compatibility(env: &Env, token_address: &Address)` to ensure
+    //      the token contract implements the standard SEP-41 Token interface or custom compliance controls (clawback, transfer rules).
+    //    - Store a whitelist of compatible tokenized assets (e.g. tokenized gold, US Treasury Bills) in instance storage.
+    // 2. On-chain Oracle Price Feed Queries:
+    //    - Integrate an oracle interface query to fetch real-time USD/XLM values for tokenized assets (e.g. XAU/USD, TBILL/USD).
+    //    - Use the price feed to verify that the value of the deposited RWA collateral meets the required loan-to-value (LTV) ratio
+    //      before approving or activating the loan.
+
     // ── Admin ─────────────────────────────────────────────────────────────────
 
     pub fn initialize(env: Env, admin: Address) {

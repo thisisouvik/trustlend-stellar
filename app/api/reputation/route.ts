@@ -53,6 +53,29 @@ export async function GET(request: NextRequest) {
     const tier = getReputationTier(score);
     const limit = score * 10; // credit limit is score * 10
 
+    // TODO (SubQuery Indexer Migration):
+    // Migrate this data fetch to read from the SubQuery Indexer:
+    // 1. Fetch reputation history events by querying the SubQuery GraphQL endpoint:
+    //    query {
+    //      reputationEvents(filter: { borrowerAddress: { equalTo: "${address}" } }, orderBy: TIMESTAMP_DESC) {
+    //        nodes {
+    //          id
+    //          eventType
+    //          pointsDelta
+    //          scoreAfter
+    //          timestamp
+    //        }
+    //      }
+    //    }
+    // 2. Map the results back to the expected output payload:
+    //    history: subqueryData.reputationEvents.nodes.map(e => ({
+    //      id: e.id,
+    //      event_type: e.eventType,
+    //      points: e.pointsDelta,
+    //      description: `Points change: ${e.pointsDelta} (New Score: ${e.scoreAfter})`,
+    //      created_at: e.timestamp
+    //    }))
+
     // 3. Fetch reputation history events
     const { data: history, error: historyError } = await supabase
       .from("reputation_events")

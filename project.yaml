@@ -1,0 +1,42 @@
+# SubQuery Manifest File for Soroban Smart Contracts
+# TODO (SubQuery Indexer Migration):
+# 1. Update the contract addresses in the datasources section to match the deployed IDs on Testnet/Pubnet.
+# 2. Add handlers for Deposit, Borrow, and Liquidation event topics.
+
+specVersion: 1.0.0
+name: trustlend-soroban-indexer
+version: 0.1.0
+runner:
+  node:
+    name: '@subql/node-stellar'
+    version: '*'
+  query:
+    name: '@subql/query'
+    version: '*'
+description: >-
+  Indexer to capture deposits, borrows, and liquidations from TrustLend Soroban contracts
+repository: 'https://github.com/thisisouvik/trustlend-stellar'
+schema:
+  file: ./schema.graphql
+
+network:
+  # Stellar Testnet passphrase and RPC endpoint
+  chainId: 'Test SDF Network ; September 2015'
+  endpoint: 'https://soroban-testnet.stellar.org'
+  # Genesis ledger to start indexing from
+  genesisHash: '0000000000000000000000000000000000000000000000000000000000000000'
+
+dataSources:
+  - kind: stellar/Soroban
+    startBlock: 12345678 # Replace with actual contract deployment ledger height
+    mapping:
+      file: ./dist/index.js
+      handlers:
+        - handler: handleLendingEvent
+          kind: stellar/SorobanEventHandler
+          filter:
+            # Filter by Lending Contract ID
+            contractId: "NEXT_PUBLIC_LENDING_CONTRACT_ID"
+            # Filter topics corresponding to Deposits, Borrows, and Liquidations
+            topics:
+              - "loan"

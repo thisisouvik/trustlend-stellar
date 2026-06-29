@@ -29,6 +29,26 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Loan not found" }, { status: 404 });
     }
 
+    // TODO (SubQuery Indexer Migration):
+    // Migrate this data fetch to read from the SubQuery Indexer:
+    // 1. Fetch repayment events by querying the SubQuery GraphQL endpoint:
+    //    query {
+    //      repayments(filter: { loanId: { equalTo: "${loanId}" } }, orderBy: TIMESTAMP_DESC) {
+    //        nodes {
+    //          id
+    //          amount
+    //          timestamp
+    //        }
+    //      }
+    //    }
+    // 2. Map the results back to the expected output payload:
+    //    repayments: subqueryData.repayments.nodes.map(r => ({
+    //      id: r.id,
+    //      repayment_id: r.id,
+    //      amount: Number(r.amount),
+    //      created_at: r.timestamp
+    //    }))
+
     // Fetch repayment history
     const { data: repayments } = await supabase
       .from("loan_repayments")

@@ -10,7 +10,7 @@ import {
 } from "@/lib/analytics-cache";
 import { getServiceRoleClient } from "@/lib/supabase/server";
 
-export const revalidate = ANALYTICS_CACHE_TTL_SECONDS;
+export const revalidate = 3600; // Match ANALYTICS_CACHE_TTL_SECONDS (1 hour)
 
 function getAnalyticsHeaders(cacheState: "hit" | "miss") {
   return {

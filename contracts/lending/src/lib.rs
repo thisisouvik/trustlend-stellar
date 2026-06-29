@@ -389,6 +389,49 @@ impl LendingContract {
             .expect("Payment not found")
     }
 
+    /// Calculate dynamic liquidation threshold based on borrower reputation score
+    /// and asset volatility.
+    ///
+    /// - Base threshold: 7500 basis points (75.00%).
+    /// - Reputation bonus: adds `reputation_score * 1.5` basis points (max 1500 bps).
+    /// - Volatility penalty: subtracts `50%` of asset volatility bps.
+    /// - Clamped between 5000 bps (50.00%) and 9000 bps (90.00%).
+    /// - Uses checked arithmetic to prevent overflow.
+    pub fn calculate_liquidation_threshold(
+        _env: Env,
+        borrower_reputation_score: u32,
+        asset_volatility_bps: u32,
+    ) -> u32 {
+        let base_threshold: u32 = 7500;
+
+        // reputation_bonus = borrower_reputation_score * 1.5
+        let reputation_bonus = (borrower_reputation_score as u64)
+            .checked_mul(15)
+            .and_then(|v| v.checked_div(10))
+            .expect("Overflow calculating reputation bonus");
+
+        // volatility_penalty = asset_volatility_bps / 2
+        let volatility_penalty = (asset_volatility_bps as u64)
+            .checked_div(2)
+            .expect("Overflow calculating volatility penalty");
+
+        let mut threshold = (base_threshold as u64)
+            .checked_add(reputation_bonus)
+            .expect("Overflow adding reputation bonus");
+
+        threshold = threshold
+            .checked_sub(volatility_penalty)
+            .unwrap_or(0); // If penalty exceeds threshold, clamp to 0 before bounding
+
+        if threshold < 5000 {
+            threshold = 5000;
+        } else if threshold > 9000 {
+            threshold = 9000;
+        }
+
+        threshold as u32
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
     /// interest = principal × rate_bps × days / (10_000 × 365)

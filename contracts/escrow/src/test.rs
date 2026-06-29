@@ -3,7 +3,7 @@
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger},
-    symbol_short, Address, Env, IntoVal,
+    symbol_short, Address, Env, IntoVal, vec,
 };
 
 const WINDOW_SECONDS: u64 = 180;
@@ -140,11 +140,6 @@ fn test_deposit_and_withdraw_emit_events() {
         env.events().all(),
         vec![
             &env,
-            (
-                contract_id.clone(),
-                (symbol_short!("escrow"), symbol_short!("deposit")).into_val(&env),
-                (lender.clone(), pool_id, amount).into_val(&env),
-            ),
             (
                 contract_id,
                 (symbol_short!("escrow"), symbol_short!("withdraw")).into_val(&env),

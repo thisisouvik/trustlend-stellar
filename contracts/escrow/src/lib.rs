@@ -91,7 +91,7 @@ impl EscrowContract {
         let hold = EscrowHold {
             id: new_id,
             loan_id,
-            lender,
+            lender: lender.clone(),
             borrower,
             amount,
             held_at: now,

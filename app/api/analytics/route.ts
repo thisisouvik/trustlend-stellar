@@ -19,7 +19,7 @@ function getAnalyticsHeaders(cacheState: "hit" | "miss") {
   };
 }
 
-export async function GET() {
+export async function GET(_request?: Request) {
   const cachedResponse = await getCachedPlatformAnalytics();
   if (cachedResponse) {
     return NextResponse.json(cachedResponse, {

@@ -72,6 +72,15 @@ export function LoanApplicationForm({ maxAmount, onSubmit }: LoanApplicationForm
         </select>
       </div>
 
+      {/* TODO (RWA Collateral UI Integration):
+          1. Collateral Deposit Selection List:
+             - Add a dropdown or card selection interface here.
+             - Render the tokenized asset logo (e.g. gold bullion image or treasury bill flag icon).
+             - Show RWA token info (asset name, token code XAU/USTB, current price feed rate, and required LTV margin).
+          2. Required Collateral Calculation:
+             - Display estimated collateral needed based on selected asset price and requested loan amount.
+      */}
+
       {error && <p className="workspace-error">{error}</p>}
 
       <button

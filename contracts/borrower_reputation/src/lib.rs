@@ -301,6 +301,11 @@ impl BorrowerReputationContract {
         }
 
         env.storage().persistent().set(&key, &profile);
+
+        env.events().publish(
+            (symbol_short!("rep"), symbol_short!("event")),
+            (borrower, event, delta, new_score),
+        );
     }
 
     /// Update cumulative borrowed/repaid amounts.
@@ -324,6 +329,11 @@ impl BorrowerReputationContract {
         profile.total_borrowed += borrowed_delta;
         profile.total_repaid += repaid_delta;
         env.storage().persistent().set(&key, &profile);
+
+        env.events().publish(
+            (symbol_short!("rep"), symbol_short!("totals")),
+            (borrower, borrowed_delta, repaid_delta),
+        );
     }
 
     /// Freeze an account (admin only).
@@ -331,7 +341,7 @@ impl BorrowerReputationContract {
         admin.require_auth();
         Self::assert_admin(&env, &admin);
 
-        let key = DataKey::BorrowerProfile(borrower);
+        let key = DataKey::BorrowerProfile(borrower.clone());
         let mut profile: BorrowerProfile = env
             .storage()
             .persistent()
@@ -343,6 +353,11 @@ impl BorrowerReputationContract {
         profile.reputation_score = 0;
         profile.reputation_tier = ReputationTier::None;
         env.storage().persistent().set(&key, &profile);
+
+        env.events().publish(
+            (symbol_short!("rep"), symbol_short!("freeze")),
+            (borrower, true),
+        );
     }
 
     /// Unfreeze an account (admin only).
@@ -350,7 +365,7 @@ impl BorrowerReputationContract {
         admin.require_auth();
         Self::assert_admin(&env, &admin);
 
-        let key = DataKey::BorrowerProfile(borrower);
+        let key = DataKey::BorrowerProfile(borrower.clone());
         let mut profile: BorrowerProfile = env
             .storage()
             .persistent()
@@ -360,6 +375,11 @@ impl BorrowerReputationContract {
         profile.is_frozen = false;
         profile.freeze_reason = String::from_str(&env, "");
         env.storage().persistent().set(&key, &profile);
+
+        env.events().publish(
+            (symbol_short!("rep"), symbol_short!("freeze")),
+            (borrower, false),
+        );
     }
 
     pub fn is_frozen(env: Env, borrower: Address) -> bool {

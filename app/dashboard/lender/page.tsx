@@ -11,13 +11,18 @@ import {
 } from "@/lib/supabase/server";
 import { formatTokenBalance } from "@/lib/utils/formatting";
 import { lenderNavLinks } from "@/lib/dashboard/lender-links";
+import {
+  getIndexedLenderReadModel,
+  isIndexerConfigured,
+  isIndexerRequired,
+} from "@/lib/indexer/read-model";
 import Link from "next/link";
 
 export default async function LenderHomePage() {
   const { user } = await requireAuthenticatedUser("lender");
   const walletAddress =
     String(user.user_metadata?.wallet_address ?? "") || null;
-  const metrics = await getLenderDashboardMetrics(user.id);
+  const metrics = await getLenderDashboardMetrics(user.id, walletAddress);
   const supabase = await getServerSupabaseClient();
   const srClient = getServiceRoleClient();
 
@@ -71,12 +76,44 @@ export default async function LenderHomePage() {
         ];
 
   const positions = positionsRes.data ?? [];
-  const p2pInvestments = p2pRes.data ?? [];
+  const dbP2pInvestments = p2pRes.data ?? [];
   const profile = profileRes.data;
   const openLoanCount = openLoanCountRes.count ?? 0;
   const isKycVerified = profile?.kyc_status === "verified";
 
-  const allLoansArray = allLoansRes.data ?? [];
+  let indexedLoans: Array<Record<string, unknown>> = [];
+  let indexedP2pInvestments: typeof dbP2pInvestments = [];
+  if (isIndexerConfigured() && walletAddress) {
+    try {
+      const indexed = await getIndexedLenderReadModel({
+        userId: user.id,
+        walletAddress,
+        limit: 20,
+      });
+      const escrowTxByLoanId = new Map(
+        indexed.escrowEvents.map((event) => [event.loanId, event.txHash ?? ""]),
+      );
+      indexedLoans = indexed.loans.map((loan) => ({
+        id: loan.id,
+        status: loan.status,
+        repaid_amount: loan.repaidAmount / 10000000,
+        principal_amount: loan.principalAmount / 10000000,
+      }));
+      indexedP2pInvestments = indexed.loans.map((loan) => ({
+        id: `indexed-${loan.id}`,
+        ref_id: loan.id,
+        amount: loan.principalAmount / 10000000,
+        status: "confirmed",
+        metadata: JSON.stringify({ txHash: escrowTxByLoanId.get(loan.id) ?? "" }),
+        created_at: loan.createdAt,
+      })) as typeof dbP2pInvestments;
+    } catch (error) {
+      if (isIndexerRequired()) throw error;
+    }
+  }
+
+  const p2pInvestments = indexedP2pInvestments.length ? indexedP2pInvestments : dbP2pInvestments;
+  const allLoansArray = indexedLoans.length ? indexedLoans : allLoansRes.data ?? [];
   const loanMap = Object.fromEntries(
     allLoansArray.map((l) => [String(l.id), l]),
   );

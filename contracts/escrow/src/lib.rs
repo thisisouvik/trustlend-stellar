@@ -171,6 +171,11 @@ impl EscrowContract {
         env.storage()
             .persistent()
             .set(&DataKey::Hold(escrow_id), &hold);
+
+        env.events().publish(
+            (symbol_short!("escrow"), symbol_short!("transfer")),
+            (escrow_id, hold.loan_id, hold.borrower, hold.amount),
+        );
     }
 
     /// Get escrow hold details.

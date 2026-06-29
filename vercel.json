@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/payment-due",
-      "schedule": "0 * * * *"
+      "schedule": "0 0 * * *"
     },
     {
       "path": "/api/cron/default-management",

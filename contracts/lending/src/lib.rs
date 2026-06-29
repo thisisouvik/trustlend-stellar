@@ -415,21 +415,12 @@ impl LendingContract {
             .checked_div(2)
             .expect("Overflow calculating volatility penalty");
 
-        let mut threshold = (base_threshold as u64)
+        let threshold = (base_threshold as u64)
             .checked_add(reputation_bonus)
-            .expect("Overflow adding reputation bonus");
+            .expect("Overflow adding reputation bonus")
+            .saturating_sub(volatility_penalty);
 
-        threshold = threshold
-            .checked_sub(volatility_penalty)
-            .unwrap_or(0); // If penalty exceeds threshold, clamp to 0 before bounding
-
-        if threshold < 5000 {
-            threshold = 5000;
-        } else if threshold > 9000 {
-            threshold = 9000;
-        }
-
-        threshold as u32
+        threshold.clamp(5000, 9000) as u32
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────

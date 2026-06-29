@@ -1,4 +1,5 @@
 #![cfg(test)]
+#![allow(clippy::inconsistent_digit_grouping)]
 
 use super::*;
 use soroban_sdk::{
@@ -320,5 +321,5 @@ fn test_liquidation_threshold_extreme_inputs_no_overflow() {
 
     // Verify u32::MAX handles safely and clamps to bounds
     let threshold = client.calculate_liquidation_threshold(&u32::MAX, &u32::MAX);
-    assert!(threshold >= 5000 && threshold <= 9000);
+    assert!((5000..=9000).contains(&threshold));
 }

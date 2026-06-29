@@ -1,6 +1,5 @@
 import { WorkspaceFrame } from "@/components/dashboard/WorkspaceFrame";
 import { WalletCard } from "@/components/dashboard/WalletCard";
-import { Badge } from "@/components/ui/Badge";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import {
   getBorrowerDashboardMetrics,
@@ -11,6 +10,30 @@ import { buildStellarTxVerificationUrl, extractPossibleTxHash, isLikelyTxHash } 
 import { BorrowerRepayWidget } from "@/components/dashboard/BorrowerRepayWidget";
 import { WithdrawToFiatButton } from "@/components/dashboard/WithdrawToFiatButton";
 import { borrowerNavLinks } from "@/lib/dashboard/borrower-links";
+
+// ── Inline SVG illustrations ───────────────────────────────────────────────
+function EmptyLoansIllustration() {
+  return (
+    <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <rect x="8" y="20" width="64" height="44" rx="8" fill="url(#emptyGrad)" opacity="0.9" />
+      <rect x="16" y="32" width="24" height="4" rx="2" fill="white" opacity="0.6" />
+      <rect x="16" y="42" width="16" height="4" rx="2" fill="white" opacity="0.4" />
+      <circle cx="58" cy="38" r="10" fill="white" opacity="0.15" />
+      <path d="M40 8 L44 16 L52 16 L46 21 L48 29 L40 24 L32 29 L34 21 L28 16 L36 16 Z"
+            fill="url(#starGrad)" opacity="0.8" />
+      <defs>
+        <linearGradient id="emptyGrad" x1="8" y1="20" x2="72" y2="64" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#7e2fd0" />
+          <stop offset="1" stopColor="#22cf9d" />
+        </linearGradient>
+        <linearGradient id="starGrad" x1="28" y1="8" x2="52" y2="29" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#f5a623" />
+          <stop offset="1" stopColor="#f7c948" />
+        </linearGradient>
+      </defs>
+    </svg>
+  );
+}
 
 export default async function BorrowerDashboardPage() {
   const { user } = await requireAuthenticatedUser("borrower");
@@ -83,25 +106,38 @@ export default async function BorrowerDashboardPage() {
   const canApplyLoan = profileComplete && isKycVerified;
   const profileNeedsAttention = !canApplyLoan;
 
-  // Active = any loan with money disbursed that still needs repayment
   const REPAYABLE_STATUSES = ["active", "funded", "approved"];
   const activeLoans  = normalizedLoans.filter((l) => REPAYABLE_STATUSES.includes(String(l.effectiveStatus)));
   const pendingLoans = normalizedLoans.filter((l) => String(l.effectiveStatus) === "requested");
   const inLoansXlm   = activeLoans.reduce((sum, l) => sum + Math.max(0, Number(l.principal_amount ?? 0) - Number(l.repaid_amount ?? 0)), 0);
   const pendingXlm   = pendingLoans.reduce((sum, l) => sum + Number(l.principal_amount ?? 0), 0);
 
-  // Pick first repayable loan for the quick repayment widget on home
   const repayableLoan = activeLoans[0] ?? null;
   const dueAmount = repayableLoan
     ? Math.max(0, Number(repayableLoan.principal_amount ?? 0) - Number(repayableLoan.repaid_amount ?? 0))
     : 0;
 
-  const statusBadge = (s: string): "yellow" | "blue" | "green" | "gold" => {
-    if (s === "requested")                    return "yellow";
-    if (s === "approved")                     return "blue";
-    if (s === "active" || s === "funded")     return "green";
-    return "gold";
+  // Header gradient class by status
+  const cardHeaderClass = (s: string) => {
+    if (s === "requested") return "borrower-loan-card__header--requested";
+    if (s === "approved")  return "borrower-loan-card__header--approved";
+    if (s === "repaid")    return "borrower-loan-card__header--repaid";
+    return "borrower-loan-card__header--active"; // active / funded
   };
+
+  // Human-readable status label
+  const statusLabel = (s: string) => {
+    const map: Record<string, string> = {
+      requested: "Pending Review",
+      approved:  "Approved",
+      funded:    "Funded",
+      active:    "Active",
+      repaid:    "Fully Repaid",
+    };
+    return map[s] ?? s.charAt(0).toUpperCase() + s.slice(1);
+  };
+
+  const isLive = (s: string) => s === "active" || s === "funded";
 
   return (
     <WorkspaceFrame
@@ -140,175 +176,183 @@ export default async function BorrowerDashboardPage() {
     >
       <div className="workspace-stack">
 
-        {/* ── Wallet prompt ── */}
+        {/* ── Wallet Alert Banner ── */}
         {!walletAddress && (
-          <article className="workspace-card workspace-card--full" style={{ borderColor: "rgba(245,166,35,0.3)", background: "rgba(245,166,35,0.04)" }}>
-            <h2 className="workspace-card-title">⚠️ Connect Your Wallet</h2>
-            <p className="workspace-card-copy" style={{ marginTop: "0.4rem" }}>
-              You need to connect a Stellar wallet before you can receive or repay loans.
-              Head to <strong>Profile &amp; Settings</strong> to set it up.
-            </p>
-          </article>
+          <div className="borrower-wallet-alert">
+            <span className="borrower-wallet-alert__icon">⚠️</span>
+            <div className="borrower-wallet-alert__body">
+              <p className="borrower-wallet-alert__title">Connect Your Stellar Wallet</p>
+              <p className="borrower-wallet-alert__copy">
+                A wallet is required to receive or repay loans on-chain. Visit{" "}
+                <a href="/dashboard/borrower/profile" style={{ fontWeight: 800, textDecoration: "underline" }}>
+                  Profile &amp; Settings
+                </a>{" "}
+                to set it up.
+              </p>
+            </div>
+          </div>
         )}
 
-        {/* ── KYC / verification status strip ── */}
-        <article className="workspace-card workspace-card--full">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-            <h2 className="workspace-card-title" style={{ margin: 0 }}>Verification Status</h2>
-            <span style={{ fontSize: "0.8rem", fontWeight: 700, color: verificationProgress === 100 ? "#22cf9d" : "#f5a623" }}>
+        {/* ── Verification Status Strip ── */}
+        <div className="borrower-verify-card">
+          <div className="borrower-verify-header">
+            <h2 className="borrower-verify-title">Verification Status</h2>
+            <span
+              className={`borrower-verify-pct ${
+                verificationProgress === 100
+                  ? "borrower-verify-pct--done"
+                  : "borrower-verify-pct--pending"
+              }`}
+            >
               {verificationProgress}% Complete
             </span>
           </div>
-          <div style={{ height: "6px", borderRadius: "9999px", background: "#eef0f8", marginBottom: "1rem", overflow: "hidden" }}>
-            <div style={{ height: "100%", width: `${verificationProgress}%`, background: "linear-gradient(90deg,#7e2fd0,#22cf9d)", borderRadius: "9999px", transition: "width 0.4s ease" }} />
+
+          <div className="borrower-verify-track" role="progressbar"
+               aria-valuenow={verificationProgress} aria-valuemin={0} aria-valuemax={100}
+               aria-label={`Profile ${verificationProgress}% complete`}>
+            <div
+              className="borrower-verify-fill"
+              style={{ width: `${verificationProgress}%` }}
+            />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "0.6rem" }}>
+
+          <div className="borrower-verify-chips">
             {verificationItems.map((item) => (
-              <div
+              <span
                 key={item.label}
-                style={{
-                  display: "flex", alignItems: "center", gap: "0.5rem",
-                  padding: "0.5rem 0.75rem", borderRadius: "0.5rem",
-                  background: item.done ? "rgba(34,207,157,0.06)" : "rgba(0,0,0,0.03)",
-                  border: `1px solid ${item.done ? "rgba(34,207,157,0.2)" : "rgba(0,0,0,0.06)"}`,
-                }}
+                className={`borrower-verify-chip ${
+                  item.done ? "borrower-verify-chip--done" : "borrower-verify-chip--pending"
+                }`}
               >
-                <span style={{ fontSize: "1rem" }}>{item.done ? "✅" : "○"}</span>
-                <span style={{ fontSize: "0.82rem", fontWeight: 600, color: item.done ? "#20bd8e" : "#6b7280" }}>{item.label}</span>
-              </div>
+                {item.done ? "✓" : "○"} {item.label}
+              </span>
             ))}
           </div>
+
           {!profileComplete && (
-            <a
-              href="/dashboard/borrower/profile"
-              style={{ display: "inline-block", marginTop: "1rem", fontSize: "0.82rem", color: "#7e2fd0", fontWeight: 600, textDecoration: "underline" }}
-            >
-              Complete profile →
+            <a href="/dashboard/borrower/profile" className="borrower-verify-cta">
+              Complete Profile →
             </a>
           )}
-        </article>
+        </div>
 
-        {/* ── Prominent Current Loan Status ── */}
-        {normalizedLoans.length > 0 && (() => {
-          const latestLoan = normalizedLoans[0];
-          const latestId = String(latestLoan.id);
-          const txHash = loanTxMap[latestId] ?? "";
-          const hasTx = isLikelyTxHash(txHash);
-          const status = String(latestLoan.effectiveStatus);
-
-          return (
-            <article className="workspace-card workspace-card--full" style={{ padding: "1.5rem", borderLeft: "4px solid #7e2fd0" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <h2 className="workspace-card-title" style={{ margin: "0 0 0.25rem 0", fontSize: "1.1rem" }}>Current Loan Status</h2>
-                  <p className="workspace-card-copy" style={{ margin: 0, fontSize: "0.85rem", opacity: 0.8 }}>
-                    Loan ID: <span style={{ fontFamily: "monospace" }}>{latestId.slice(0, 8)}</span>
-                  </p>
-                </div>
-                <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-                    <span style={{ fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 700, color: "#6b7280", letterSpacing: "0.05em", marginBottom: "0.2rem" }}>Status</span>
-                    <Badge variant={statusBadge(status)}>{status.toUpperCase()}</Badge>
-                  </div>
-                  <div style={{ borderLeft: "1px solid #eef0f8", height: "40px", margin: "0 0.5rem" }} />
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-                    <span style={{ fontSize: "0.75rem", textTransform: "uppercase", fontWeight: 700, color: "#6b7280", letterSpacing: "0.05em", marginBottom: "0.3rem" }}>Blockchain Verification</span>
-                    {hasTx ? (
-                      <a href={buildStellarTxVerificationUrl(txHash)} target="_blank" rel="noreferrer"
-                        style={{ fontSize: "0.85rem", color: "#22cf9d", fontWeight: 700, display: "flex", alignItems: "center", gap: "0.35rem", textDecoration: "none", background: "rgba(34,207,157,0.1)", padding: "0.2rem 0.6rem", borderRadius: "0.4rem" }}>
-                        View Tx ↗
-                      </a>
-                    ) : (
-                      <span style={{ fontSize: "0.85rem", color: "#9ca3af", fontStyle: "italic", fontWeight: 500 }}>
-                        {status === "requested" || status === "approved" ? "Pending Approval..." : status === "funded" ? "Processing..." : "Not Available"}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </article>
-          );
-        })()}
-
-        {/* ── Active / pending loans summary ── */}
+        {/* ── Loan Cards ── */}
         {normalizedLoans.length > 0 && (
-          <article className="workspace-card workspace-card--full">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-              <h2 className="workspace-card-title" style={{ margin: 0 }}>Your Loans</h2>
-              <a href="/dashboard/borrower/history" style={{ fontSize: "0.82rem", color: "#7e2fd0", fontWeight: 600, textDecoration: "none" }}>
+          <div className="borrower-loan-section">
+            <div className="borrower-loan-section__header">
+              <h2 className="borrower-loan-section__title">Your Loans</h2>
+              <a href="/dashboard/borrower/history" className="borrower-loan-section__link">
                 View full history →
               </a>
             </div>
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
-                <thead>
-                  <tr style={{ borderBottom: "1px solid #eef0f8" }}>
-                    {["Loan ID", "Amount", "Status", "APR", "Due", "Stellar TX", "Receipt"].map((h) => (
-                      <th key={h} style={{ textAlign: "left", padding: "0.6rem 0.75rem", fontSize: "0.72rem", fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {normalizedLoans.slice(0, 5).map((loan) => {
-                    const status = String(loan.effectiveStatus);
-                    const loanId = String(loan.id);
-                    const txHash = loanTxMap[loanId] ?? "";
-                    const hasTx  = isLikelyTxHash(txHash);
-                    return (
-                      <tr key={loanId} style={{ borderBottom: "1px solid #f9fafb" }}>
-                        <td style={{ padding: "0.75rem", fontFamily: "monospace", fontSize: "0.8rem", color: "#6b7280" }}>{loanId.slice(0, 8)}</td>
-                        <td style={{ padding: "0.75rem", fontWeight: 700 }}>{Number(loan.principal_amount).toFixed(2)} XLM</td>
-                          <td style={{ padding: "0.75rem" }}>
-                            <Badge variant={statusBadge(status)}>{status.toUpperCase()}</Badge>
-                          </td>
-                        <td style={{ padding: "0.75rem" }}>{(Number(loan.apr_bps ?? 0) / 100).toFixed(2)}%</td>
-                        <td style={{ padding: "0.75rem", whiteSpace: "nowrap" }}>
-                          {loan.due_at ? new Date(String(loan.due_at)).toLocaleDateString() : "—"}
-                        </td>
-                        <td style={{ padding: "0.75rem" }}>
-                          {hasTx ? (
-                            <a href={buildStellarTxVerificationUrl(txHash)} target="_blank" rel="noreferrer"
-                              style={{ fontSize: "0.78rem", color: "#22cf9d", fontWeight: 600, whiteSpace: "nowrap" }}>
-                              ✅ Verify ↗
-                            </a>
-                          ) : (
-                            <span style={{ fontSize: "0.75rem", opacity: 0.4, whiteSpace: "nowrap" }}>
-                              {status === "requested" || status === "approved" ? "⏳ Pending" : status === "funded" ? "✅ Recorded" : "—"}
-                            </span>
-                          )}
-                        </td>
-                        <td style={{ padding: "0.75rem", whiteSpace: "nowrap" }}>
-                          {status === "repaid" ? (
-                            <a
-                              href={`/api/loans/${loanId}/receipt`}
-                              target="_blank"
-                              rel="noreferrer"
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "0.35rem",
-                                padding: "0.45rem 0.8rem",
-                                borderRadius: "0.45rem",
-                                background: "rgba(126,47,208,0.08)",
-                                color: "#7e2fd0",
-                                fontSize: "0.78rem",
-                                fontWeight: 700,
-                                textDecoration: "none",
-                              }}
-                            >
-                              Download PDF
-                            </a>
-                          ) : (
-                            <span style={{ fontSize: "0.75rem", opacity: 0.4 }}>-</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+
+            <div className="borrower-loan-cards">
+              {normalizedLoans.slice(0, 6).map((loan) => {
+                const status   = String(loan.effectiveStatus);
+                const loanId   = String(loan.id);
+                const txHash   = loanTxMap[loanId] ?? "";
+                const hasTx    = isLikelyTxHash(txHash);
+                const principal = Number(loan.principal_amount ?? 0);
+                const repaid    = Number(loan.repaid_amount ?? 0);
+                const repayPct  = principal > 0 ? Math.min(100, Math.round((repaid / principal) * 100)) : 0;
+                const apr       = (Number(loan.apr_bps ?? 0) / 100).toFixed(2);
+                const due       = loan.due_at ? new Date(String(loan.due_at)).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
+
+                return (
+                  <article key={loanId} className="borrower-loan-card">
+                    {/* ── Card Header ── */}
+                    <div className={`borrower-loan-card__header ${cardHeaderClass(status)}`}>
+                      <div className="borrower-loan-card__chip">
+                        {isLive(status) && <span className="borrower-live-dot" />}
+                        {statusLabel(status)}
+                      </div>
+                      <p className="borrower-loan-card__amount">
+                        {principal.toFixed(2)}
+                        <span style={{ fontSize: "1rem", fontWeight: 600, marginLeft: "0.35rem", opacity: 0.8 }}>XLM</span>
+                      </p>
+                      <span className="borrower-loan-card__amount-label">Principal</span>
+                      <span className="borrower-loan-card__id">#{loanId.slice(0, 8)}</span>
+                    </div>
+
+                    {/* ── Card Body ── */}
+                    <div className="borrower-loan-card__body">
+                      {/* Repayment progress */}
+                      <div>
+                        <div className="borrower-loan-card__progress-row">
+                          <span>Repaid: <strong>{repaid.toFixed(2)} XLM</strong></span>
+                          <span>{repayPct}%</span>
+                        </div>
+                        <div className="borrower-loan-card__progress-track">
+                          <div
+                            className="borrower-loan-card__progress-fill"
+                            style={{ width: `${repayPct}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Key metadata */}
+                      <div className="borrower-loan-card__meta">
+                        <div className="borrower-loan-card__meta-item">
+                          <span className="borrower-loan-card__meta-label">APR</span>
+                          <span className="borrower-loan-card__meta-value">{apr}%</span>
+                        </div>
+                        <div className="borrower-loan-card__meta-item">
+                          <span className="borrower-loan-card__meta-label">Due Date</span>
+                          <span className="borrower-loan-card__meta-value">{due}</span>
+                        </div>
+                        {Number(loan.duration_days) > 0 && (
+                          <div className="borrower-loan-card__meta-item">
+                            <span className="borrower-loan-card__meta-label">Duration</span>
+                            <span className="borrower-loan-card__meta-value">{loan.duration_days}d</span>
+                          </div>
+                        )}
+                        <div className="borrower-loan-card__meta-item">
+                          <span className="borrower-loan-card__meta-label">Remaining</span>
+                          <span className="borrower-loan-card__meta-value">
+                            {Math.max(0, principal - repaid).toFixed(2)} XLM
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Footer: TX badge + receipt */}
+                      <div className="borrower-loan-card__footer">
+                        {hasTx ? (
+                          <a
+                            href={buildStellarTxVerificationUrl(txHash)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="borrower-loan-card__tx-badge borrower-loan-card__tx-badge--live"
+                          >
+                            ✦ Verify on Stellar ↗
+                          </a>
+                        ) : (
+                          <span className="borrower-loan-card__tx-badge borrower-loan-card__tx-badge--pending">
+                            {status === "requested" || status === "approved"
+                              ? "⏳ Pending Approval"
+                              : status === "funded"
+                              ? "⌛ Processing"
+                              : "— No TX"}
+                          </span>
+                        )}
+
+                        {status === "repaid" && (
+                          <a
+                            href={`/api/loans/${loanId}/receipt`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="borrower-loan-card__receipt-btn"
+                          >
+                            ↓ Receipt
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
-          </article>
+          </div>
         )}
 
         {/* ── Quick Repayment Widget (if active loan) ── */}
@@ -327,25 +371,38 @@ export default async function BorrowerDashboardPage() {
         {/* ── Cash out to fiat via Stellar Anchor (SEP-24) ── */}
         <WithdrawToFiatButton walletAddress={walletAddress} />
 
-        {/* ── Empty state (no loans) ── */}
+        {/* ── Polished Empty State (no loans) ── */}
         {normalizedLoans.length === 0 && (
-          <article className="workspace-card workspace-card--full" style={{ textAlign: "center", padding: "2.5rem 1.5rem" }}>
-            <div style={{ fontSize: "2.5rem", marginBottom: "0.75rem" }}>📋</div>
-            <h2 className="workspace-card-title">No Loans Yet</h2>
-            <p className="workspace-card-copy" style={{ margin: "0.5rem auto", maxWidth: "380px" }}>
+          <div className="borrower-empty-state">
+            <div className="borrower-empty-state__glow" aria-hidden="true" />
+            <div className="borrower-empty-state__icon">
+              <EmptyLoansIllustration />
+            </div>
+            <h2 className="borrower-empty-state__title">
               {canApplyLoan
-                ? "You're verified and ready! Head to 'Apply for Loan' to submit your first loan request."
+                ? "Ready to Borrow?"
                 : profileComplete
-                  ? "Your profile is complete and KYC is under review. You can apply once verification is approved."
-                  : "Complete your verification first, then you can apply for a loan."}
+                ? "KYC Under Review"
+                : "Complete Your Profile"}
+            </h2>
+            <p className="borrower-empty-state__copy">
+              {canApplyLoan
+                ? "You're fully verified and ready to go. Submit your first loan request and get funded on Stellar."
+                : profileComplete
+                ? "Your profile is complete and your KYC documents are being reviewed by our team. You'll be notified once approved."
+                : "Finish setting up your profile and complete KYC verification to unlock borrowing on TrustLend."}
             </p>
             <a
               href={canApplyLoan ? "/dashboard/borrower/loans" : "/dashboard/borrower/profile"}
-              style={{ display: "inline-block", marginTop: "1rem", padding: "0.6rem 1.5rem", background: "#7e2fd0", color: "#fff", borderRadius: "0.5rem", fontSize: "0.875rem", fontWeight: 700, textDecoration: "none" }}
+              className={`borrower-empty-state__cta${profileComplete && !canApplyLoan ? " borrower-empty-state__cta--kyc" : ""}`}
             >
-              {canApplyLoan ? "Apply for a Loan →" : profileComplete ? "KYC Under Review" : "Complete Profile →"}
+              {canApplyLoan
+                ? "Apply for a Loan →"
+                : profileComplete
+                ? "Check KYC Status"
+                : "Complete Profile →"}
             </a>
-          </article>
+          </div>
         )}
 
       </div>

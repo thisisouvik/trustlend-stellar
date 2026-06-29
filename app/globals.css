@@ -3397,3 +3397,640 @@ a {
     transform: rotate(360deg);
   }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   BORROWER DASHBOARD — Modern Fintech Redesign
+   Apple Card-style loan cards, polished empty states,
+   verification chips, wallet alert banner
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Wallet Alert Banner ── */
+.borrower-wallet-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.1rem 1.4rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(245, 166, 35, 0.3);
+  background: linear-gradient(135deg, rgba(245, 166, 35, 0.07) 0%, rgba(255, 200, 50, 0.04) 100%);
+  grid-column: 1 / -1;
+}
+
+.dark .borrower-wallet-alert {
+  border-color: rgba(245, 166, 35, 0.25);
+  background: linear-gradient(135deg, rgba(245, 166, 35, 0.1) 0%, rgba(255, 200, 50, 0.05) 100%);
+}
+
+.borrower-wallet-alert__icon {
+  font-size: 1.5rem;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 0.05rem;
+}
+
+.borrower-wallet-alert__body {
+  flex: 1;
+}
+
+.borrower-wallet-alert__title {
+  margin: 0 0 0.25rem;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #92600a;
+}
+
+.dark .borrower-wallet-alert__title {
+  color: #f5c060;
+}
+
+.borrower-wallet-alert__copy {
+  margin: 0;
+  font-size: 0.84rem;
+  color: #a07020;
+  line-height: 1.5;
+}
+
+.dark .borrower-wallet-alert__copy {
+  color: #c8a050;
+}
+
+/* ── Verification Strip ── */
+.borrower-verify-card {
+  padding: 1.5rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(122, 138, 177, 0.2);
+  background: #ffffff;
+  grid-column: 1 / -1;
+}
+
+.dark .borrower-verify-card {
+  background: rgba(20, 24, 46, 0.9);
+  border-color: rgba(160, 167, 197, 0.18);
+}
+
+.borrower-verify-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.85rem;
+}
+
+.borrower-verify-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #28325a;
+}
+
+.dark .borrower-verify-title {
+  color: #e6e8f0;
+}
+
+.borrower-verify-pct {
+  font-size: 0.8rem;
+  font-weight: 800;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+}
+
+.borrower-verify-pct--done {
+  color: #14a67a;
+  background: rgba(34, 207, 157, 0.12);
+  border: 1px solid rgba(34, 207, 157, 0.25);
+}
+
+.borrower-verify-pct--pending {
+  color: #b07010;
+  background: rgba(245, 166, 35, 0.12);
+  border: 1px solid rgba(245, 166, 35, 0.25);
+}
+
+.borrower-verify-track {
+  height: 7px;
+  border-radius: 999px;
+  background: #e8edf9;
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+.dark .borrower-verify-track {
+  background: rgba(160, 167, 197, 0.18);
+}
+
+.borrower-verify-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #7e2fd0, #22cf9d);
+  transition: width 0.5s ease;
+}
+
+.borrower-verify-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.borrower-verify-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  padding: 0.38rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.borrower-verify-chip--done {
+  background: rgba(34, 207, 157, 0.1);
+  border: 1px solid rgba(34, 207, 157, 0.28);
+  color: #15a67d;
+}
+
+.dark .borrower-verify-chip--done {
+  background: rgba(34, 207, 157, 0.12);
+  color: #22cf9d;
+}
+
+.borrower-verify-chip--pending {
+  background: rgba(122, 138, 177, 0.07);
+  border: 1px solid rgba(122, 138, 177, 0.2);
+  color: #6b7280;
+}
+
+.dark .borrower-verify-chip--pending {
+  background: rgba(160, 167, 197, 0.08);
+  border-color: rgba(160, 167, 197, 0.18);
+  color: #a0a7c5;
+}
+
+.borrower-verify-chip:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
+}
+
+.borrower-verify-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 1rem;
+  padding: 0.55rem 1.2rem;
+  border-radius: 0.65rem;
+  background: linear-gradient(135deg, #7e2fd0, #5a1fad);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 6px 16px rgba(126, 47, 208, 0.28);
+}
+
+.borrower-verify-cta:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(126, 47, 208, 0.38);
+}
+
+/* ── Loan Cards Grid ── */
+.borrower-loan-section {
+  grid-column: 1 / -1;
+}
+
+.borrower-loan-section__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.borrower-loan-section__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #28325a;
+}
+
+.dark .borrower-loan-section__title {
+  color: #e6e8f0;
+}
+
+.borrower-loan-section__link {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #7e2fd0;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  transition: color 0.15s ease;
+}
+
+.borrower-loan-section__link:hover {
+  color: #5a1fad;
+}
+
+.borrower-loan-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1rem;
+}
+
+/* ── Individual Loan Card — Apple Card style ── */
+.borrower-loan-card {
+  border-radius: 1.2rem;
+  overflow: hidden;
+  border: 1px solid rgba(122, 138, 177, 0.22);
+  background: #ffffff;
+  box-shadow: 0 4px 16px rgba(29, 37, 74, 0.07);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.dark .borrower-loan-card {
+  background: #14182e;
+  border-color: rgba(160, 167, 197, 0.2);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+}
+
+.borrower-loan-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 36px rgba(29, 37, 74, 0.13);
+}
+
+.dark .borrower-loan-card:hover {
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.38);
+}
+
+/* Gradient header band */
+.borrower-loan-card__header {
+  position: relative;
+  padding: 1.35rem 1.4rem 2.5rem;
+  overflow: hidden;
+}
+
+.borrower-loan-card__header--requested {
+  background: linear-gradient(135deg, #4a4a6a 0%, #2d2d52 100%);
+}
+
+.borrower-loan-card__header--approved {
+  background: linear-gradient(135deg, #1a6db5 0%, #0d4d8a 100%);
+}
+
+.borrower-loan-card__header--active,
+.borrower-loan-card__header--funded {
+  background: linear-gradient(135deg, #7e2fd0 0%, #3a1580 100%);
+}
+
+.borrower-loan-card__header--repaid {
+  background: linear-gradient(135deg, #14a67a 0%, #0a6e52 100%);
+}
+
+/* Decorative orbs inside header */
+.borrower-loan-card__header::before,
+.borrower-loan-card__header::after {
+  content: '';
+  position: absolute;
+  border-radius: 999px;
+  opacity: 0.15;
+  pointer-events: none;
+}
+
+.borrower-loan-card__header::before {
+  width: 140px;
+  height: 140px;
+  background: #ffffff;
+  top: -40px;
+  right: -30px;
+}
+
+.borrower-loan-card__header::after {
+  width: 80px;
+  height: 80px;
+  background: #ffffff;
+  bottom: -20px;
+  left: 20px;
+}
+
+.borrower-loan-card__chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.22rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(4px);
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  margin-bottom: 0.75rem;
+}
+
+.borrower-loan-card__amount {
+  margin: 0;
+  color: #ffffff;
+  font-family: var(--font-sora), "Trebuchet MS", sans-serif;
+  font-size: clamp(1.6rem, 3vw, 2rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.borrower-loan-card__amount-label {
+  display: block;
+  margin-top: 0.3rem;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.borrower-loan-card__id {
+  position: absolute;
+  bottom: 0.75rem;
+  right: 1.1rem;
+  font-family: monospace;
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* Body */
+.borrower-loan-card__body {
+  padding: 1.2rem 1.4rem;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* Progress bar */
+.borrower-loan-card__progress-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: #9ca3af;
+  margin-bottom: 0.4rem;
+}
+
+.borrower-loan-card__progress-row strong {
+  color: #22cf9d;
+}
+
+.borrower-loan-card__progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: #e8edf9;
+  overflow: hidden;
+}
+
+.dark .borrower-loan-card__progress-track {
+  background: rgba(160, 167, 197, 0.15);
+}
+
+.borrower-loan-card__progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #7e2fd0, #22cf9d);
+  transition: width 0.5s ease;
+}
+
+/* Meta row */
+.borrower-loan-card__meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+
+.borrower-loan-card__meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.borrower-loan-card__meta-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9ca3af;
+}
+
+.borrower-loan-card__meta-value {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #28325a;
+}
+
+.dark .borrower-loan-card__meta-value {
+  color: #d4d8ee;
+}
+
+/* Footer row */
+.borrower-loan-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: auto;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(122, 138, 177, 0.12);
+}
+
+.dark .borrower-loan-card__footer {
+  border-top-color: rgba(160, 167, 197, 0.12);
+}
+
+.borrower-loan-card__tx-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.borrower-loan-card__tx-badge--live {
+  background: rgba(34, 207, 157, 0.1);
+  border: 1px solid rgba(34, 207, 157, 0.28);
+  color: #14a67a;
+}
+
+.dark .borrower-loan-card__tx-badge--live {
+  color: #22cf9d;
+  background: rgba(34, 207, 157, 0.12);
+}
+
+.borrower-loan-card__tx-badge--live:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(34, 207, 157, 0.2);
+}
+
+.borrower-loan-card__tx-badge--pending {
+  background: rgba(245, 166, 35, 0.08);
+  border: 1px solid rgba(245, 166, 35, 0.2);
+  color: #a07020;
+}
+
+.dark .borrower-loan-card__tx-badge--pending {
+  color: #e5a020;
+  background: rgba(245, 166, 35, 0.1);
+}
+
+.borrower-loan-card__receipt-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 0.55rem;
+  background: rgba(126, 47, 208, 0.09);
+  border: 1px solid rgba(126, 47, 208, 0.22);
+  color: #7e2fd0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.borrower-loan-card__receipt-btn:hover {
+  background: rgba(126, 47, 208, 0.15);
+  transform: translateY(-1px);
+}
+
+/* ── Polished Empty State ── */
+.borrower-empty-state {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 3rem 2rem;
+  border-radius: 1.2rem;
+  border: 1px dashed rgba(122, 138, 177, 0.3);
+  background: linear-gradient(
+    135deg,
+    rgba(126, 47, 208, 0.03) 0%,
+    rgba(34, 207, 157, 0.03) 100%
+  );
+  position: relative;
+  overflow: hidden;
+}
+
+.dark .borrower-empty-state {
+  border-color: rgba(160, 167, 197, 0.2);
+  background: linear-gradient(
+    135deg,
+    rgba(126, 47, 208, 0.06) 0%,
+    rgba(34, 207, 157, 0.04) 100%
+  );
+}
+
+.borrower-empty-state__glow {
+  position: absolute;
+  width: 300px;
+  height: 300px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(126, 47, 208, 0.1) 0%, transparent 70%);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.borrower-empty-state__icon {
+  position: relative;
+  width: 5rem;
+  height: 5rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 1.2rem;
+  background: linear-gradient(135deg, rgba(126, 47, 208, 0.12) 0%, rgba(34, 207, 157, 0.1) 100%);
+  border: 1px solid rgba(126, 47, 208, 0.18);
+}
+
+.dark .borrower-empty-state__icon {
+  background: linear-gradient(135deg, rgba(126, 47, 208, 0.2) 0%, rgba(34, 207, 157, 0.12) 100%);
+  border-color: rgba(126, 47, 208, 0.3);
+}
+
+.borrower-empty-state__icon svg {
+  width: 2.2rem;
+  height: 2.2rem;
+}
+
+.borrower-empty-state__title {
+  margin: 0 0 0.6rem;
+  font-family: var(--font-sora), "Trebuchet MS", sans-serif;
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #24285a;
+}
+
+.dark .borrower-empty-state__title {
+  color: #e6e8f0;
+}
+
+.borrower-empty-state__copy {
+  margin: 0 0 1.75rem;
+  color: #6b7280;
+  font-size: 0.9rem;
+  line-height: 1.65;
+  max-width: 38ch;
+}
+
+.dark .borrower-empty-state__copy {
+  color: #a0a7c5;
+}
+
+.borrower-empty-state__cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.7rem 1.75rem;
+  border-radius: 0.75rem;
+  background: linear-gradient(135deg, #7e2fd0, #5a1fad);
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 800;
+  text-decoration: none;
+  box-shadow: 0 8px 20px rgba(126, 47, 208, 0.32);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.borrower-empty-state__cta:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px rgba(126, 47, 208, 0.42);
+}
+
+.borrower-empty-state__cta--kyc {
+  background: linear-gradient(135deg, #a07020, #805510);
+  box-shadow: 0 8px 20px rgba(160, 112, 32, 0.28);
+}
+
+.borrower-empty-state__cta--kyc:hover {
+  box-shadow: 0 14px 28px rgba(160, 112, 32, 0.38);
+}
+
+/* ── Status badge dot on cards ── */
+@keyframes borrower-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.borrower-live-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #22cf9d;
+  animation: borrower-pulse 1.8s ease-in-out infinite;
+  margin-right: 0.25rem;
+}
+

@@ -44,6 +44,19 @@ export const metadata: Metadata = {
   },
 };
 
+/**
+ * RootLayout – Server Component
+ *
+ * The app-wide HTML shell. Loads the Manrope/Sora fonts, then wraps every page
+ * in {@link ThemeProvider} configured for class-based theming
+ * (`attribute="class"`) with the preference persisted under the
+ * `trustlend-theme` localStorage key. `suppressHydrationWarning` on `<html>` is
+ * required because next-themes mutates the `class` before React hydrates.
+ *
+ * @param props - Layout props.
+ * @param props.children - The active route's rendered page.
+ * @returns The root `<html>`/`<body>` document for the application.
+ */
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -56,6 +69,7 @@ export default function RootLayout({
           attribute="class"
           defaultTheme="system"
           enableSystem
+          storageKey="trustlend-theme"
           disableTransitionOnChange
         >
           {children}

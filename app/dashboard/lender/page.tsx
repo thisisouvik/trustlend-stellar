@@ -9,15 +9,20 @@ import {
   getServerSupabaseClient,
   getServiceRoleClient,
 } from "@/lib/supabase/server";
-import { formatCurrency } from "@/lib/utils/formatting";
+import { formatTokenBalance } from "@/lib/utils/formatting";
 import { lenderNavLinks } from "@/lib/dashboard/lender-links";
+import {
+  getIndexedLenderReadModel,
+  isIndexerConfigured,
+  isIndexerRequired,
+} from "@/lib/indexer/read-model";
 import Link from "next/link";
 
 export default async function LenderHomePage() {
   const { user } = await requireAuthenticatedUser("lender");
   const walletAddress =
     String(user.user_metadata?.wallet_address ?? "") || null;
-  const metrics = await getLenderDashboardMetrics(user.id);
+  const metrics = await getLenderDashboardMetrics(user.id, walletAddress);
   const supabase = await getServerSupabaseClient();
   const srClient = getServiceRoleClient();
 
@@ -71,12 +76,44 @@ export default async function LenderHomePage() {
         ];
 
   const positions = positionsRes.data ?? [];
-  const p2pInvestments = p2pRes.data ?? [];
+  const dbP2pInvestments = p2pRes.data ?? [];
   const profile = profileRes.data;
   const openLoanCount = openLoanCountRes.count ?? 0;
   const isKycVerified = profile?.kyc_status === "verified";
 
-  const allLoansArray = allLoansRes.data ?? [];
+  let indexedLoans: Array<Record<string, unknown>> = [];
+  let indexedP2pInvestments: typeof dbP2pInvestments = [];
+  if (isIndexerConfigured() && walletAddress) {
+    try {
+      const indexed = await getIndexedLenderReadModel({
+        userId: user.id,
+        walletAddress,
+        limit: 20,
+      });
+      const escrowTxByLoanId = new Map(
+        indexed.escrowEvents.map((event) => [event.loanId, event.txHash ?? ""]),
+      );
+      indexedLoans = indexed.loans.map((loan) => ({
+        id: loan.id,
+        status: loan.status,
+        repaid_amount: loan.repaidAmount / 10000000,
+        principal_amount: loan.principalAmount / 10000000,
+      }));
+      indexedP2pInvestments = indexed.loans.map((loan) => ({
+        id: `indexed-${loan.id}`,
+        ref_id: loan.id,
+        amount: loan.principalAmount / 10000000,
+        status: "confirmed",
+        metadata: JSON.stringify({ txHash: escrowTxByLoanId.get(loan.id) ?? "" }),
+        created_at: loan.createdAt,
+      })) as typeof dbP2pInvestments;
+    } catch (error) {
+      if (isIndexerRequired()) throw error;
+    }
+  }
+
+  const p2pInvestments = indexedP2pInvestments.length ? indexedP2pInvestments : dbP2pInvestments;
+  const allLoansArray = indexedLoans.length ? indexedLoans : allLoansRes.data ?? [];
   const loanMap = Object.fromEntries(
     allLoansArray.map((l) => [String(l.id), l]),
   );
@@ -247,12 +284,12 @@ export default async function LenderHomePage() {
           {[
             {
               label: "Total Deployed",
-              value: `${metrics.deployedCapital.toFixed(2)} XLM`,
+              value: formatTokenBalance(metrics.deployedCapital),
               sub: `${metrics.activePositions} active pool position${metrics.activePositions !== 1 ? "s" : ""}`,
             },
             {
               label: "Net Earnings",
-              value: formatCurrency(netEarnings),
+              value: formatTokenBalance(netEarnings),
               sub: "Total accumulated interest",
               highlight: true,
               positive: netEarnings >= 0,
@@ -296,6 +333,23 @@ export default async function LenderHomePage() {
             </article>
           ))}
         </section>
+
+        {/* TODO (Lender Utilization Chart Integration):
+            1. Install and Import Charting Library:
+               - Install Recharts (`npm install recharts`) or Chart.js/react-chartjs-2.
+               - Import `{ ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid }` from 'recharts'.
+            2. Fetch Historical Pool Volume Statistics:
+               - Request historical utilization data from backend API: e.g. `GET /api/pools/performance?range=30d` (referencing `sql/04_pool_performance_rpc.sql`).
+               - Calculate `utilizationRate = (totalBorrowed / totalLiquidity) * 100` for each data point over the 30-day window.
+            3. Render Responsive Area/Line Chart:
+               - Render inside a `<div style={{ height: 300, width: "100%" }}>` wrapper.
+               - Pass dataset containing `date`, `utilizationRate`, `borrowed`, and `totalLiquidity` values.
+            4. Add Tooltip Support displaying volume breakdowns on hover:
+               - Customize the `<Tooltip />` component to render custom HTML showing:
+                 * Utilization: `utilizationRate.toFixed(2)}%`
+                 * Borrowed Volume: `${formatTokenBalance(borrowed)} XLM`
+                 * Pool Capacity: `${formatTokenBalance(totalLiquidity)} XLM`
+        */}
 
         {/* ── Recent positions ────────────────────────────────────── */}
         <section style={{ display: "grid", gap: "1.5rem" }}>
@@ -361,11 +415,11 @@ export default async function LenderHomePage() {
                         </td>
                         <td>
                           <strong>
-                            {Number(pos.principal_amount ?? 0).toFixed(2)} XLM
+                            {formatTokenBalance(Number(pos.principal_amount ?? 0))}
                           </strong>
                         </td>
                         <td style={{ color: "#22cf9d" }}>
-                          {Number(pos.earned_interest ?? 0).toFixed(4)} XLM
+                          {formatTokenBalance(Number(pos.earned_interest ?? 0))}
                         </td>
                       </tr>
                     ))}
@@ -457,7 +511,7 @@ export default async function LenderHomePage() {
                           </td>
                           <td>
                             <strong>
-                              {Number(tx.amount ?? 0).toFixed(2)} XLM
+                              {formatTokenBalance(Number(tx.amount ?? 0))}
                             </strong>
                           </td>
                           <td>

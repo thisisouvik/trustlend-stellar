@@ -7,6 +7,11 @@ import {
   presentAdminMetrics,
 } from "@/lib/dashboard/metrics";
 import { getServiceRoleClient } from "@/lib/supabase/server";
+import {
+  getIndexedAdminReadModel,
+  isIndexerConfigured,
+  isIndexerRequired,
+} from "@/lib/indexer/read-model";
 import Link from "next/link";
 
 function formatAmount(value: number) {
@@ -67,7 +72,23 @@ export default async function AdminDashboardPage() {
     : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }];
 
   const profiles = profilesRes.data ?? [];
-  const loans = loansRes.data ?? [];
+  const dbLoans = loansRes.data ?? [];
+  let indexedLoans: typeof dbLoans | null = null;
+  if (isIndexerConfigured()) {
+    try {
+      const indexed = await getIndexedAdminReadModel(10);
+      indexedLoans = indexed.loans.map((loan) => ({
+        id: loan.id,
+        borrower_id: loan.borrowerId ?? loan.borrowerAddress ?? "",
+        status: loan.status === "pending" ? "requested" : loan.status,
+        principal_amount: loan.principalAmount / 10000000,
+        requested_at: loan.requestedAt ?? loan.createdAt,
+      })) as typeof dbLoans;
+    } catch (error) {
+      if (isIndexerRequired()) throw error;
+    }
+  }
+  const loans = indexedLoans?.length ? indexedLoans : dbLoans;
   const repayments = repaymentsRes.data ?? [];
   const ledgerRows = ledgerRes.data ?? [];
   const fraudSignals = fraudRes.data ?? [];

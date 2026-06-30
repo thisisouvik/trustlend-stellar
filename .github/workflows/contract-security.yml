@@ -1,0 +1,43 @@
+name: Smart Contract Security Audit & Lint
+
+on:
+  pull_request:
+    branches: [ "main", "dev" ]
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/contract-security.yml'
+
+jobs:
+  clippy:
+    name: Run Cargo Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts
+
+      - name: Run Clippy
+        working-directory: ./contracts
+        run: cargo clippy --all-targets -- -D warnings -A clippy::inconsistent_digit_grouping
+
+  audit:
+    name: Run Cargo Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run Cargo Audit
+        uses: rustsec/audit-check@v1.4.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: contracts

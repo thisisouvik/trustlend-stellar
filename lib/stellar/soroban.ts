@@ -11,6 +11,7 @@ import {
   scValToNative,
 } from "@stellar/stellar-sdk";
 import { signTransactionWithWallet } from "@/lib/stellar/wallet";
+import { redis } from "@/lib/services/redis";
 
 // ─── Network config ───────────────────────────────────────────────────────────
 
@@ -238,6 +239,9 @@ export async function callContract({
     }>("getTransaction", { hash });
 
     if (txResult.status === "SUCCESS") {
+      // Invalidate the cache for this contract since its state has changed
+      await invalidateContractCache(contractId).catch(() => {});
+
       return txResult.returnValue
         ? decodeScVal(xdr.ScVal.fromXDR(txResult.returnValue, "base64"))
         : null;
@@ -263,6 +267,19 @@ export async function simulateContractCall({
   args,
   callerAddress,
 }: CallContractOptions): Promise<unknown> {
+  const cacheKey = `soroban-cache:${contractId}:${method}:${args.map((a) => a.toXDR("base64")).join(",")}`;
+
+  if (redis) {
+    try {
+      const cached = await redis.get<string>(cacheKey);
+      if (cached !== null && cached !== undefined) {
+        return parseValue(typeof cached === "string" ? cached : JSON.stringify(cached));
+      }
+    } catch (err) {
+      console.error("[Redis] Cache read failed:", err);
+    }
+  }
+
   // Get account sequence from Horizon REST API
   const sequence = await getAccountSequence(callerAddress);
   const account = new Account(callerAddress, sequence);
@@ -288,10 +305,45 @@ export async function simulateContractCall({
 
   // results[0].xdr is the base64-encoded SCVal return value
   const retvalXdr = simData.results?.[0]?.xdr;
-  return retvalXdr ? decodeScVal(xdr.ScVal.fromXDR(retvalXdr, "base64")) : null;
+  const result = retvalXdr ? decodeScVal(xdr.ScVal.fromXDR(retvalXdr, "base64")) : null;
+
+  if (redis && result !== null && result !== undefined) {
+    try {
+      await redis.set(cacheKey, stringifyValue(result), { ex: 180 });
+    } catch (err) {
+      console.error("[Redis] Cache write failed:", err);
+    }
+  }
+
+  return result;
 }
 
 // ─── Internal ─────────────────────────────────────────────────────────────────
 
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+function stringifyValue(value: unknown): string {
+  return JSON.stringify(value, (_key, val) =>
+    typeof val === "bigint" ? { __bigint: val.toString() } : val
+  );
+}
+
+function parseValue(jsonStr: string): unknown {
+  return JSON.parse(jsonStr, (_key, val) =>
+    val && typeof val === "object" && "__bigint" in val ? BigInt(val.__bigint) : val
+  );
+}
+
+export async function invalidateContractCache(contractId: string): Promise<void> {
+  if (!redis) return;
+  try {
+    const keys = await redis.keys(`soroban-cache:${contractId}:*`);
+    if (keys.length > 0) {
+      await redis.del(...keys);
+      console.log(`[Redis] Invalidated ${keys.length} cache keys for contract ${contractId}`);
+    }
+  } catch (error) {
+    console.error("[Redis] Cache invalidation failed:", error);
+  }
+}

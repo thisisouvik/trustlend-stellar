@@ -1,4 +1,8 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { NotificationWidget } from "./NotificationWidget";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
@@ -57,6 +61,16 @@ export function WorkspaceFrame({
   // If no summary is provided, the alert section is suppressed entirely.
   const resolvedProfileSummary = profileSummary ?? null;
 
+  const pathname = usePathname();
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [prevPathname, setPrevPathname] = useState(pathname);
+
+  // Close sidebar on path change
+  if (pathname !== prevPathname) {
+    setIsSidebarOpen(false);
+    setPrevPathname(pathname);
+  }
+
   const normalizedLinks = (() => {
     const seen = new Set<string>();
     return links.filter((item) => {
@@ -75,7 +89,16 @@ export function WorkspaceFrame({
     <main className="role-dashboard-shell">
       <section className="role-dashboard-card role-dashboard-card--wide">
         <div className="workspace-layout">
-          <aside className="workspace-sidebar" aria-label="Dashboard sidebar">
+          {/* Overlay for mobile sidebar */}
+          {isSidebarOpen && (
+            <div 
+              className="workspace-sidebar-overlay" 
+              onClick={() => setIsSidebarOpen(false)}
+              aria-hidden="true"
+            />
+          )}
+          
+          <aside className={`workspace-sidebar ${isSidebarOpen ? "workspace-sidebar--open" : ""}`} aria-label="Dashboard sidebar">
             <div className="workspace-brand-wrap">
               <Link href="/" className="workspace-brand font-display">
                 TrustLend
@@ -139,9 +162,23 @@ export function WorkspaceFrame({
 
           <div className="workspace-main-panel">
             <header className="workspace-topbar">
-              <div>
-                <h1 className="font-display role-title">{heading}</h1>
-                <p className="role-description">{description}</p>
+              <div className="workspace-topbar-left">
+                <button 
+                  className="workspace-hamburger"
+                  onClick={() => setIsSidebarOpen(true)}
+                  aria-label="Open sidebar menu"
+                  aria-expanded={isSidebarOpen}
+                >
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="3" y1="12" x2="21" y2="12"></line>
+                    <line x1="3" y1="6" x2="21" y2="6"></line>
+                    <line x1="3" y1="18" x2="21" y2="18"></line>
+                  </svg>
+                </button>
+                <div>
+                  <h1 className="font-display role-title">{heading}</h1>
+                  <p className="role-description">{description}</p>
+                </div>
               </div>
               <div className="workspace-header-widget" aria-label="Dashboard controls">
                 {headerWidget ?? (

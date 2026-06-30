@@ -259,6 +259,7 @@ export function ProfileSettingsForm({
               className="settings-input settings-input--file"
               accept="image/jpeg,image/png,image/webp,application/pdf"
               onChange={handleChange}
+              onClick={(e) => e.stopPropagation()}
             />
             {selectedFile && (
               <p className="settings-file-note">

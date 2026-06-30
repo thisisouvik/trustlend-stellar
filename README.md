@@ -210,6 +210,13 @@ TrustLend includes an automated scheduler that checks for loans with payment dea
 | `WEBHOOK_NOTIFICATION_URL` | URL of the notification service that receives payment-due webhook POSTs |
 | `CRON_SECRET` | Secret token used to authenticate scheduler requests (`Authorization: Bearer <value>`) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service-role key (required for RLS-bypassing loan queries) |
+| `RESEND_API_KEY` | Optional Resend API key for borrower email notifications |
+| `RESEND_FROM_EMAIL` | Verified sender address used for TrustLend emails |
+| `RESEND_REPLY_TO_EMAIL` | Optional reply-to address for support responses |
+
+When Resend is configured, TrustLend sends borrower emails for loan approval,
+loan funding, and overdue payments. Email failures are logged but do not roll
+back successful loan state changes.
 
 ### Webhook Payload
 

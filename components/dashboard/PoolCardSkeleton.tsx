@@ -74,20 +74,20 @@ function PoolCardItem({ delay = 0 }: { delay?: number }) {
         }}
       >
         {["APR", "Total Size", "Available"].map((label) => (
-          <div key={label} style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-            <ShimmerBar width="3.5rem" height="0.6rem" />
-            <ShimmerBar width="5rem" height="1rem" />
+          <div key={label} style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+            <ShimmerBar width="3.5rem" height="0.65rem" />
+            <ShimmerBar width="5rem" height="0.88rem" />
           </div>
         ))}
       </div>
 
-      {/* Footer: My stake + CTA button */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "0.25rem" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
-          <ShimmerBar width="4rem" height="0.6rem" />
-          <ShimmerBar width="6rem" height="0.85rem" />
+      {/* Footer: My stake + APR badge placeholder */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "0.1rem" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.2rem" }}>
+          <ShimmerBar width="4.5rem" height="0.65rem" />
+          <ShimmerBar width="3rem" height="0.82rem" />
         </div>
-        <ShimmerBar width="6rem" height="2.1rem" className="rounded-lg!" />
+        <ShimmerBar width="5rem" height="1.6rem" className="rounded-full!" />
       </div>
     </motion.article>
   );
@@ -159,9 +159,37 @@ function BannerSkeleton() {
 }
 
 // ──────────────────────────────────────────────────────────
-// Main exported skeleton component
+// Main exported skeleton component (Available Pools only)
 // ──────────────────────────────────────────────────────────
 export function PoolCardSkeleton() {
+  return (
+    <div aria-busy="true" aria-label="Loading pools…">
+      {/* Section header */}
+      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1.25rem" }}>
+        <ShimmerBar width="12rem" height="1.1rem" />
+        <ShimmerBar width="3.5rem" height="1.4rem" className="rounded-full!" />
+      </div>
+
+      {/* Pool cards grid */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+          gap: "1rem",
+        }}
+      >
+        {[0, 0.07, 0.14, 0.21].map((delay, i) => (
+          <PoolCardItem key={i} delay={delay} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────
+// Full page skeleton for route loading
+// ──────────────────────────────────────────────────────────
+export function LenderPoolsPageSkeleton() {
   return (
     <div className="workspace-stack" aria-busy="true" aria-label="Loading pool data…">
       {/* Banner */}
@@ -193,32 +221,10 @@ export function PoolCardSkeleton() {
         </motion.article>
       </section>
 
-      {/* Available pools – card grid */}
-      <motion.article
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35, delay: 0.15, ease: "easeOut" }}
-        className="workspace-card workspace-card--full"
-      >
-        {/* Section header */}
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1.25rem" }}>
-          <ShimmerBar width="10rem" height="0.95rem" />
-          <ShimmerBar width="3.5rem" height="1.4rem" className="rounded-full!" />
-        </div>
-
-        {/* Pool cards grid */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-            gap: "1rem",
-          }}
-        >
-          {[0, 0.07, 0.14, 0.21].map((delay, i) => (
-            <PoolCardItem key={i} delay={delay} />
-          ))}
-        </div>
-      </motion.article>
+      {/* Available pools – card grid wrapper */}
+      <article className="workspace-card workspace-card--full">
+        <PoolCardSkeleton />
+      </article>
 
       {/* Deposit / Withdraw forms + Positions list */}
       <section className="workspace-grid workspace-grid--two">

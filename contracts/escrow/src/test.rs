@@ -2,8 +2,8 @@
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Ledger},
-    Address, Env,
+    testutils::{Address as _, Events, Ledger},
+    symbol_short, Address, Env, IntoVal, vec,
 };
 
 const WINDOW_SECONDS: u64 = 180;
@@ -108,4 +108,43 @@ fn test_create_hold_sets_expected_expiry_window() {
     assert_eq!(hold.held_at, START_TIMESTAMP);
     assert_eq!(hold.expires_at, START_TIMESTAMP + WINDOW_SECONDS);
     assert_eq!(hold.status, EscrowStatus::Held);
+}
+
+#[test]
+fn test_deposit_and_withdraw_emit_events() {
+    let (env, contract_id, _admin, lender, borrower) = setup();
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let pool_id = 42u32;
+    let amount = 5_000_000i128;
+
+    let escrow_id = client.create_hold(&lender, &borrower, &pool_id, &amount);
+
+    assert_eq!(
+        env.events().all(),
+        vec![
+            &env,
+            (
+                contract_id.clone(),
+                (symbol_short!("escrow"), symbol_short!("deposit")).into_val(&env),
+                (lender.clone(), pool_id, amount).into_val(&env),
+            ),
+        ]
+    );
+
+    let hold = client.get_hold(&escrow_id);
+    env.ledger().set_timestamp(hold.expires_at - 1);
+    client.revoke_hold(&lender, &escrow_id);
+
+    assert_eq!(
+        env.events().all(),
+        vec![
+            &env,
+            (
+                contract_id,
+                (symbol_short!("escrow"), symbol_short!("withdraw")).into_val(&env),
+                (lender, pool_id, amount).into_val(&env),
+            ),
+        ]
+    );
 }

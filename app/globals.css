@@ -1234,6 +1234,7 @@ a {
   border-color: rgba(126, 47, 208, 0.25);
   background: linear-gradient(90deg, rgba(126, 47, 208, 0.14), rgba(45, 211, 159, 0.11));
   color: #5d28b0;
+  transform: translateX(3px);
 }
 
 .dark .workspace-sidebar-link--active {

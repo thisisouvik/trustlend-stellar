@@ -1,4 +1,5 @@
 #![cfg(test)]
+#![allow(clippy::inconsistent_digit_grouping)]
 
 use super::*;
 use soroban_sdk::{
@@ -250,4 +251,75 @@ fn test_platform_fee_is_one_percent_of_interest() {
 
     let interest = loan.total_due - principal;
     assert_eq!(loan.platform_fee, interest / 100);
+}
+
+// ─── Dynamic liquidation threshold tests ─────────────────────────────────────
+
+#[test]
+fn test_liquidation_threshold_base() {
+    let (env, contract_id, _admin, _borrower) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Reputation = 0, Volatility = 0
+    // Expected: base threshold = 7500
+    let threshold = client.calculate_liquidation_threshold(&0, &0);
+    assert_eq!(threshold, 7500);
+}
+
+#[test]
+fn test_liquidation_threshold_reputation_boost() {
+    let (env, contract_id, _admin, _borrower) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Reputation = 500, Volatility = 0
+    // Expected: 7500 + (500 * 1.5) = 7500 + 750 = 8250
+    let threshold = client.calculate_liquidation_threshold(&500, &0);
+    assert_eq!(threshold, 8250);
+
+    // Reputation = 1000, Volatility = 0
+    // Expected: 7500 + (1000 * 1.5) = 7500 + 1500 = 9000 (upper bound cap)
+    let threshold = client.calculate_liquidation_threshold(&1000, &0);
+    assert_eq!(threshold, 9000);
+}
+
+#[test]
+fn test_liquidation_threshold_volatility_penalty() {
+    let (env, contract_id, _admin, _borrower) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Reputation = 0, Volatility = 2000 (20%)
+    // Expected: 7500 - (2000 / 2) = 7500 - 1000 = 6500
+    let threshold = client.calculate_liquidation_threshold(&0, &2000);
+    assert_eq!(threshold, 6500);
+}
+
+#[test]
+fn test_liquidation_threshold_clamping_bounds() {
+    let (env, contract_id, _admin, _borrower) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Upper bound clamp: Reputation = 1000, Volatility = 0
+    // Calculated: 7500 + 1500 = 9000
+    let threshold = client.calculate_liquidation_threshold(&1000, &0);
+    assert_eq!(threshold, 9000);
+
+    // Check Reputation = 2000 (abnormal), Volatility = 0
+    // Calculated: 7500 + 3000 = 10500 -> Clamped to 9000
+    let threshold = client.calculate_liquidation_threshold(&2000, &0);
+    assert_eq!(threshold, 9000);
+
+    // Lower bound clamp: Reputation = 0, Volatility = 8000 (80% volatility)
+    // Calculated: 7500 - 4000 = 3500 -> Clamped to 5000
+    let threshold = client.calculate_liquidation_threshold(&0, &8000);
+    assert_eq!(threshold, 5000);
+}
+
+#[test]
+fn test_liquidation_threshold_extreme_inputs_no_overflow() {
+    let (env, contract_id, _admin, _borrower) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Verify u32::MAX handles safely and clamps to bounds
+    let threshold = client.calculate_liquidation_threshold(&u32::MAX, &u32::MAX);
+    assert!((5000..=9000).contains(&threshold));
 }

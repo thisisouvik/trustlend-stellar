@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { formatCurrency } from "@/lib/utils/formatting";
+import { formatTokenBalance } from "@/lib/utils/formatting";
 import {
   LendingContract,
   ReputationContract,
@@ -71,6 +71,15 @@ export function LoanApplicationForm({ maxAmount, onSubmit }: LoanApplicationForm
           <option value="90">90 days (10% interest)</option>
         </select>
       </div>
+
+      {/* TODO (RWA Collateral UI Integration):
+          1. Collateral Deposit Selection List:
+             - Add a dropdown or card selection interface here.
+             - Render the tokenized asset logo (e.g. gold bullion image or treasury bill flag icon).
+             - Show RWA token info (asset name, token code XAU/USTB, current price feed rate, and required LTV margin).
+          2. Required Collateral Calculation:
+             - Display estimated collateral needed based on selected asset price and requested loan amount.
+      */}
 
       {error && <p className="workspace-error">{error}</p>}
 
@@ -346,7 +355,7 @@ export function BorrowerForms({
                   </p>
                 </div>
                 <div style={{ textAlign: "right" }}>
-                  <p style={{ margin: 0, fontWeight: 800, color: "#7e2fd0" }}>{formatCurrency(Number(loan.principal_amount ?? 0))}</p>
+                  <p style={{ margin: 0, fontWeight: 800, color: "#7e2fd0" }}>{formatTokenBalance(Number(loan.principal_amount ?? 0))}</p>
                   <p style={{ fontSize: "0.75rem", color: "#f59e0b", fontWeight: 700, margin: "0.15rem 0 0" }}>REQUESTED</p>
                 </div>
               </div>
@@ -369,7 +378,7 @@ export function BorrowerForms({
         ) : (
           <>
             <p className="workspace-card-copy">Loan #{String(selectedRepaymentLoan.id).slice(0, 8)}</p>
-            <p className="workspace-card-copy">Still owe: {formatCurrency(dueAmount)}</p>
+            <p className="workspace-card-copy">Still owe: {formatTokenBalance(dueAmount)}</p>
             <p className="workspace-card-copy">
               Next due: {selectedRepaymentLoan.due_at ? new Date(String(selectedRepaymentLoan.due_at)).toLocaleDateString() : "-"}
             </p>

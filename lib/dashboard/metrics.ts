@@ -1,4 +1,11 @@
 import { getServerSupabaseClient } from "@/lib/supabase/server";
+import {
+  getIndexedAdminReadModel,
+  getIndexedBorrowerReadModel,
+  getIndexedLenderReadModel,
+  isIndexerConfigured,
+  isIndexerRequired,
+} from "@/lib/indexer/read-model";
 
 export interface BorrowerDashboardMetrics {
   reputationScore: number;
@@ -22,10 +29,11 @@ export interface AdminDashboardMetrics {
   highRiskUsers: number;
 }
 
-function toCurrency(value: number): string {
+function toCurrency(valueInStroops: number): string {
+  const adjustedValue = valueInStroops / 10000000;
   return `${new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
-  }).format(value)} XLM`;
+  }).format(adjustedValue)} XLM`;
 }
 
 function toPercentage(value: number): string {
@@ -61,7 +69,48 @@ export function presentAdminMetrics(metrics: AdminDashboardMetrics) {
 }
 
 
-export async function getBorrowerDashboardMetrics(userId: string): Promise<BorrowerDashboardMetrics> {
+const ACTIVE_LOAN_STATUSES = ["active", "funded", "approved"];
+
+export async function getBorrowerDashboardMetrics(
+  userId: string,
+  walletAddress?: string | null,
+): Promise<BorrowerDashboardMetrics> {
+  if (isIndexerConfigured() && walletAddress) {
+    try {
+      const indexed = await getIndexedBorrowerReadModel({ userId, walletAddress });
+      if (indexed.loans.length === 0 && indexed.reputationEvents.length === 0) {
+        throw new Error("Indexer borrower read model is empty");
+      }
+      const reputationPoints = indexed.reputationEvents.reduce(
+        (sum, row) => sum + Number(row.pointsDelta ?? 0),
+        0,
+      );
+      const reputation =
+        indexed.reputationEvents.find((row) => Number.isFinite(row.scoreAfter ?? NaN))
+          ?.scoreAfter ?? Math.max(0, 250 + reputationPoints);
+      const pendingLoans = indexed.loans.filter((loan) =>
+        ["pending", "requested"].includes(loan.status),
+      ).length;
+      const activeLoans = indexed.loans.filter((loan) =>
+        ACTIVE_LOAN_STATUSES.includes(loan.status),
+      ).length;
+      const repaidLoans = indexed.loans.filter((loan) => loan.status === "repaid").length;
+      const defaultedLoans = indexed.loans.filter((loan) => loan.status === "defaulted").length;
+      const repaymentBase = repaidLoans + defaultedLoans;
+      const repaymentRate = repaymentBase > 0 ? (repaidLoans / repaymentBase) * 100 : 100;
+
+      return {
+        reputationScore: Math.max(0, Number(reputation ?? 0)),
+        availableCredit: Math.max(0, Number(reputation ?? 0)) * 10,
+        activeLoans,
+        pendingLoans,
+        repaymentRate,
+      };
+    } catch (error) {
+      if (isIndexerRequired()) throw error;
+    }
+  }
+
   const supabase = await getServerSupabaseClient();
 
   if (!supabase) {
@@ -86,7 +135,7 @@ export async function getBorrowerDashboardMetrics(userId: string): Promise<Borro
     const loans = loansRes.data ?? [];
 
     const pendingLoans  = loans.filter((loan) => loan.status === "requested").length;
-    const activeLoans   = loans.filter((loan) => ["active", "funded", "approved"].includes(loan.status)).length;
+    const activeLoans   = loans.filter((loan) => ACTIVE_LOAN_STATUSES.includes(loan.status)).length;
     const repaidLoans   = loans.filter((loan) => loan.status === "repaid").length;
     const defaultedLoans = loans.filter((loan) => loan.status === "defaulted").length;
     const repaymentBase = repaidLoans + defaultedLoans;
@@ -104,13 +153,34 @@ export async function getBorrowerDashboardMetrics(userId: string): Promise<Borro
   }
 }
 
-export async function getLenderDashboardMetrics(userId: string): Promise<LenderDashboardMetrics> {
+export async function getLenderDashboardMetrics(
+  userId: string,
+  walletAddress?: string | null,
+): Promise<LenderDashboardMetrics> {
+  let indexedDeployed = 0;
+  let indexedEarnings = 0;
+  let indexedActive = 0;
+
+  if (isIndexerConfigured() && walletAddress) {
+    try {
+      const indexed = await getIndexedLenderReadModel({ userId, walletAddress });
+      indexedDeployed = indexed.loans.reduce((sum, loan) => sum + loan.principalAmount, 0);
+      indexedEarnings = indexed.loans.reduce(
+        (sum, loan) => sum + Math.max(0, loan.repaidAmount - loan.principalAmount),
+        0,
+      );
+      indexedActive = indexed.loans.filter((loan) => ACTIVE_LOAN_STATUSES.includes(loan.status)).length;
+    } catch (error) {
+      if (isIndexerRequired()) throw error;
+    }
+  }
+
   const { getServerSupabaseClient, getServiceRoleClient } = await import("@/lib/supabase/server");
   const supabase = await getServerSupabaseClient();
   const srClient = getServiceRoleClient();
 
   if (!supabase || !srClient) {
-    return { deployedCapital: 0, totalEarnings: 0, activePositions: 0, defaultRate: 0 };
+    return { deployedCapital: indexedDeployed, totalEarnings: indexedEarnings, activePositions: indexedActive, defaultRate: 0 };
   }
 
   try {
@@ -185,9 +255,9 @@ export async function getLenderDashboardMetrics(userId: string): Promise<LenderD
       p2pActiveCount = (loans ?? []).filter(l => l.status === "active").length;
     }
 
-    const deployedCapital = poolDeployed + p2pDeployed;
-    const totalEarnings = poolEarnings + p2pProfit;
-    const activePositions = poolActive + p2pActiveCount;
+    const deployedCapital = poolDeployed + (indexedDeployed || p2pDeployed);
+    const totalEarnings = poolEarnings + (indexedEarnings || p2pProfit);
+    const activePositions = poolActive + (indexedActive || p2pActiveCount);
     const defaultRate = 0;
 
     return { deployedCapital, totalEarnings, activePositions, defaultRate };
@@ -201,6 +271,23 @@ export async function getAdminDashboardMetrics(): Promise<AdminDashboardMetrics>
   if (!supabase) return { totalUsers: 0, totalLoans: 0, activeLoans: 0, highRiskUsers: 0 };
 
   try {
+    let indexedLoanCounts: Pick<AdminDashboardMetrics, "totalLoans" | "activeLoans"> | null = null;
+    if (isIndexerConfigured()) {
+      try {
+        const indexed = await getIndexedAdminReadModel(500);
+        if (indexed.loans.length > 0) {
+          indexedLoanCounts = {
+            totalLoans: indexed.loans.length,
+            activeLoans: indexed.loans.filter((loan) =>
+              [...ACTIVE_LOAN_STATUSES, "pending", "requested"].includes(loan.status),
+            ).length,
+          };
+        }
+      } catch (error) {
+        if (isIndexerRequired()) throw error;
+      }
+    }
+
     const [usersRes, totalLoansRes, activeLoansRes, highRiskRes] = await Promise.all([
       supabase.from("profiles").select("id", { count: "exact", head: true }),
       supabase.from("loans").select("id", { count: "exact", head: true }),
@@ -211,8 +298,8 @@ export async function getAdminDashboardMetrics(): Promise<AdminDashboardMetrics>
     ]);
     return {
       totalUsers:    usersRes.count    ?? 0,
-      totalLoans:    totalLoansRes.count ?? 0,
-      activeLoans:   activeLoansRes.count ?? 0,
+      totalLoans:    indexedLoanCounts?.totalLoans ?? totalLoansRes.count ?? 0,
+      activeLoans:   indexedLoanCounts?.activeLoans ?? activeLoansRes.count ?? 0,
       highRiskUsers: highRiskRes.count ?? 0,
     };
   } catch {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { enforceRouteRateLimit } from "@/lib/rate-limit";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
+import { sendLoanFundedEmail } from "@/lib/email/resend";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 
 /**
@@ -146,6 +147,11 @@ export async function POST(request: NextRequest) {
       title: "Loan Funded!",
       message: `Great news! A lender has funded your loan of ${loan.principal_amount} XLM. The funds have been sent to your wallet.`,
       type: "loan_funded",
+    });
+    await sendLoanFundedEmail({
+      userId: String(loan.borrower_id),
+      amount: Number(loan.principal_amount ?? 0),
+      loanId,
     });
     // Notify Lender
     await createNotification({

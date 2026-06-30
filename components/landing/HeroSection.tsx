@@ -1,4 +1,8 @@
+"use client";
+
 import Image from "next/image";
+import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
 import type { HeroContent } from "@/types/landing";
 
 interface HeroSectionProps {
@@ -6,33 +10,127 @@ interface HeroSectionProps {
   isAuthenticated?: boolean;
 }
 
+// Particle component for decorative effects
+const Particle = ({ x, y, delay, width, height, duration }: { x: number; y: number; delay: number; width: number; height: number; duration: number }) => {
+  return (
+    <motion.div
+      className="absolute rounded-full bg-gradient-to-br from-purple-500/30 to-teal-400/30"
+      style={{
+        left: `${x}%`,
+        top: `${y}%`,
+        width,
+        height,
+      }}
+      initial={{ opacity: 0, scale: 0, y: 20 }}
+      animate={{
+        opacity: [0.3, 0.8, 0.3],
+        scale: [1, 1.3, 1],
+        y: [0, -30, 0],
+      }}
+      transition={{
+        duration,
+        repeat: Infinity,
+        delay,
+        ease: "easeInOut",
+      }}
+    />
+  );
+};
+
 export function HeroSection({ content, isAuthenticated = false }: HeroSectionProps) {
+  const [particles, setParticles] = useState<Array<{ id: number; x: number; y: number; delay: number; width: number; height: number; duration: number }>>([]);
+
+  // Generate particles once on mount
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setParticles(
+      Array.from({ length: 20 }).map((_, i) => ({
+        id: i,
+        x: Math.random() * 100,
+        y: Math.random() * 100,
+        delay: Math.random() * 3,
+        width: Math.random() * 20 + 8,
+        height: Math.random() * 20 + 8,
+        duration: Math.random() * 4 + 3,
+      }))
+    );
+  }, []);
+
   return (
     <section id="home" className="hero-section section-anchor">
-      <div className="crypto-container hero-grid">
-        <article className="hero-copy">
+      {/* Particle background */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {particles.map((p) => (
+          <Particle key={p.id} x={p.x} y={p.y} delay={p.delay} width={p.width} height={p.height} duration={p.duration} />
+        ))}
+      </div>
 
+      <div className="crypto-container hero-grid">
+        <motion.article
+          className="hero-copy"
+          initial={{ opacity: 0, x: -50 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.8, ease: "easeOut" }}
+        >
           {/* Eyebrow — styled badge */}
-          <div className="hero-eyebrow-badge">
+          <motion.div
+            className="hero-eyebrow-badge"
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.2, ease: "easeOut" }}
+          >
             <span className="hero-eyebrow-dot" />
             {content.eyebrow}
-          </div>
+          </motion.div>
 
           {/* Title — each part forced to its own line */}
-          <h1 className="hero-title font-display">
+          <motion.h1
+            className="hero-title font-display"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.4, ease: "easeOut" }}
+          >
             <span className="hero-title-line">{content.titleMain}</span>
             <span className="hero-title-line hero-title-accent">{content.titleAccent}</span>
-          </h1>
+          </motion.h1>
 
-          <p className="hero-description">{content.description}</p>
+          <motion.p
+            className="hero-description"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.6, ease: "easeOut" }}
+          >
+            {content.description}
+          </motion.p>
 
-          <div className="hero-trust-pills" role="list" aria-label="TrustLend highlights">
-            <span className="hero-trust-pill" role="listitem">Borrower flow</span>
-            <span className="hero-trust-pill" role="listitem">Lender flow</span>
-            <span className="hero-trust-pill" role="listitem">Real behavior scoring</span>
-          </div>
+          <motion.div
+            className="hero-trust-pills"
+            role="list"
+            aria-label="TrustLend highlights"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.8, ease: "easeOut" }}
+          >
+            {["Borrower flow", "Lender flow", "Real behavior scoring"].map((pill, i) => (
+              <motion.span
+                key={pill}
+                className="hero-trust-pill"
+                role="listitem"
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.3, delay: 1 + i * 0.1, ease: "easeOut" }}
+              >
+                {pill}
+              </motion.span>
+            ))}
+          </motion.div>
 
-          <div className="hero-cta-wrap">
+          <motion.div
+            className="hero-cta-wrap"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 1.2, ease: "easeOut" }}
+          >
             <a
               href={isAuthenticated ? "/dashboard" : "/auth"}
               className="google-btn google-btn-hero"
@@ -40,16 +138,31 @@ export function HeroSection({ content, isAuthenticated = false }: HeroSectionPro
             >
               {isAuthenticated ? "Go to Dashboard →" : "Start now →"}
             </a>
-          </div>
+          </motion.div>
 
-          <p className="hero-subnote">
+          <motion.p
+            className="hero-subnote"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.6, delay: 1.4, ease: "easeOut" }}
+          >
             Choose your role during sign-in. Dashboard is automatically split by role.
-          </p>
-        </article>
+          </motion.p>
+        </motion.article>
 
-        <article className="hero-visual" aria-hidden="true">
+        <motion.article
+          className="hero-visual"
+          aria-hidden="true"
+          initial={{ opacity: 0, x: 50 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.8, delay: 0.5, ease: "easeOut" }}
+        >
           <div className="hero-visual-glow" />
-          <div className="hero-art">
+          <motion.div
+            className="hero-art"
+            animate={{ y: [0, -15, 0] }}
+            transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
+          >
             <Image
               src="/assets/hero-trust.png"
               alt=""
@@ -58,16 +171,38 @@ export function HeroSection({ content, isAuthenticated = false }: HeroSectionPro
               sizes="(max-width: 960px) 100vw, 50vw"
               className="object-contain"
             />
-          </div>
-          <div className="hero-stat hero-stat-tl">
+          </motion.div>
+          <motion.div
+            className="hero-stat hero-stat-tl"
+            animate={{
+              y: [0, -10, 0],
+              boxShadow: [
+                "0 4px 12px rgba(0,0,0,0.1)",
+                "0 8px 24px rgba(0,0,0,0.2)",
+                "0 4px 12px rgba(0,0,0,0.1)",
+              ],
+            }}
+            transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+          >
             <span className="hero-stat-val">Trust</span>
             <span className="hero-stat-label">Live risk signal</span>
-          </div>
-          <div className="hero-stat hero-stat-br">
+          </motion.div>
+          <motion.div
+            className="hero-stat hero-stat-br"
+            animate={{
+              y: [0, 10, 0],
+              boxShadow: [
+                "0 4px 12px rgba(0,0,0,0.1)",
+                "0 8px 24px rgba(0,0,0,0.2)",
+                "0 4px 12px rgba(0,0,0,0.1)",
+              ],
+            }}
+            transition={{ duration: 5, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
+          >
             <span className="hero-stat-val">3.4k</span>
             <span className="hero-stat-label">Active users</span>
-          </div>
-        </article>
+          </motion.div>
+        </motion.article>
       </div>
     </section>
   );

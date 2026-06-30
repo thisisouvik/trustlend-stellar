@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Vec};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -80,6 +80,16 @@ pub struct LendingContract;
 
 #[contractimpl]
 impl LendingContract {
+    // TODO (RWA Collateral Integration):
+    // 1. Compatibility Check for Customized Asset Contracts:
+    //    - Implement a validation helper `validate_rwa_token_compatibility(env: &Env, token_address: &Address)` to ensure
+    //      the token contract implements the standard SEP-41 Token interface or custom compliance controls (clawback, transfer rules).
+    //    - Store a whitelist of compatible tokenized assets (e.g. tokenized gold, US Treasury Bills) in instance storage.
+    // 2. On-chain Oracle Price Feed Queries:
+    //    - Integrate an oracle interface query to fetch real-time USD/XLM values for tokenized assets (e.g. XAU/USD, TBILL/USD).
+    //    - Use the price feed to verify that the value of the deposited RWA collateral meets the required loan-to-value (LTV) ratio
+    //      before approving or activating the loan.
+
     // ── Admin ─────────────────────────────────────────────────────────────────
 
     pub fn initialize(env: Env, admin: Address) {
@@ -222,6 +232,19 @@ impl LendingContract {
         // Track per-borrower list
         Self::push_loan_id_for_borrower(&env, &borrower, loan_id);
 
+        env.events().publish(
+            (symbol_short!("loan"), symbol_short!("request")),
+            (
+                loan_id,
+                borrower,
+                amount,
+                duration_days,
+                interest_rate_bps,
+                total_due,
+                due_at,
+            ),
+        );
+
         loan_id
     }
 
@@ -245,6 +268,11 @@ impl LendingContract {
 
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
         Self::push_loan_id_for_lender(&env, &lender, loan_id);
+
+        env.events().publish(
+            (symbol_short!("loan"), symbol_short!("approved")),
+            (loan_id, lender, escrow_id),
+        );
     }
 
     /// Lender revokes an approved loan (within the 1-hour escrow window).
@@ -264,6 +292,9 @@ impl LendingContract {
         loan.lender = env.current_contract_address();
         loan.escrow_id = 0;
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+
+        env.events()
+            .publish((symbol_short!("loan"), symbol_short!("revoked")), loan_id);
     }
 
     /// Admin/backend activates the loan once escrow disbursement is confirmed.
@@ -277,6 +308,9 @@ impl LendingContract {
         }
         loan.status = LoanStatus::Active;
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+
+        env.events()
+            .publish((symbol_short!("loan"), symbol_short!("active")), loan_id);
     }
 
     /// Record a repayment (partial or full).
@@ -326,6 +360,10 @@ impl LendingContract {
         }
 
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+        env.events().publish(
+            (symbol_short!("loan"), symbol_short!("payment")),
+            (loan_id, amount, loan.remaining_due, loan.status.clone()),
+        );
         loan.status
     }
 
@@ -340,6 +378,9 @@ impl LendingContract {
         }
         loan.status = LoanStatus::Defaulted;
         env.storage().persistent().set(&DataKey::Loan(loan_id), &loan);
+
+        env.events()
+            .publish((symbol_short!("loan"), symbol_short!("default")), loan_id);
     }
 
     // ── Queries ───────────────────────────────────────────────────────────────
@@ -387,6 +428,40 @@ impl LendingContract {
             .persistent()
             .get(&DataKey::Payment(loan_id, payment_index))
             .expect("Payment not found")
+    }
+
+    /// Calculate dynamic liquidation threshold based on borrower reputation score
+    /// and asset volatility.
+    ///
+    /// - Base threshold: 7500 basis points (75.00%).
+    /// - Reputation bonus: adds `reputation_score * 1.5` basis points (max 1500 bps).
+    /// - Volatility penalty: subtracts `50%` of asset volatility bps.
+    /// - Clamped between 5000 bps (50.00%) and 9000 bps (90.00%).
+    /// - Uses checked arithmetic to prevent overflow.
+    pub fn calculate_liquidation_threshold(
+        _env: Env,
+        borrower_reputation_score: u32,
+        asset_volatility_bps: u32,
+    ) -> u32 {
+        let base_threshold: u32 = 7500;
+
+        // reputation_bonus = borrower_reputation_score * 1.5
+        let reputation_bonus = (borrower_reputation_score as u64)
+            .checked_mul(15)
+            .and_then(|v| v.checked_div(10))
+            .expect("Overflow calculating reputation bonus");
+
+        // volatility_penalty = asset_volatility_bps / 2
+        let volatility_penalty = (asset_volatility_bps as u64)
+            .checked_div(2)
+            .expect("Overflow calculating volatility penalty");
+
+        let threshold = (base_threshold as u64)
+            .checked_add(reputation_bonus)
+            .expect("Overflow adding reputation bonus")
+            .saturating_sub(volatility_penalty);
+
+        threshold.clamp(5000, 9000) as u32
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────

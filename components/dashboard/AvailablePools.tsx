@@ -15,7 +15,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { getBrowserSupabaseClient } from "@/lib/supabase/client";
-import { formatCurrency } from "@/lib/utils/formatting";
+import { formatTokenBalance } from "@/lib/utils/formatting";
 import { PoolCardSkeleton } from "./PoolCardSkeleton";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -88,8 +88,8 @@ function PoolCard({
   index: number;
 }) {
   const apr = (Number(pool.apr_bps ?? 0) / 100).toFixed(2);
-  const totalSize = formatCurrency(Number(pool.total_liquidity ?? 0));
-  const available = Number(pool.available_liquidity ?? 0).toFixed(2);
+  const totalSize = formatTokenBalance(Number(pool.total_liquidity ?? 0));
+  const available = (Number(pool.available_liquidity ?? 0) / 10000000).toFixed(2);
 
   return (
     <motion.article

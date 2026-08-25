@@ -2,7 +2,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatTokenBalance } from "@/lib/utils/formatting";
-import { Tooltip } from "@/components/ui/Tooltip";
 import {
   LendingContract,
   ReputationContract,
@@ -145,35 +144,6 @@ export function LoanApplicationForm({ maxAmount, onSubmit }: LoanApplicationForm
             <div>
               <strong>Floating Rate</strong>
               <p style={{ margin: 0, fontSize: '0.85rem', color: '#666' }}>Starts lower, adjusts with market.</p>
-              
-              {rateModel === "floating" && (
-                <div style={{ marginTop: '0.75rem', display: 'flex', gap: '1rem', flexWrap: 'wrap', background: 'rgba(255,255,255,0.03)', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'rgba(255,255,255,0.7)' }}>Base Rate</span>
-                      <Tooltip content="The minimum interest rate charged when pool utilization is 0%.">
-                        <span style={{ cursor: 'help', fontSize: '0.75rem', opacity: 0.7 }}>ⓘ</span>
-                      </Tooltip>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'rgba(255,255,255,0.7)' }}>Utilization Rate</span>
-                      <Tooltip content="The percentage of the pool's total liquidity that is currently borrowed.">
-                        <span style={{ cursor: 'help', fontSize: '0.75rem', opacity: 0.7 }}>ⓘ</span>
-                      </Tooltip>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'rgba(255,255,255,0.7)' }}>Multiplier</span>
-                      <Tooltip content="The rate at which interest increases as utilization increases.">
-                        <span style={{ cursor: 'help', fontSize: '0.75rem', opacity: 0.7 }}>ⓘ</span>
-                      </Tooltip>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           </label>
         </div>

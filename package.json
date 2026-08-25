@@ -21,7 +21,6 @@
   "dependencies": {
     "@albedo-link/intent": "^0.13.0",
     "@creit.tech/stellar-wallets-kit": "^2.5.0",
-    "@radix-ui/react-tooltip": "^1.2.16",
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^16.0.1",
     "@supabase/ssr": "^0.10.2",

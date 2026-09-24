@@ -76,7 +76,7 @@
     "pg": "^8.23.0",
     "tailwindcss": "^4",
     "tsx": "^4.19.2",
-    "typescript": "^5",
+    "typescript": "^7",
     "vitest": "4.1.9"
   },
   "overrides": {

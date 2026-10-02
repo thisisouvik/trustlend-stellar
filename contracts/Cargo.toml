@@ -21,7 +21,7 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
-soroban-sdk = "22.0.4"
+soroban-sdk = "28.0.0"
 
 # ─── Release profile (optimise WASM size) ────────────────────────────────────
 [profile.release]

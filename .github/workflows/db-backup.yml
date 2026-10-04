@@ -23,10 +23,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  check-secrets:
+    runs-on: ubuntu-latest
+    outputs:
+      has_aws_key: ${{ steps.check.outputs.has_aws_key }}
+    steps:
+      - id: check
+        env:
+          AWS_KEY: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        run: |
+          if [ -n "$AWS_KEY" ]; then
+            echo "has_aws_key=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_aws_key=false" >> "$GITHUB_OUTPUT"
+          fi
+
   backup:
     name: Dump, encrypt and upload to S3
     runs-on: ubuntu-latest
-    if: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
+    needs: check-secrets
+    if: needs.check-secrets.outputs.has_aws_key == 'true'
     timeout-minutes: 30
     steps:
       - name: Checkout repo

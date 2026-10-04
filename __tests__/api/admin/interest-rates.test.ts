@@ -2,14 +2,19 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
 // ── Mock Auth ─────────────────────────────────────────────────────────────────
-class MockUnauthorizedError extends Error {
-  constructor(message = "Unauthorized") {
-    super(message);
-    this.name = "UnauthorizedError";
+const { mockRequireApiAdmin, MockUnauthorizedError } = vi.hoisted(() => {
+  class MockUnauthorizedError extends Error {
+    constructor(message = "Unauthorized") {
+      super(message);
+      this.name = "UnauthorizedError";
+    }
   }
-}
+  return {
+    mockRequireApiAdmin: vi.fn(),
+    MockUnauthorizedError,
+  };
+});
 
-const mockRequireApiAdmin = vi.fn();
 vi.mock("@/lib/auth/session", () => ({
   requireApiAdmin: () => mockRequireApiAdmin(),
   UnauthorizedError: MockUnauthorizedError,

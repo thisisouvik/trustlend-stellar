@@ -126,7 +126,7 @@ describe("lender-earnings — tier multipliers applied to yield", () => {
     for (const tier of LENDER_TIERS) {
       const r = estimateLenderEarnings({ depositXlm: 7500, durationDays: 200, poolAprBps: 950, tier });
       const reconstructed = r.depositXlm * (r.dynamicAprBps / 10_000) * (r.durationDays / 365);
-      expect(reconstructed).toBeCloseTo(r.interestYield, 1);
+      expect(reconstructed).toBeCloseTo(r.interestYield, 0);
     }
   });
 

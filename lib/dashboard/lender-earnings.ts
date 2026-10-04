@@ -198,12 +198,10 @@ export function estimateLenderEarnings(params: EarningsEstimateParams): Earnings
   const platformFee = toStroopPrecision(interestYield * (feeBps / 10_000));
   const netRewards = toStroopPrecision(interestYield - platformFee);
 
-  // The rate the gross forecast annualizes to. Derived from interestYield so it
-  // can never drift from the reward figure shown beside it.
-  const dynamicAprBps =
-    depositXlm > 0 && yearFraction > 0
-      ? Math.round((interestYield / (depositXlm * yearFraction)) * 10_000)
-      : 0;
+  // The rate the gross forecast annualizes to. Computed directly from the pool rate
+  // and multiplier to avoid floating point division bugs that appear if we back-calculate
+  // from the stroop-rounded interestYield.
+  const dynamicAprBps = Math.round(poolAprBps * tierConfig.multiplier);
 
   const reputationPoints = Math.round(
     depositXlm *

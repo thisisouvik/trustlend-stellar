@@ -403,6 +403,31 @@ export const interestRateConfigs = pgTable(
   ],
 );
 
+// ─── Platform Settings ────────────────────────────────────────────────────────
+
+export const platformSettings = pgTable(
+  "platform_settings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    settingKey: text("setting_key").notNull(),
+    valueBps: integer("value_bps").notNull(),
+    version: integer("version").notNull().default(1),
+    isActive: boolean("is_active").notNull().default(true),
+    notes: text("notes"),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    updatedByEmail: text("updated_by_email"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("platform_settings_key_version_key").on(t.settingKey, t.version),
+    uniqueIndex("platform_settings_active_key")
+      .on(t.settingKey)
+      .where(sql`${t.isActive}`),
+    index("idx_platform_settings_created_at").on(t.createdAt),
+  ],
+);
+
 // ─── Risk and fraud ───────────────────────────────────────────────────────────
 
 export const riskAssessments = pgTable(
@@ -660,3 +685,4 @@ export type Notification = typeof notifications.$inferSelect;
 export type FraudSignal = typeof fraudSignals.$inferSelect;
 export type RiskAssessment = typeof riskAssessments.$inferSelect;
 export type InterestRateConfigRow = typeof interestRateConfigs.$inferSelect;
+export type PlatformSettingRow = typeof platformSettings.$inferSelect;

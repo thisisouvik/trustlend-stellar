@@ -7,6 +7,7 @@ import { ledgerTransactions, lendingPools, loans, profiles, reputationSnapshots 
 import { requireKycVerified } from "@/lib/kyc/middleware";
 import { verifyOnchainLoanRequest } from "@/lib/loans/onchain";
 import { getActiveRateConfig, isRateModel, priceLoanApr } from "@/lib/loans/rate-config";
+import { getPlatformFeeBps } from "@/lib/platform/settings";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 
 /**

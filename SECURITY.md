@@ -9,7 +9,7 @@ TrustLend is dedicated to ensuring the security and safety of our decentralized 
 If you discover a security vulnerability within TrustLend, **do NOT open a public GitHub issue** or publicly disclose the issue until it has been acknowledged, investigated, and remediated by the TrustLend team.
 
 ### Secure Disclosure Instructions
-1. **Email:** Send your report securely to `security@trustlend.io` (or submit via GitHub Private Vulnerability Reporting).
+1. **Email:** Send your report securely to `souvikmandals10@gmail.com` (Maintainer Email) or submit via GitHub Private Vulnerability Reporting.
 2. **Details Required:**
    - **Summary:** Concise explanation of the vulnerability and its potential impact.
    - **Component:** The specific smart contract, API endpoint, script, or component affected.

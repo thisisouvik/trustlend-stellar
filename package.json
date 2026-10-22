@@ -33,7 +33,7 @@
   "dependencies": {
     "@creit.tech/stellar-wallets-kit": "^2.5.0",
     "@neondatabase/serverless": "^1.1.0",
-    "@radix-ui/react-tooltip": "^1.2.16",
+    "@radix-ui/react-tooltip": "^1.4.1",
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^16.0.1",
     "@upstash/ratelimit": "^2.0.8",

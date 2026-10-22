@@ -17,4 +17,4 @@ soroban-sdk = { workspace = true }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 # Already in the dependency tree via soroban-sdk's testutils; used by the
 # tests to sign proofs as a provider would.
-ed25519-dalek = "2"
+ed25519-dalek = "3"

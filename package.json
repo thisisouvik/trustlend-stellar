@@ -68,7 +68,7 @@
     "@vitest/coverage-v8": "^4.1.12",
     "cross-env": "^10.1.0",
     "drizzle-kit": "^0.31.10",
-    "eslint": "^9",
+    "eslint": "^10",
     "eslint-config-next": "16.4.2",
     "husky": "^9.1.7",
     "pg": "^8.23.0",

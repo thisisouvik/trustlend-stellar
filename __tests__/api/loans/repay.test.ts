@@ -33,10 +33,10 @@ vi.mock("@/lib/db/client", () => ({ getDb: () => mockGetDb() }));
 
 import { POST } from "@/app/api/loans/repay/route";
 
-function request(body: Record<string, unknown>) {
+function request(body: Record<string, unknown>, headers: Record<string, string> = {}) {
   return new NextRequest("http://localhost/api/loans/repay", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
 }
@@ -164,5 +164,41 @@ describe("POST /api/loans/repay — payment verification", () => {
     const res = await POST(request({ loanId: LOAN_ID, amount: 50, txHash: HASH, borrowerAddress: BORROWER }));
     expect(res.status).toBe(409);
     expect(mockVerify).not.toHaveBeenCalled();
+  });
+
+  it("executes inside db.transaction with FOR UPDATE row-level lock and rejects duplicate Idempotency-Key", async () => {
+    const db = createFakeDb() as ReturnType<typeof createFakeDb> & {
+      transaction?: (fn: (tx: unknown) => Promise<unknown>) => Promise<unknown>;
+    };
+    const transactionSpy = vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(db));
+    db.transaction = transactionSpy;
+
+    const origSelect = db.select.bind(db);
+    const forSpy = vi.fn();
+    db.select = (...args: unknown[]) => {
+      const chain = origSelect(...args);
+      chain.for = (mode: string) => {
+        forSpy(mode);
+        return chain;
+      };
+      return chain;
+    };
+
+    db.queue([loanRow]); // loan lookup with FOR UPDATE
+    db.queue([{ id: "existing-ledger-tx" }]); // duplicate idempotency key found
+    mockGetDb.mockReturnValue(db);
+
+    const res = await POST(
+      request(
+        { loanId: LOAN_ID, amount: 50, txHash: HASH, borrowerAddress: BORROWER },
+        { "Idempotency-Key": "repay-idem-key-1" },
+      ),
+    );
+
+    expect(res.status).toBe(409);
+    expect(transactionSpy).toHaveBeenCalledTimes(1);
+    expect(forSpy).toHaveBeenCalledWith("update");
+    expect(mockVerify).not.toHaveBeenCalled();
+    expect(db.calls.some((c) => c.method === "insert")).toBe(false);
   });
 });

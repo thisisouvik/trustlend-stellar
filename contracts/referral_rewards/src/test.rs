@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, token, Env};
+use soroban_sdk::{testutils::Address as _, token, vec, Env};
 
 const REFERENCE_LOAN: i128 = 1_000_0000000; // 1_000 XLM
 const BASE_BONUS: i128 = 10_0000000; // 10 TLND (7 decimals)
@@ -38,6 +38,7 @@ fn setup_with(config: ReferralConfig, funding: i128) -> Ctx {
     let client = ReferralRewardsContractClient::new(&env, &contract_id);
 
     client.initialize(&admin, &token_id, &lending, &config);
+    client.set_multisig_admin(&admin, &admin);
 
     if funding > 0 {
         token::StellarAssetClient::new(&env, &token_id).mint(&contract_id, &funding);
@@ -422,4 +423,114 @@ fn test_referrer_accumulates_across_referees() {
     assert_eq!(c.get_paid_referral_count(&referrer), 3);
     assert_eq!(c.get_total_bonuses_paid(), BASE_BONUS * 3);
     assert_eq!(balance_of(&ctx, &referrer), BASE_BONUS * 3);
+}
+
+// ─── Multi-sig & Pause Controls (Issue #425) ────────────────────────────────
+
+#[test]
+fn test_setup_multisig_and_threshold_pause_unpause() {
+    let ctx = setup();
+    let c = client(&ctx);
+    let signer1 = Address::generate(&ctx.env);
+    let signer2 = Address::generate(&ctx.env);
+
+    let admins = vec![&ctx.env, ctx.admin.clone(), signer1.clone(), signer2.clone()];
+    c.setup_multisig(&ctx.admin, &admins, &2);
+
+    assert_eq!(c.get_multisig_admins().len(), 3);
+    assert_eq!(c.get_multisig_threshold(), 2);
+    assert!(!c.is_paused());
+
+    c.pause(&ctx.admin);
+    assert!(!c.is_paused());
+    assert_eq!(c.get_pause_signer_count(), 1);
+
+    c.pause(&signer1);
+    assert!(c.is_paused());
+    assert_eq!(c.get_pause_signer_count(), 0);
+
+    c.unpause(&ctx.admin);
+    assert!(c.is_paused());
+    c.unpause(&signer2);
+    assert!(!c.is_paused());
+}
+
+#[test]
+#[should_panic(expected = "Multisig not configured")]
+fn test_withdraw_unspent_requires_multisig_configured() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let lending = Address::generate(&env);
+    let token_id = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let contract_id = env.register(ReferralRewardsContract, ());
+    let c = ReferralRewardsContractClient::new(&env, &contract_id);
+
+    c.initialize(&admin, &token_id, &lending, &default_config());
+    token::StellarAssetClient::new(&env, &token_id).mint(&contract_id, &BASE_BONUS);
+
+    let treasury = Address::generate(&env);
+    // No multisig configured -> withdraw_unspent must fail closed
+    c.withdraw_unspent(&admin, &treasury, &BASE_BONUS);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorised: caller is not a multisig admin")]
+fn test_withdraw_unspent_rejects_non_multisig_caller() {
+    let ctx = setup();
+    let c = client(&ctx);
+    let stranger = Address::generate(&ctx.env);
+    let treasury = Address::generate(&ctx.env);
+
+    c.withdraw_unspent(&stranger, &treasury, &BASE_BONUS);
+}
+
+#[test]
+#[should_panic(expected = "Contract is paused")]
+fn test_withdraw_unspent_blocked_when_paused() {
+    let ctx = setup();
+    let c = client(&ctx);
+    let treasury = Address::generate(&ctx.env);
+
+    c.pause(&ctx.admin);
+    assert!(c.is_paused());
+
+    c.withdraw_unspent(&ctx.admin, &treasury, &BASE_BONUS);
+}
+
+#[test]
+#[should_panic(expected = "Contract is paused")]
+fn test_register_referral_blocked_when_paused() {
+    let ctx = setup();
+    let c = client(&ctx);
+    let referrer = Address::generate(&ctx.env);
+    let referee = Address::generate(&ctx.env);
+
+    c.pause(&ctx.admin);
+    c.register_referral(&referee, &referrer);
+}
+
+#[test]
+fn test_claim_referral_bonus_returns_zero_when_paused_and_pays_after_unpause() {
+    let ctx = setup();
+    let c = client(&ctx);
+    let referrer = Address::generate(&ctx.env);
+    let referee = Address::generate(&ctx.env);
+
+    c.register_referral(&referee, &referrer);
+    c.pause(&ctx.admin);
+    assert!(c.is_paused());
+
+    // Must return 0 without panicking when paused so loan activation is not broken
+    let paid_while_paused = c.claim_referral_bonus(&ctx.lending, &referee, &REFERENCE_LOAN);
+    assert_eq!(paid_while_paused, 0);
+    assert!(!c.is_bonus_paid(&referee));
+
+    c.unpause(&ctx.admin);
+    let paid_after_unpause = c.claim_referral_bonus(&ctx.lending, &referee, &REFERENCE_LOAN);
+    assert_eq!(paid_after_unpause, BASE_BONUS);
+    assert!(c.is_bonus_paid(&referee));
 }

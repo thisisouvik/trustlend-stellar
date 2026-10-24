@@ -568,6 +568,7 @@ export const referrals = pgTable(
       .references(() => profiles.id, { onDelete: "cascade" }),
     refereeId: uuid("referee_id")
       .notNull()
+      .unique()
       .references(() => profiles.id, { onDelete: "cascade" }),
     referralCode: text("referral_code").notNull(),
     status: referralStatusEnum("status").notNull().default("pending"),

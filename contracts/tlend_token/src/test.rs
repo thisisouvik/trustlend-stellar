@@ -180,3 +180,47 @@ fn test_set_admin() {
     token.set_admin(&new_admin);
     assert_eq!(token.admin(), new_admin);
 }
+
+#[test]
+fn test_mint_up_to_max_total_supply() {
+    let (env, _admin, token) = setup();
+    let alice = Address::generate(&env);
+
+    assert_eq!(token.max_supply(), MAX_TOTAL_SUPPLY);
+    token.mint(&alice, &MAX_TOTAL_SUPPLY);
+    assert_eq!(token.balance(&alice), MAX_TOTAL_SUPPLY);
+    assert_eq!(token.total_supply(), MAX_TOTAL_SUPPLY);
+}
+
+#[test]
+#[should_panic(expected = "Mint exceeds MAX_TOTAL_SUPPLY")]
+fn test_mint_exceeding_max_total_supply_panics() {
+    let (env, _admin, token) = setup();
+    let alice = Address::generate(&env);
+
+    token.mint(&alice, &MAX_TOTAL_SUPPLY);
+    token.mint(&alice, &1);
+}
+
+#[test]
+#[should_panic(expected = "Mint exceeds MAX_TOTAL_SUPPLY")]
+fn test_single_mint_above_max_total_supply_panics() {
+    let (env, _admin, token) = setup();
+    let alice = Address::generate(&env);
+
+    token.mint(&alice, &(MAX_TOTAL_SUPPLY + 1));
+}
+
+#[test]
+fn test_burn_restores_mint_headroom_under_max_total_supply() {
+    let (env, _admin, token) = setup();
+    let alice = Address::generate(&env);
+
+    token.mint(&alice, &MAX_TOTAL_SUPPLY);
+    token.burn(&alice, &1_000);
+    assert_eq!(token.total_supply(), MAX_TOTAL_SUPPLY - 1_000);
+
+    token.mint(&alice, &1_000);
+    assert_eq!(token.total_supply(), MAX_TOTAL_SUPPLY);
+}
+

@@ -77,6 +77,13 @@ fn advance_past_voting(w: &World) {
     w.env.ledger().set_timestamp(now + VOTING_PERIOD + 1);
 }
 
+fn advance_past_timelock(w: &World) {
+    let now = w.env.ledger().timestamp();
+    w.env
+        .ledger()
+        .set_timestamp(now + DEFAULT_TIMELOCK_DELAY_SECS + 1);
+}
+
 #[test]
 fn test_default_fee_is_100_bps() {
     let w = setup();
@@ -110,6 +117,7 @@ fn test_full_fee_change_flow() {
     // Fee unchanged until executed.
     assert_eq!(w.lending.get_platform_fee_bps(), 100);
 
+    advance_past_timelock(&w);
     w.gov.execute(&id);
     assert_eq!(w.lending.get_platform_fee_bps(), 250);
     assert_eq!(w.gov.get_proposal(&id).status, ProposalStatus::Executed);
@@ -228,4 +236,97 @@ fn test_lending_fee_change_blocked_without_governance() {
     lending.initialize(&admin);
     // No set_governance call → no on-chain path to change the fee.
     lending.set_platform_fee_bps(&admin, &200);
+}
+
+#[test]
+#[should_panic(expected = "Timelock delay has not elapsed")]
+fn test_execute_before_timelock_panics() {
+    let w = setup();
+    let alice = Address::generate(&w.env);
+    give_score(&w, &alice, 10);
+
+    let id = w.gov.propose_fee_change(&alice, &250);
+    w.gov.vote(&alice, &id, &true);
+
+    advance_past_voting(&w);
+    assert_eq!(w.gov.finalize(&id), ProposalStatus::Passed);
+
+    // Attempt immediate execution before DEFAULT_TIMELOCK_DELAY_SECS has elapsed.
+    w.gov.execute(&id);
+}
+
+#[test]
+fn test_custom_timelock_delay_enforced() {
+    let w = setup();
+    let alice = Address::generate(&w.env);
+    give_score(&w, &alice, 10);
+
+    w.gov.set_timelock_delay(&w.admin, &3_600);
+    assert_eq!(w.gov.get_timelock_delay(), 3_600);
+
+    let id = w.gov.propose_fee_change(&alice, &300);
+    w.gov.vote(&alice, &id, &true);
+    advance_past_voting(&w);
+    assert_eq!(w.gov.finalize(&id), ProposalStatus::Passed);
+
+    let p = w.gov.get_proposal(&id);
+    assert_eq!(p.eta, w.env.ledger().timestamp() + 3_600);
+
+    w.env.ledger().set_timestamp(p.eta - 1);
+    assert!(w.gov.try_execute(&id).is_err());
+
+    w.env.ledger().set_timestamp(p.eta);
+    w.gov.execute(&id);
+    assert_eq!(w.lending.get_platform_fee_bps(), 300);
+}
+
+#[test]
+fn test_voting_power_snapshot_ignores_mid_vote_reputation_inflation() {
+    let w = setup();
+    let alice = Address::generate(&w.env); // 100 power at snapshot
+    let bob = Address::generate(&w.env); // 150 power at snapshot
+    give_score(&w, &alice, 2);
+    give_score(&w, &bob, 3);
+
+    // Record checkpoints prior to proposal creation
+    assert_eq!(w.gov.checkpoint_voting_power(&alice), 100);
+    assert_eq!(w.gov.checkpoint_voting_power(&bob), 150);
+
+    let id = w.gov.propose_fee_change(&alice, &250);
+
+    // Advance ledger/time during voting window and inflate Bob's reputation by +500
+    w.env.ledger().set_sequence_number(w.env.ledger().sequence() + 1);
+    w.env.ledger().set_timestamp(w.env.ledger().timestamp() + 10);
+    for _ in 0..10 {
+        w.rep
+            .add_reputation_event(&w.admin, &bob, &ReputationEvent::TestLoanRepaid);
+    }
+    assert_eq!(w.gov.get_voting_power(&bob), 650);
+
+    // Bob's vote must use his snapshotted power (150), not his inflated mid-vote power (650)
+    w.gov.vote(&alice, &id, &true);
+    w.gov.vote(&bob, &id, &false);
+
+    let p = w.gov.get_proposal(&id);
+    assert_eq!(p.votes_for, 100);
+    assert_eq!(p.votes_against, 150);
+}
+
+#[test]
+#[should_panic(expected = "No voting power")]
+fn test_voter_acquiring_reputation_after_proposal_creation_rejected() {
+    let w = setup();
+    let alice = Address::generate(&w.env);
+    let latecomer = Address::generate(&w.env);
+    give_score(&w, &alice, 10);
+
+    let id = w.gov.propose_fee_change(&alice, &250);
+
+    // Latecomer acquires reputation in a subsequent ledger after proposal creation
+    w.env.ledger().set_sequence_number(w.env.ledger().sequence() + 1);
+    w.env.ledger().set_timestamp(w.env.ledger().timestamp() + 10);
+    give_score(&w, &latecomer, 10);
+
+    // Latecomer had 0 snapshotted power when proposal was created, so voting must fail
+    w.gov.vote(&latecomer, &id, &true);
 }

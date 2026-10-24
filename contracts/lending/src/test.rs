@@ -1697,6 +1697,168 @@ fn test_flash_loan_fee_at_max_boundary_accepted() {
     assert_eq!(pool_after, pool_before + expected_fee);
 }
 
+mod reentrant_flash_receiver {
+    use super::*;
+    use soroban_sdk::{contract, contractimpl};
+
+    #[contract]
+    pub struct ReentrantFlashReceiver;
+
+    #[contractimpl]
+    impl FlashLoanReceiver for ReentrantFlashReceiver {
+        fn execute_operation(
+            env: Env,
+            token: Address,
+            amount: i128,
+            _fee: i128,
+            pool: Address,
+            params: Bytes,
+        ) {
+            let client = LendingContractClient::new(&env, &pool);
+            let caller = env.current_contract_address();
+            client.flash_loan(&caller, &token, &amount, &params);
+        }
+    }
+}
+
+mod reentrant_deposit_receiver {
+    use super::*;
+    use soroban_sdk::{contract, contractimpl};
+
+    #[contract]
+    pub struct ReentrantDepositReceiver;
+
+    #[contractimpl]
+    impl FlashLoanReceiver for ReentrantDepositReceiver {
+        fn execute_operation(
+            env: Env,
+            token: Address,
+            amount: i128,
+            _fee: i128,
+            pool: Address,
+            _params: Bytes,
+        ) {
+            let client = LendingContractClient::new(&env, &pool);
+            let caller = env.current_contract_address();
+            client.deposit_collateral(&caller, &token, &amount);
+        }
+    }
+}
+
+mod reentrant_rate_switch_receiver {
+    use super::*;
+    use soroban_sdk::{contract, contractimpl};
+
+    #[contract]
+    pub struct ReentrantRateSwitchReceiver;
+
+    #[contractimpl]
+    impl FlashLoanReceiver for ReentrantRateSwitchReceiver {
+        fn execute_operation(
+            env: Env,
+            _token: Address,
+            _amount: i128,
+            _fee: i128,
+            pool: Address,
+            _params: Bytes,
+        ) {
+            let client = LendingContractClient::new(&env, &pool);
+            let caller = env.current_contract_address();
+            client.switch_rate_model(&caller, &1);
+        }
+    }
+}
+
+#[test]
+#[should_panic(expected = "Reentrancy detected: flash loan in progress")]
+fn test_flash_loan_rejects_recursive_flash_loan_reentrancy() {
+    let (env, contract_id, _admin, _borrower, token_address) = setup_flash_loan();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let receiver_id = env.register(reentrant_flash_receiver::ReentrantFlashReceiver, ());
+    client.flash_loan(
+        &receiver_id,
+        &token_address,
+        &1_000_0000000,
+        &Bytes::new(&env),
+    );
+}
+
+#[test]
+#[should_panic(expected = "Reentrancy detected: flash loan in progress")]
+fn test_flash_loan_rejects_cross_function_deposit_collateral_reentrancy() {
+    let (env, contract_id, admin, _borrower, token_address) = setup_flash_loan();
+    let client = LendingContractClient::new(&env, &contract_id);
+    client.whitelist_asset(&admin, &token_address);
+
+    let receiver_id = env.register(reentrant_deposit_receiver::ReentrantDepositReceiver, ());
+    client.flash_loan(
+        &receiver_id,
+        &token_address,
+        &1_000_0000000,
+        &Bytes::new(&env),
+    );
+}
+
+#[test]
+#[should_panic(expected = "Reentrancy detected: flash loan in progress")]
+fn test_flash_loan_rejects_cross_function_switch_rate_model_reentrancy() {
+    let (env, contract_id, _admin, _borrower, token_address) = setup_flash_loan();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let receiver_id = env.register(
+        reentrant_rate_switch_receiver::ReentrantRateSwitchReceiver,
+        (),
+    );
+    client.flash_loan(
+        &receiver_id,
+        &token_address,
+        &1_000_0000000,
+        &Bytes::new(&env),
+    );
+}
+
+#[test]
+fn test_flash_loan_with_deadline_succeeds_before_deadline() {
+    let (env, contract_id, _admin, _borrower, token_address) = setup_flash_loan();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    env.ledger().with_mut(|l| l.timestamp = 1_000);
+    let receiver_id = env.register(good_receiver::GoodReceiver, ());
+    let loan_amount: i128 = 1_000_0000000;
+    let fee = loan_amount * DEFAULT_FLASH_LOAN_FEE_BPS / 10_000;
+    mint_tokens(&env, &token_address, &receiver_id, fee);
+
+    let pool_before = token::Client::new(&env, &token_address).balance(&contract_id);
+    client.flash_loan_with_deadline(
+        &receiver_id,
+        &token_address,
+        &loan_amount,
+        &Bytes::new(&env),
+        &2_000,
+    );
+    let pool_after = token::Client::new(&env, &token_address).balance(&contract_id);
+    assert_eq!(pool_after, pool_before + fee);
+}
+
+#[test]
+#[should_panic(expected = "Flash loan deadline expired")]
+fn test_flash_loan_with_deadline_reverts_after_deadline() {
+    let (env, contract_id, _admin, _borrower, token_address) = setup_flash_loan();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    env.ledger().with_mut(|l| l.timestamp = 2_001);
+    let receiver_id = env.register(good_receiver::GoodReceiver, ());
+    client.flash_loan_with_deadline(
+        &receiver_id,
+        &token_address,
+        &1_000_0000000,
+        &Bytes::new(&env),
+        &2_000,
+    );
+}
+
+
 // ─── Multi-Asset Collateral Vault Tests ───────────────────────────────────────
 
 fn setup_multi_collateral() -> (Env, Address, Address, Address, Address, Address) {

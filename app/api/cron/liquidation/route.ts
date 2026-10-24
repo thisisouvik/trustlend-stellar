@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireCronAuth } from "@/lib/auth/cron";
+import { CronTimeoutError, requireCronAuth, withCronTimeout } from "@/lib/auth/cron";
 import { getAdminKeypair } from "@/lib/stellar/server-contract";
 import { loadConfig, runLiquidationKeeper } from "@/scripts/liquidation-keeper";
 
@@ -23,19 +23,27 @@ export async function POST(request: NextRequest) {
   const denied = requireCronAuth(request, "liquidation");
   if (denied) return denied;
 
-  const start = Date.now();
   try {
     const cfg = loadConfig([]);
     const signer = getAdminKeypair();
-    const summary = await runLiquidationKeeper(cfg, signer);
-    const duration = Date.now() - start;
-    console.log(
-      `[liquidation] Run complete in ${duration}ms: ` +
-        `scanned=${summary.scanned} liquidated=${summary.liquidated} ` +
-        `healthy=${summary.healthy} skipped=${summary.skipped} failed=${summary.failed}`
+    const { result: summary, durationMs: duration, timedOut } = await withCronTimeout(
+      "liquidation",
+      () => runLiquidationKeeper(cfg, signer),
     );
-    return NextResponse.json({ ok: true, ...summary, duration });
+    console.log(
+      `[liquidation] Run complete in ${duration}ms (timedOut=${timedOut}): ` +
+        `scanned=${summary.scanned} liquidated=${summary.liquidated} ` +
+        `healthy=${summary.healthy} skipped=${summary.skipped} failed=${summary.failed}`,
+    );
+    return NextResponse.json({ ok: true, timedOut, ...summary, duration });
   } catch (err) {
+    if (err instanceof CronTimeoutError) {
+      console.error("[liquidation] Keeper run timed out:", err.message);
+      return NextResponse.json(
+        { ok: false, timedOut: true, error: err.message },
+        { status: 504 },
+      );
+    }
     const msg = err instanceof Error ? err.message : "Unexpected error";
     console.error("[liquidation] Keeper run failed:", msg);
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });

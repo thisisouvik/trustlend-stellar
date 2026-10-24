@@ -8,7 +8,7 @@ import { sendLoanFundedEmail } from "@/lib/email/resend";
 import { getFundingProgress, validateFundingAmount } from "@/lib/loans/funding";
 import { qualifyReferralForLoan } from "@/lib/referrals/qualify";
 import { PAYMENT_MEMO, verifyPaymentTransaction } from "@/lib/stellar/verify-payment";
-import { activateFundedLoanOnchain } from "@/lib/loans/onchain";
+import * as onchainLoans from "@/lib/loans/onchain";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { isBoundedString } from "@/lib/http/request-validation";
 
@@ -175,6 +175,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Verify that the borrower's collateral is locked in custody on-chain (#427)
+    if (typeof onchainLoans.verifyLoanCollateralForFunding === "function") {
+      const collateralCheck = await onchainLoans.verifyLoanCollateralForFunding({
+        loanMetadata: loan.metadata,
+        borrowerWallet: loan.borrower_wallet,
+        principalAmountXlm: loan.principal_amount,
+      });
+      if (!collateralCheck.ok) {
+        return NextResponse.json(
+          { error: collateralCheck.reason },
+          { status: collateralCheck.status }
+        );
+      }
+    }
+
     // The payment must come from the wallet this account signed in with (or
     // the wallet saved on the lender's profile), not from an address the
     // client merely claims.
@@ -268,7 +283,7 @@ export async function POST(request: NextRequest) {
     // The XLM has already moved and is recorded above; a chain failure here is
     // surfaced in the response and in loans.metadata rather than rolled back.
     const onchain = isFullyFunded
-      ? await activateFundedLoanOnchain({
+      ? await onchainLoans.activateFundedLoanOnchain({
           db,
           loanId,
           loanMetadata: loan.metadata,

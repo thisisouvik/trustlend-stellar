@@ -219,6 +219,11 @@ export interface OnchainLoan {
   escrowId: number;
 }
 
+export interface OnchainCollateralEntry {
+  asset: string;
+  amountStroops: bigint;
+}
+
 /** `scValToNative` renders unit enum variants as `[variant]` or `variant`. */
 export function decodeEnumVariant(value: unknown): string {
   if (Array.isArray(value)) return String(value[0]);
@@ -253,6 +258,44 @@ export async function readOnchainLoan(onchainLoanId: number): Promise<OnchainLoa
     sourceAddress: adminAddress(),
   });
   return decodeOnchainLoan(raw);
+}
+
+/**
+ * Read the borrower's collateral vault entries from the LendingContract
+ * (`get_user_collateral_entries`).
+ */
+export async function readUserCollateralEntries(
+  borrowerAddress: string,
+): Promise<OnchainCollateralEntry[]> {
+  const raw = await invokeReadOnly({
+    contractId: lendingContractId(),
+    method: "get_user_collateral_entries",
+    args: [addr(borrowerAddress)],
+    sourceAddress: adminAddress(),
+  });
+  if (!Array.isArray(raw)) return [];
+  return raw.map((entry) => {
+    const record = (entry ?? {}) as Record<string, unknown>;
+    const amountRaw = record.amount ?? record.amountStroops ?? 0;
+    return {
+      asset: String(record.asset ?? ""),
+      amountStroops: typeof amountRaw === "bigint" ? amountRaw : BigInt(String(amountRaw)),
+    };
+  });
+}
+
+/**
+ * Read the borrower's health factor in basis points (`get_health_factor`, where
+ * 10000 = 1.00x healthy threshold) from the LendingContract.
+ */
+export async function readBorrowerHealthFactor(borrowerAddress: string): Promise<number> {
+  const raw = await invokeReadOnly({
+    contractId: lendingContractId(),
+    method: "get_health_factor",
+    args: [addr(borrowerAddress)],
+    sourceAddress: adminAddress(),
+  });
+  return Number(raw ?? 0);
 }
 
 // ─── Admin-signed writes ─────────────────────────────────────────────────────
@@ -353,6 +396,8 @@ export interface OnchainLoanMetadata {
   onchain_payment_txs?: string[];
   onchain_status?: OnchainLoanStatus;
   onchain_error?: string;
+  onchain_collateral_verified?: boolean;
+  onchain_health_factor_bps?: number;
 }
 
 export function readOnchainLoanId(metadata: unknown): number | null {

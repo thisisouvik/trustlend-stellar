@@ -20,14 +20,20 @@ import {
   activateLoanOnchain,
   isOnchainLifecycleRequired,
   lendingContractId,
+  readBorrowerHealthFactor,
   readOnchainLoan,
   readOnchainLoanId,
+  readUserCollateralEntries,
   recordPaymentOnchain,
   verifyContractInvocation,
   xlmToStroops,
+  type OnchainCollateralEntry,
   type OnchainLoanMetadata,
   type OnchainLoanStatus,
 } from "@/lib/stellar/onchain-lifecycle";
+
+/** Minimum required health factor in basis points (10,000 bps = 1.00x). */
+export const MIN_HEALTH_FACTOR_BPS = 10_000;
 
 export type OnchainOutcome =
   | { attempted: false; reason?: string }
@@ -43,6 +49,95 @@ async function mergeLoanMetadata(db: Db, loanId: string, patch: OnchainLoanMetad
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+export type CollateralVerificationResult =
+  | {
+      ok: true;
+      entries: OnchainCollateralEntry[];
+      totalCollateralStroops: bigint;
+      healthFactorBps: number;
+    }
+  | { ok: false; status: number; reason: string };
+
+/**
+ * Verify that the borrower has deposited sufficient collateral into the on-chain
+ * LendingContract vault (`get_user_collateral_entries`) and maintains a healthy
+ * collateral ratio / health factor (`get_health_factor` >= 10,000 bps).
+ */
+export async function verifyBorrowerCollateralOnchain(params: {
+  borrowerAddress: string;
+  requiredAmountStroops: bigint;
+}): Promise<CollateralVerificationResult> {
+  if (!isOnchainLifecycleRequired()) {
+    return {
+      ok: true,
+      entries: [],
+      totalCollateralStroops: params.requiredAmountStroops,
+      healthFactorBps: MIN_HEALTH_FACTOR_BPS,
+    };
+  }
+
+  let entries: OnchainCollateralEntry[];
+  let healthFactorBps: number;
+  try {
+    entries = await readUserCollateralEntries(params.borrowerAddress);
+    healthFactorBps = await readBorrowerHealthFactor(params.borrowerAddress);
+  } catch (error) {
+    return {
+      ok: false,
+      status: 502,
+      reason: `Could not verify on-chain collateral for ${params.borrowerAddress}: ${errorMessage(error)}`,
+    };
+  }
+
+  const totalCollateralStroops = entries.reduce(
+    (sum, entry) => sum + (entry.amountStroops > 0n ? entry.amountStroops : 0n),
+    0n,
+  );
+
+  if (entries.length === 0 || totalCollateralStroops < params.requiredAmountStroops) {
+    return {
+      ok: false,
+      status: 422,
+      reason: "Insufficient on-chain collateral deposited in the lending vault",
+    };
+  }
+
+  if (!Number.isFinite(healthFactorBps) || healthFactorBps < MIN_HEALTH_FACTOR_BPS) {
+    return {
+      ok: false,
+      status: 422,
+      reason: `Borrower health factor (${healthFactorBps} bps) is below minimum threshold (${MIN_HEALTH_FACTOR_BPS} bps)`,
+    };
+  }
+
+  return {
+    ok: true,
+    entries,
+    totalCollateralStroops,
+    healthFactorBps,
+  };
+}
+
+/**
+ * Called by POST /api/loans/fund before recording lender contributions when
+ * on-chain loan lifecycle is active, ensuring the borrower's collateral is still
+ * locked in custody before lenders fund the loan.
+ */
+export async function verifyLoanCollateralForFunding(params: {
+  loanMetadata: unknown;
+  borrowerWallet: string;
+  principalAmountXlm: number;
+}): Promise<{ ok: true } | { ok: false; status: number; reason: string }> {
+  if (!isOnchainLifecycleRequired()) return { ok: true };
+  const onchainLoanId = readOnchainLoanId(params.loanMetadata);
+  if (!onchainLoanId) return { ok: true };
+
+  return verifyBorrowerCollateralOnchain({
+    borrowerAddress: params.borrowerWallet,
+    requiredAmountStroops: xlmToStroops(params.principalAmountXlm),
+  });
 }
 
 /**
@@ -244,6 +339,19 @@ export async function verifyOnchainLoanRequest(params: {
   }
   if (loan.status !== "Pending") {
     return { ok: false, status: 409, reason: `On-chain loan is already ${loan.status}` };
+  }
+
+  // Verify on-chain collateral custody and borrower health factor (#427)
+  const collateralCheck = await verifyBorrowerCollateralOnchain({
+    borrowerAddress: params.walletAddress,
+    requiredAmountStroops: loan.amountStroops,
+  });
+  if (!collateralCheck.ok) {
+    return {
+      ok: false,
+      status: collateralCheck.status,
+      reason: collateralCheck.reason,
+    };
   }
 
   // One on-chain loan maps to exactly one row.

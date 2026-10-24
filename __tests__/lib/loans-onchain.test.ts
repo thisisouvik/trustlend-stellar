@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   required: vi.fn(() => true),
   verifyInvocation: vi.fn(),
   readLoan: vi.fn(),
+  readCollateral: vi.fn(),
+  readHealthFactor: vi.fn(),
   activate: vi.fn(),
   recordPayment: vi.fn(),
 }));
@@ -27,12 +29,19 @@ vi.mock("@/lib/stellar/onchain-lifecycle", async () => {
     lendingContractId: () => CONTRACT,
     verifyContractInvocation: (...args: unknown[]) => mocks.verifyInvocation(...args),
     readOnchainLoan: (...args: unknown[]) => mocks.readLoan(...args),
+    readUserCollateralEntries: (...args: unknown[]) => mocks.readCollateral(...args),
+    readBorrowerHealthFactor: (...args: unknown[]) => mocks.readHealthFactor(...args),
     activateLoanOnchain: (...args: unknown[]) => mocks.activate(...args),
     recordPaymentOnchain: (...args: unknown[]) => mocks.recordPayment(...args),
   };
 });
 
-import { activateFundedLoanOnchain, recordRepaymentOnchain, verifyOnchainLoanRequest } from "@/lib/loans/onchain";
+import {
+  activateFundedLoanOnchain,
+  recordRepaymentOnchain,
+  verifyLoanCollateralForFunding,
+  verifyOnchainLoanRequest,
+} from "@/lib/loans/onchain";
 
 /** Collect every string inside a (possibly cyclic) drizzle `sql` object. */
 function strings(value: unknown, seen = new Set<unknown>()): string[] {
@@ -62,6 +71,8 @@ describe("activateFundedLoanOnchain", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.required.mockReturnValue(true);
+    mocks.readCollateral.mockResolvedValue([{ asset: CONTRACT, amountStroops: 150_0000000n }]);
+    mocks.readHealthFactor.mockResolvedValue(15000);
   });
 
   it("is a no-op when the lifecycle is off or the loan has no on-chain id", async () => {
@@ -190,6 +201,8 @@ describe("verifyOnchainLoanRequest", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.required.mockReturnValue(true);
+    mocks.readCollateral.mockResolvedValue([{ asset: CONTRACT, amountStroops: 150_0000000n }]);
+    mocks.readHealthFactor.mockResolvedValue(15000);
   });
 
   it("passes through with empty metadata when the lifecycle is off", async () => {
@@ -267,5 +280,47 @@ describe("verifyOnchainLoanRequest", () => {
 
     expect(out).toMatchObject({ ok: false, status: 422, reason: expect.stringContaining("quoted APR") });
     expect(db.calls.some((call) => call.method === "select")).toBe(false);
+  });
+
+  it("rejects loan request when on-chain collateral vault balance is insufficient", async () => {
+    const db = createFakeDb();
+    mocks.verifyInvocation.mockResolvedValue({ ok: true, returnValue: 5 });
+    mocks.readLoan.mockResolvedValue(onchainLoan({ status: "Pending" }));
+    mocks.readCollateral.mockResolvedValue([{ asset: CONTRACT, amountStroops: 20_0000000n }]);
+
+    const out = await verifyOnchainLoanRequest({ db, ...params });
+    expect(out).toMatchObject({
+      ok: false,
+      status: 422,
+      reason: expect.stringContaining("Insufficient on-chain collateral"),
+    });
+  });
+
+  it("rejects loan request when borrower health factor is below 10000 bps", async () => {
+    const db = createFakeDb();
+    mocks.verifyInvocation.mockResolvedValue({ ok: true, returnValue: 5 });
+    mocks.readLoan.mockResolvedValue(onchainLoan({ status: "Pending" }));
+    mocks.readHealthFactor.mockResolvedValue(8500);
+
+    const out = await verifyOnchainLoanRequest({ db, ...params });
+    expect(out).toMatchObject({
+      ok: false,
+      status: 422,
+      reason: expect.stringContaining("health factor"),
+    });
+  });
+
+  it("verifies collateral custody before funding on-chain loans", async () => {
+    mocks.readCollateral.mockResolvedValue([]);
+    const res = await verifyLoanCollateralForFunding({
+      loanMetadata: { onchain_loan_id: 5 },
+      borrowerWallet: BORROWER,
+      principalAmountXlm: 100,
+    });
+    expect(res).toMatchObject({
+      ok: false,
+      status: 422,
+      reason: expect.stringContaining("Insufficient on-chain collateral"),
+    });
   });
 });

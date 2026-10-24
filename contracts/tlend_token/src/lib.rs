@@ -40,6 +40,11 @@ pub enum DataKey {
 
 // ─── TlendTokenContract ──────────────────────────────────────────────────────
 
+/// Maximum total supply of TLEND tokens: 1,000,000,000 TLEND at 7 decimal places (10^16 stroops).
+pub const MAX_TOTAL_SUPPLY: i128 = 10_000_000_000_000_000;
+/// Alias for `MAX_TOTAL_SUPPLY`.
+pub const MAX_SUPPLY: i128 = MAX_TOTAL_SUPPLY;
+
 #[contract]
 pub struct TlendTokenContract;
 
@@ -73,6 +78,10 @@ impl TlendTokenContract {
 
     pub fn total_supply(env: Env) -> i128 {
         env.storage().instance().get(&DataKey::TotalSupply).unwrap_or(0)
+    }
+
+    pub fn max_supply(_env: Env) -> i128 {
+        MAX_TOTAL_SUPPLY
     }
 
     // ── Internal helpers ─────────────────────────────────────────────────────
@@ -287,9 +296,16 @@ impl token::StellarAssetInterface for TlendTokenContract {
         Self::check_non_negative_amount(amount);
         Self::check_authorized(&env, &to);
 
-        Self::receive_balance(&env, &to, amount);
         let supply = Self::total_supply(env.clone());
-        env.storage().instance().set(&DataKey::TotalSupply, &(supply + amount));
+        let new_supply = supply
+            .checked_add(amount)
+            .expect("Total supply overflow");
+        if new_supply > MAX_TOTAL_SUPPLY {
+            panic!("Mint exceeds MAX_TOTAL_SUPPLY");
+        }
+
+        Self::receive_balance(&env, &to, amount);
+        env.storage().instance().set(&DataKey::TotalSupply, &new_supply);
         env.events()
             .publish((symbol_short!("mint"), admin, to), amount);
     }

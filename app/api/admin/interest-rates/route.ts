@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { and, eq, sql } from "drizzle-orm";
 import { requireApiAdmin, UnauthorizedError } from "@/lib/auth/session";
 import { enforceRouteRateLimit } from "@/lib/rate-limit";
@@ -50,8 +51,16 @@ export async function GET(request: NextRequest) {
       { status: 200 }
     );
   } catch (error) {
+    if (isRedirectError(error)) throw error;
     if (error instanceof UnauthorizedError) {
-      return NextResponse.json({ success: false, error: "Admin access required" }, { status: 403 });
+      const unauthenticated = error.message === "Not authenticated";
+      return NextResponse.json(
+        {
+          success: false,
+          error: unauthenticated ? "Authentication required" : "Admin access required",
+        },
+        { status: unauthenticated ? 401 : 403 }
+      );
     }
     console.error("Failed to fetch interest rate configs:", error);
     return NextResponse.json(
@@ -179,8 +188,16 @@ export async function POST(request: NextRequest) {
       { status: 200 }
     );
   } catch (error) {
+    if (isRedirectError(error)) throw error;
     if (error instanceof UnauthorizedError) {
-      return NextResponse.json({ success: false, error: "Admin access required" }, { status: 403 });
+      const unauthenticated = error.message === "Not authenticated";
+      return NextResponse.json(
+        {
+          success: false,
+          error: unauthenticated ? "Authentication required" : "Admin access required",
+        },
+        { status: unauthenticated ? 401 : 403 }
+      );
     }
     console.error("Failed to publish rate schedule:", error);
     return NextResponse.json(

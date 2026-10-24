@@ -3559,3 +3559,169 @@ fn test_sweep_cannot_take_uncollected_fees() {
     client.sweep_tokens(&admin, &fee_token, &recipient, &100);
     assert_eq!(token::Client::new(&env, &fee_token).balance(&contract_id), uncollected);
 }
+
+// ─── Liquidation Execution & Collateral Seizure (Issue #433) ──────────────
+
+#[test]
+fn test_mark_defaulted_seizes_collateral_and_transfers_to_lender() {
+    let (env, contract_id, admin, borrower, asset_a, asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+    let lender = Address::generate(&env);
+
+    let deposit_a: i128 = 5_000_0000000;
+    let deposit_b: i128 = 3_000_0000000;
+    client.deposit_collateral(&borrower, &asset_a, &deposit_a);
+    client.deposit_collateral(&borrower, &asset_b, &deposit_b);
+
+    let loan_id = client.create_loan_request(
+        &borrower,
+        &LoanRequestInput {
+            amount: 5_000_0000000,
+            duration_days: 30,
+            interest_rate_bps: 1000,
+            max_loan_amount: 100_000_0000000,
+            collateral_entries: vec![
+                &env,
+                CollateralEntry {
+                    asset: asset_a.clone(),
+                    amount: deposit_a,
+                },
+                CollateralEntry {
+                    asset: asset_b.clone(),
+                    amount: deposit_b,
+                },
+            ],
+            rate_model: InterestRateModel::Fixed,
+            reputation_tier: 4,
+        },
+    );
+    client.approve_loan(&lender, &loan_id, &1);
+    client.activate_loan(&admin, &loan_id);
+
+    // Drop collateral prices so borrower health factor falls below 1.0 (< 10_000 bps)
+    let crashed_price = PRICE_PRECISION / 4;
+    client.set_asset_oracle_prices(&admin, &asset_a, &vec![&env, crashed_price]);
+    client.set_asset_oracle_prices(&admin, &asset_b, &vec![&env, crashed_price]);
+    assert!(client.get_health_factor(&borrower) < 10_000);
+
+    // First eligibility check starts the 12-hour grace period
+    assert!(!client.check_liquidation_eligibility(&loan_id));
+
+    // Advance past the 12-hour grace period and refresh oracle prices
+    let after_grace = env.ledger().timestamp() + GRACE_PERIOD_SECONDS + 1;
+    env.ledger().set_timestamp(after_grace);
+    client.set_asset_oracle_prices(&admin, &asset_a, &vec![&env, crashed_price]);
+    client.set_asset_oracle_prices(&admin, &asset_b, &vec![&env, crashed_price]);
+
+    let token_a = token::Client::new(&env, &asset_a);
+    let token_b = token::Client::new(&env, &asset_b);
+    assert_eq!(token_a.balance(&lender), 0);
+    assert_eq!(token_b.balance(&lender), 0);
+
+    client.mark_defaulted(&admin, &loan_id);
+
+    assert_eq!(client.get_loan(&loan_id).status, LoanStatus::Defaulted);
+    assert_eq!(client.get_user_collateral_entries(&borrower).len(), 0);
+    assert_eq!(token_a.balance(&contract_id), 0);
+    assert_eq!(token_b.balance(&contract_id), 0);
+    assert_eq!(token_a.balance(&lender), deposit_a);
+    assert_eq!(token_b.balance(&lender), deposit_b);
+
+    // Seized collateral cannot be withdrawn by the defaulted borrower
+    assert!(client
+        .try_withdraw_collateral(&borrower, &asset_a, &1)
+        .is_err());
+}
+
+#[test]
+fn test_liquidate_loan_transfers_seized_collateral_to_specified_recipient() {
+    let (env, contract_id, admin, borrower, asset_a, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+    let lender = Address::generate(&env);
+    let insurance_fund = Address::generate(&env);
+
+    let deposit_a: i128 = 10_000_0000000;
+    client.deposit_collateral(&borrower, &asset_a, &deposit_a);
+
+    let loan_id = client.create_loan_request(
+        &borrower,
+        &LoanRequestInput {
+            amount: 5_000_0000000,
+            duration_days: 30,
+            interest_rate_bps: 1000,
+            max_loan_amount: 100_000_0000000,
+            collateral_entries: vec![
+                &env,
+                CollateralEntry {
+                    asset: asset_a.clone(),
+                    amount: deposit_a,
+                },
+            ],
+            rate_model: InterestRateModel::Fixed,
+            reputation_tier: 4,
+        },
+    );
+    client.approve_loan(&lender, &loan_id, &1);
+    client.activate_loan(&admin, &loan_id);
+
+    let crashed_price = PRICE_PRECISION / 4;
+    client.set_asset_oracle_prices(&admin, &asset_a, &vec![&env, crashed_price]);
+    assert!(!client.check_liquidation_eligibility(&loan_id));
+
+    let after_grace = env.ledger().timestamp() + GRACE_PERIOD_SECONDS + 1;
+    env.ledger().set_timestamp(after_grace);
+    client.set_asset_oracle_prices(&admin, &asset_a, &vec![&env, crashed_price]);
+
+    let seized = client.liquidate_loan(&admin, &loan_id, &insurance_fund);
+    assert_eq!(seized.len(), 1);
+    assert_eq!(seized.get(0).unwrap().asset, asset_a);
+    assert_eq!(seized.get(0).unwrap().amount, deposit_a);
+
+    let token_a = token::Client::new(&env, &asset_a);
+    assert_eq!(token_a.balance(&insurance_fund), deposit_a);
+    assert_eq!(token_a.balance(&contract_id), 0);
+    assert_eq!(client.get_user_collateral_entries(&borrower).len(), 0);
+}
+
+#[test]
+fn test_mark_defaulted_rejected_during_grace_period_preserves_collateral() {
+    let (env, contract_id, admin, borrower, asset_a, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+    let lender = Address::generate(&env);
+
+    let deposit_a: i128 = 10_000_0000000;
+    client.deposit_collateral(&borrower, &asset_a, &deposit_a);
+
+    let loan_id = client.create_loan_request(
+        &borrower,
+        &LoanRequestInput {
+            amount: 5_000_0000000,
+            duration_days: 30,
+            interest_rate_bps: 1000,
+            max_loan_amount: 100_000_0000000,
+            collateral_entries: vec![
+                &env,
+                CollateralEntry {
+                    asset: asset_a.clone(),
+                    amount: deposit_a,
+                },
+            ],
+            rate_model: InterestRateModel::Fixed,
+            reputation_tier: 4,
+        },
+    );
+    client.approve_loan(&lender, &loan_id, &1);
+    client.activate_loan(&admin, &loan_id);
+
+    let crashed_price = PRICE_PRECISION / 4;
+    client.set_asset_oracle_prices(&admin, &asset_a, &vec![&env, crashed_price]);
+
+    // Still inside the 12-hour grace period -> liquidation must fail and keep collateral intact
+    assert!(client.try_mark_defaulted(&admin, &loan_id).is_err());
+    assert_eq!(client.get_loan(&loan_id).status, LoanStatus::Active);
+    assert_eq!(client.get_user_collateral_entries(&borrower).len(), 1);
+    assert_eq!(
+        token::Client::new(&env, &asset_a).balance(&contract_id),
+        deposit_a
+    );
+}

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { desc } from "drizzle-orm";
 import { z } from "zod";
 import { requireApiAdmin, UnauthorizedError } from "@/lib/auth/session";
@@ -23,8 +24,17 @@ async function guard() {
     }
     return { user, db };
   } catch (err) {
-    const status = err instanceof UnauthorizedError ? 401 : 500;
-    return { error: NextResponse.json({ error: "Unauthorized" }, { status }) };
+    if (isRedirectError(err)) throw err;
+    if (err instanceof UnauthorizedError) {
+      const unauthenticated = err.message === "Not authenticated";
+      return {
+        error: NextResponse.json(
+          { error: unauthenticated ? "Authentication required" : "Admin access required" },
+          { status: unauthenticated ? 401 : 403 }
+        ),
+      };
+    }
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 500 }) };
   }
 }
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireTradeVaultAdmin } from "@/lib/auth/session";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
+import { requireApiAdmin, UnauthorizedError } from "@/lib/auth/session";
 import { enforceRouteRateLimit } from "@/lib/rate-limit";
 import {
   DEFAULT_ASSET_RISK_CONFIGS,
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
     const rateLimit = await enforceRouteRateLimit(request);
     if (rateLimit) return rateLimit;
 
-    await requireTradeVaultAdmin();
+    await requireApiAdmin();
 
     return NextResponse.json(
       {
@@ -38,8 +39,19 @@ export async function GET(request: NextRequest) {
       { status: 200 }
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unauthorized or failed to fetch risk parameters";
-    return NextResponse.json({ success: false, error: message }, { status: 401 });
+    if (isRedirectError(error)) throw error;
+    if (error instanceof UnauthorizedError) {
+      const unauthenticated = error.message === "Not authenticated";
+      return NextResponse.json(
+        {
+          success: false,
+          error: unauthenticated ? "Authentication required" : "Admin access required",
+        },
+        { status: unauthenticated ? 401 : 403 }
+      );
+    }
+    const message = error instanceof Error ? error.message : "Failed to fetch risk parameters";
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
 
@@ -48,7 +60,7 @@ export async function POST(request: NextRequest) {
     const rateLimit = await enforceRouteRateLimit(request);
     if (rateLimit) return rateLimit;
 
-    const { user } = await requireTradeVaultAdmin();
+    const user = await requireApiAdmin();
     const adminEmail = user.email || "admin@trustlend.org";
 
     const body = await request.json();
@@ -159,6 +171,17 @@ export async function POST(request: NextRequest) {
       { status: 200 }
     );
   } catch (error) {
+    if (isRedirectError(error)) throw error;
+    if (error instanceof UnauthorizedError) {
+      const unauthenticated = error.message === "Not authenticated";
+      return NextResponse.json(
+        {
+          success: false,
+          error: unauthenticated ? "Authentication required" : "Admin access required",
+        },
+        { status: unauthenticated ? 401 : 403 }
+      );
+    }
     const message = error instanceof Error ? error.message : "Failed to execute parameter update";
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }

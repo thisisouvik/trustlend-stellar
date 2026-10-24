@@ -35,9 +35,12 @@ export interface SessionUser {
 }
 
 export class UnauthorizedError extends Error {
-  constructor(message = "Not authenticated") {
+  readonly status: 401 | 403;
+
+  constructor(message = "Not authenticated", status?: 401 | 403) {
     super(message);
     this.name = "UnauthorizedError";
+    this.status = status ?? (message === "Not authenticated" ? 401 : 403);
   }
 }
 
@@ -140,9 +143,9 @@ export async function requireAuthenticatedUser(expectedRole?: UserRole): Promise
 /** For API routes: throw instead of redirecting so the caller can return JSON. */
 export async function requireApiUser(expectedRole?: UserRole): Promise<SessionUser> {
   const user = await getSessionUser();
-  if (!user) throw new UnauthorizedError();
+  if (!user) throw new UnauthorizedError("Not authenticated", 401);
   if (expectedRole && user.role !== expectedRole) {
-    throw new UnauthorizedError(`This action requires the ${expectedRole} role.`);
+    throw new UnauthorizedError(`This action requires the ${expectedRole} role.`, 403);
   }
   return user;
 }
@@ -193,7 +196,7 @@ export async function requireApiAdmin(): Promise<SessionUser> {
     ? await db.select({ role: profiles.role }).from(profiles).where(eq(profiles.id, user.id)).limit(1)
     : [];
   if (!isTradeVaultAdminUser(user) || profile?.role !== "admin") {
-    throw new UnauthorizedError("Admin access required.");
+    throw new UnauthorizedError("Admin access required.", 403);
   }
   return user;
 }

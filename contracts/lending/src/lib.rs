@@ -1576,7 +1576,21 @@ impl LendingContract {
     /// Mark a loan as defaulted (called by DefaultManagementContract or admin).
     /// Now includes grace period check (Issue #157) - borrowers get 12 hours
     /// to top up collateral before liquidation can proceed.
+    /// Seizes the borrower's locked collateral and transfers it to the lender (Issue #433).
     pub fn mark_defaulted(env: Env, caller: Address, loan_id: u32) {
+        let loan = Self::get_loan(env.clone(), loan_id);
+        let _ = Self::liquidate_loan(env, caller, loan_id, loan.lender);
+    }
+
+    /// Liquidate an eligible active loan, marking it as `Defaulted` and seizing
+    /// the borrower's deposited collateral to `recipient` (e.g. the lender,
+    /// insurance fund, or liquidation auction contract) (Issue #433).
+    pub fn liquidate_loan(
+        env: Env,
+        caller: Address,
+        loan_id: u32,
+        recipient: Address,
+    ) -> Vec<CollateralEntry> {
         caller.require_auth();
         Self::assert_admin(&env, &caller);
         Self::assert_not_paused(&env);
@@ -1591,20 +1605,80 @@ impl LendingContract {
             panic!("Loan is not eligible for liquidation yet - grace period active or health factor is healthy");
         }
 
+        // Capture health factor before collateral seizure and status transition
+        let health_factor = Self::get_health_factor(env.clone(), loan.borrower.clone());
+
         loan.status = LoanStatus::Defaulted;
         env.storage()
             .persistent()
             .set(&DataKey::Loan(loan_id), &loan);
 
         // Clean up grace period tracking since loan is now defaulted
-        env.storage().persistent().remove(&DataKey::GracePeriodStart(loan_id));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::GracePeriodStart(loan_id));
+
+        // Seize borrower collateral and transfer to recipient
+        let seized =
+            Self::seize_borrower_collateral(&env, loan_id, &loan.borrower, &recipient);
 
         // Emit liquidation event with health factor context
-        let health_factor = Self::get_health_factor(env.clone(), loan.borrower.clone());
         env.events().publish(
             (symbol_short!("loan"), symbol_short!("default")),
             (loan_id, health_factor),
         );
+
+        seized
+    }
+
+    /// Deduct and transfer all locked collateral entries of `borrower` to `recipient`.
+    fn seize_borrower_collateral(
+        env: &Env,
+        loan_id: u32,
+        borrower: &Address,
+        recipient: &Address,
+    ) -> Vec<CollateralEntry> {
+        let collateral_key = DataKey::UserCollateral(borrower.clone());
+        let entries: Vec<CollateralEntry> = env
+            .storage()
+            .persistent()
+            .get(&collateral_key)
+            .unwrap_or(Vec::new(env));
+
+        let mut seized: Vec<CollateralEntry> = Vec::new(env);
+        if entries.is_empty() {
+            return seized;
+        }
+
+        let contract_addr = env.current_contract_address();
+        for entry in entries.iter() {
+            if entry.amount > 0 {
+                let token_client = token::Client::new(env, &entry.asset);
+                let available = token_client.balance(&contract_addr).max(0);
+                let seize_amount = entry.amount.min(available);
+                if seize_amount > 0 {
+                    token_client.transfer(&contract_addr, recipient, &seize_amount);
+                }
+                seized.push_back(CollateralEntry {
+                    asset: entry.asset.clone(),
+                    amount: seize_amount,
+                });
+                env.events().publish(
+                    (symbol_short!("collat"), symbol_short!("seized")),
+                    (
+                        loan_id,
+                        borrower.clone(),
+                        recipient.clone(),
+                        entry.asset,
+                        seize_amount,
+                    ),
+                );
+            }
+        }
+
+        // Clear the borrower's collateral entries so seized collateral cannot be withdrawn or reused
+        env.storage().persistent().remove(&collateral_key);
+        seized
     }
 
     // ── Rate model switching ─────────────────────────────────────────────────

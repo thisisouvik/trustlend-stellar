@@ -1,6 +1,6 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env};
 
 #[contracttype]
 #[derive(Clone, Eq, PartialEq)]
@@ -41,6 +41,9 @@ pub struct AuctionSettlement {
 #[contracttype]
 pub enum DataKey {
     Admin,
+    PaymentToken,
+    CollateralToken,
+    Treasury,
     Auction(u32),
 }
 
@@ -49,11 +52,24 @@ pub struct LiquidationAuctionContract;
 
 #[contractimpl]
 impl LiquidationAuctionContract {
-    pub fn initialize(env: Env, admin: Address) {
+    pub fn initialize(
+        env: Env,
+        admin: Address,
+        payment_token: Address,
+        collateral_token: Address,
+        treasury: Address,
+    ) {
         if env.storage().instance().has(&DataKey::Admin) {
             panic!("Contract already initialised");
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::PaymentToken, &payment_token);
+        env.storage()
+            .instance()
+            .set(&DataKey::CollateralToken, &collateral_token);
+        env.storage().instance().set(&DataKey::Treasury, &treasury);
     }
 
     pub fn start_auction(
@@ -140,7 +156,12 @@ impl LiquidationAuctionContract {
         )
     }
 
-    pub fn place_bid(env: Env, bidder: Address, loan_id: u32, bid_amount: i128) -> AuctionSettlement {
+    pub fn place_bid(
+        env: Env,
+        bidder: Address,
+        loan_id: u32,
+        bid_amount: i128,
+    ) -> AuctionSettlement {
         bidder.require_auth();
 
         let mut auction = Self::load_active_auction(&env, loan_id);
@@ -161,6 +182,32 @@ impl LiquidationAuctionContract {
         if bid_amount < current_price {
             panic!("Bid below current auction price");
         }
+
+        // Settle in tokens before touching state: a bidder without enough
+        // balance makes the payment transfer fail and the whole bid revert.
+        let payment_token: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PaymentToken)
+            .expect("Contract not initialised");
+        let collateral_token: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::CollateralToken)
+            .expect("Contract not initialised");
+        let treasury: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Treasury)
+            .expect("Contract not initialised");
+        let this = env.current_contract_address();
+
+        token::Client::new(&env, &payment_token).transfer(&bidder, &treasury, &bid_amount);
+        token::Client::new(&env, &collateral_token).transfer(
+            &this,
+            &bidder,
+            &auction.collateral_amount,
+        );
 
         auction.status = AuctionStatus::Sold;
         auction.highest_bid = bid_amount;

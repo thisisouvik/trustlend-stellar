@@ -722,7 +722,17 @@ function initializeSatellites(
   }
 
   if (has("liquidation_auction")) {
-    invoke(ids.liquidation_auction, "initialize", ["--admin", adminAddress], options);
+    invoke(
+      ids.liquidation_auction,
+      "initialize",
+      [
+        "--admin", adminAddress,
+        "--payment_token", xlm,
+        "--collateral_token", xlm,
+        "--treasury", has("treasury") ? ids.treasury : adminAddress,
+      ],
+      options
+    );
     log.ok("LiquidationAuctionContract initialized");
   }
 

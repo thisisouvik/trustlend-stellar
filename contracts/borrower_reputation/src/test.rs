@@ -577,3 +577,46 @@ fn test_packed_bitmask_zk_tier_upgrade_flag() {
     assert!((flags & FLAG_ZK_UPGRADED) != 0);
     assert!((flags & FLAG_IS_ACTIVE) != 0);
 }
+#[test]
+fn test_reputation_score_exceeding_i32_max_does_not_truncate() {
+    let (env, contract_id, admin, borrower) = setup();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+
+    let initial_high_score: i128 = (i32::MAX as i128) + 1_000;
+    env.as_contract(&contract_id, || {
+        let key = DataKey::BorrowerProfile(borrower.clone());
+        let mut profile: BorrowerProfile = env.storage().persistent().get(&key).unwrap();
+        profile.reputation_score = initial_high_score;
+        profile.reputation_tier = ReputationTier::Platinum;
+        env.storage().persistent().set(&key, &profile);
+    });
+
+    client.add_reputation_event(&admin, &borrower, &ReputationEvent::TestLoanRepaid);
+    let profile = client.get_profile(&borrower);
+    assert_eq!(profile.reputation_score, initial_high_score + 50);
+    assert_eq!(profile.reputation_tier, ReputationTier::Platinum);
+
+    client.add_reputation_event(&admin, &borrower, &ReputationEvent::LoanDefaulted);
+    let profile = client.get_profile(&borrower);
+    assert_eq!(profile.reputation_score, initial_high_score - 50);
+    assert_eq!(profile.reputation_tier, ReputationTier::Platinum);
+}
+
+#[test]
+fn test_reputation_score_saturates_at_i128_max() {
+    let (env, contract_id, admin, borrower) = setup();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+
+    env.as_contract(&contract_id, || {
+        let key = DataKey::BorrowerProfile(borrower.clone());
+        let mut profile: BorrowerProfile = env.storage().persistent().get(&key).unwrap();
+        profile.reputation_score = i128::MAX - 10;
+        profile.reputation_tier = ReputationTier::Platinum;
+        env.storage().persistent().set(&key, &profile);
+    });
+
+    client.add_reputation_event(&admin, &borrower, &ReputationEvent::TestLoanRepaid);
+    let profile = client.get_profile(&borrower);
+    assert_eq!(profile.reputation_score, i128::MAX);
+    assert_eq!(profile.reputation_tier, ReputationTier::Platinum);
+}

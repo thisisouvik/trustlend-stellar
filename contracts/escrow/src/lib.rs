@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Vec, BytesN};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, Vec, BytesN};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -14,8 +14,8 @@ pub enum EscrowStatus {
 }
 
 /// A single escrow commitment.
-/// NOTE: actual XLM movement happens via Stellar PAYMENT operations.
-/// This contract records the *intent* and enforces the timing rules.
+/// The held tokens are custodied by this contract until the hold is revoked
+/// (refund to the lender) or disbursed (payout to the borrower).
 #[contracttype]
 #[derive(Clone)]
 pub struct EscrowHold {
@@ -23,6 +23,8 @@ pub struct EscrowHold {
     pub loan_id: u32,
     pub lender: Address,
     pub borrower: Address,
+    /// Token contract (e.g. native XLM or USDC) custodied for this hold
+    pub token: Address,
     /// Amount in stroops
     pub amount: i128,
     /// Ledger timestamp when hold was created
@@ -212,12 +214,13 @@ impl EscrowContract {
 
     // ── Holds ─────────────────────────────────────────────────────────────────
 
-    /// Register an escrow commitment once the lender has sent the PAYMENT.
-    /// Returns the new escrow `id`.
+    /// Lock `amount` of `token` from the lender in this contract and register
+    /// the escrow commitment. Returns the new escrow `id`.
     pub fn create_hold(
         env: Env,
         lender: Address,
         borrower: Address,
+        token: Address,
         loan_id: u32,
         amount: i128,
     ) -> u32 {
@@ -227,6 +230,13 @@ impl EscrowContract {
         if amount <= 0 {
             panic!("Amount must be positive");
         }
+
+        // Take custody of the funds before recording the hold.
+        token::Client::new(&env, &token).transfer(
+            &lender,
+            &env.current_contract_address(),
+            &amount,
+        );
 
         let count: u32 = env
             .storage()
@@ -241,6 +251,7 @@ impl EscrowContract {
             loan_id,
             lender: lender.clone(),
             borrower,
+            token,
             amount,
             held_at: now,
             expires_at: now + 180, // 3-minute revocation window
@@ -270,8 +281,7 @@ impl EscrowContract {
     }
 
     /// Lender revokes before the 3-minute window closes.
-    /// The *actual* XLM refund must happen via a separate PAYMENT operation
-    /// signed by the platform after this call confirms on-chain.
+    /// The held tokens are refunded to the lender from the contract's custody.
     pub fn revoke_hold(env: Env, lender: Address, escrow_id: u32) {
         lender.require_auth();
 
@@ -293,14 +303,20 @@ impl EscrowContract {
             .persistent()
             .set(&DataKey::Hold(escrow_id), &hold);
 
+        token::Client::new(&env, &hold.token).transfer(
+            &env.current_contract_address(),
+            &hold.lender,
+            &hold.amount,
+        );
+
         env.events().publish(
             (symbol_short!("escrow"), symbol_short!("withdraw")),
             (lender, hold.loan_id, hold.amount),
         );
     }
 
-    /// Mark escrow as disbursed once the on-chain payment to the borrower
-    /// has been confirmed (called by admin/backend after Horizon verification).
+    /// Release the held tokens to the borrower once the revocation window has
+    /// closed (called by admin/backend).
     pub fn confirm_disbursement(env: Env, caller: Address, escrow_id: u32) {
         caller.require_auth();
         Self::assert_admin(&env, &caller);
@@ -320,6 +336,12 @@ impl EscrowContract {
         env.storage()
             .persistent()
             .set(&DataKey::Hold(escrow_id), &hold);
+
+        token::Client::new(&env, &hold.token).transfer(
+            &env.current_contract_address(),
+            &hold.borrower,
+            &hold.amount,
+        );
 
         env.events().publish(
             (symbol_short!("escrow"), symbol_short!("transfer")),

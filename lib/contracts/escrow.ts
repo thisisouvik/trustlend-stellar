@@ -63,17 +63,20 @@ export async function getEscrowCount(callerAddress: string): Promise<number> {
 // ─── Write functions ──────────────────────────────────────────────────────────
 
 /**
- * Register an escrow hold after the lender has sent the XLM PAYMENT.
+ * Lock the lender's tokens in the escrow contract and register the hold.
  * Returns the new escrow ID.
  *
  * Step-by-step flow:
- * 1. Lender sends XLM to borrower's address via Freighter PAYMENT op.
- * 2. Frontend calls `createEscrowHold()` so the hold is recorded on-chain.
- * 3. After 3 minutes the admin calls `confirmDisbursement()`.
+ * 1. Frontend calls `createEscrowHold()`; the contract pulls `amountStroops`
+ *    of `tokenAddress` from the lender into its own custody.
+ * 2. Within 3 minutes the lender may call `revokeEscrowHold()` to get a refund.
+ * 3. After 3 minutes the admin calls `confirmDisbursement()` and the contract
+ *    pays the borrower.
  */
 export async function createEscrowHold(
   lenderAddress: string,
   borrowerAddress: string,
+  tokenAddress: string,
   loanId: number,
   amountStroops: bigint
 ): Promise<number> {
@@ -83,6 +86,7 @@ export async function createEscrowHold(
     args: [
       addressToScVal(lenderAddress),
       addressToScVal(borrowerAddress),
+      addressToScVal(tokenAddress),
       u32ToScVal(loanId),
       i128ToScVal(amountStroops),
     ],
@@ -93,7 +97,7 @@ export async function createEscrowHold(
 
 /**
  * Lender revokes the escrow hold within the 3-minute window.
- * After this call the admin should refund the XLM via a separate PAYMENT op.
+ * The contract refunds the held tokens to the lender.
  */
 export async function revokeEscrowHold(
   lenderAddress: string,
@@ -108,8 +112,7 @@ export async function revokeEscrowHold(
 }
 
 /**
- * Admin marks escrow as disbursed once the XLM payment to the borrower
- * has been confirmed on Horizon.
+ * Admin releases the held tokens to the borrower after the revocation window.
  */
 export async function confirmDisbursement(
   adminAddress: string,

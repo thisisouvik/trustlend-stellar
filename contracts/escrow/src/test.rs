@@ -3,11 +3,34 @@
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger},
-    symbol_short, Address, Env, IntoVal, vec,
+    symbol_short, token, Address, Env, IntoVal, vec,
 };
 
 const WINDOW_SECONDS: u64 = 180;
 const START_TIMESTAMP: u64 = 1_000;
+const MINTED: i128 = 100_000_000;
+
+/// Events emitted by the escrow contract itself (token transfer events excluded).
+fn escrow_events(
+    env: &Env,
+    contract_id: &Address,
+) -> soroban_sdk::Vec<(Address, soroban_sdk::Vec<soroban_sdk::Val>, soroban_sdk::Val)> {
+    let mut out = vec![env];
+    for e in env.events().all().iter() {
+        if e.0 == *contract_id {
+            out.push_back(e);
+        }
+    }
+    out
+}
+
+/// Register a Stellar asset contract and mint `MINTED` units to `holder`.
+fn new_token(env: &Env, holder: &Address) -> Address {
+    let issuer = Address::generate(env);
+    let token = env.register_stellar_asset_contract_v2(issuer).address();
+    token::StellarAssetClient::new(env, &token).mint(holder, &MINTED);
+    token
+}
 
 fn setup() -> (Env, Address, Address, Address, Address) {
     let env = Env::default();
@@ -30,8 +53,9 @@ fn setup() -> (Env, Address, Address, Address, Address) {
 fn test_revocation_window_is_open_until_exact_expiry() {
     let (env, contract_id, _admin, lender, borrower) = setup();
     let client = EscrowContractClient::new(&env, &contract_id);
+    let token = new_token(&env, &lender);
 
-    let escrow_id = client.create_hold(&lender, &borrower, &7, &5_000_000);
+    let escrow_id = client.create_hold(&lender, &borrower, &token, &7, &5_000_000);
     let hold = client.get_hold(&escrow_id);
 
     env.ledger().set_timestamp(hold.expires_at - 1);
@@ -45,8 +69,9 @@ fn test_revocation_window_is_open_until_exact_expiry() {
 fn test_revoke_hold_succeeds_before_expiry() {
     let (env, contract_id, _admin, lender, borrower) = setup();
     let client = EscrowContractClient::new(&env, &contract_id);
+    let token = new_token(&env, &lender);
 
-    let escrow_id = client.create_hold(&lender, &borrower, &12, &8_000_000);
+    let escrow_id = client.create_hold(&lender, &borrower, &token, &12, &8_000_000);
     let hold = client.get_hold(&escrow_id);
 
     env.ledger().set_timestamp(hold.expires_at - 1);
@@ -61,8 +86,9 @@ fn test_revoke_hold_succeeds_before_expiry() {
 fn test_revoke_hold_fails_at_exact_expiry() {
     let (env, contract_id, _admin, lender, borrower) = setup();
     let client = EscrowContractClient::new(&env, &contract_id);
+    let token = new_token(&env, &lender);
 
-    let escrow_id = client.create_hold(&lender, &borrower, &13, &8_000_000);
+    let escrow_id = client.create_hold(&lender, &borrower, &token, &13, &8_000_000);
     let hold = client.get_hold(&escrow_id);
 
     env.ledger().set_timestamp(hold.expires_at);
@@ -73,8 +99,9 @@ fn test_revoke_hold_fails_at_exact_expiry() {
 fn test_confirm_disbursement_succeeds_at_exact_expiry() {
     let (env, contract_id, admin, lender, borrower) = setup();
     let client = EscrowContractClient::new(&env, &contract_id);
+    let token = new_token(&env, &lender);
 
-    let escrow_id = client.create_hold(&lender, &borrower, &99, &9_500_000);
+    let escrow_id = client.create_hold(&lender, &borrower, &token, &99, &9_500_000);
     let hold = client.get_hold(&escrow_id);
 
     env.ledger().set_timestamp(hold.expires_at);
@@ -89,8 +116,9 @@ fn test_confirm_disbursement_succeeds_at_exact_expiry() {
 fn test_confirm_disbursement_fails_before_expiry() {
     let (env, contract_id, admin, lender, borrower) = setup();
     let client = EscrowContractClient::new(&env, &contract_id);
+    let token = new_token(&env, &lender);
 
-    let escrow_id = client.create_hold(&lender, &borrower, &100, &9_500_000);
+    let escrow_id = client.create_hold(&lender, &borrower, &token, &100, &9_500_000);
     let hold = client.get_hold(&escrow_id);
 
     env.ledger().set_timestamp(hold.expires_at - 1);
@@ -101,8 +129,9 @@ fn test_confirm_disbursement_fails_before_expiry() {
 fn test_create_hold_sets_expected_expiry_window() {
     let (env, contract_id, _admin, lender, borrower) = setup();
     let client = EscrowContractClient::new(&env, &contract_id);
+    let token = new_token(&env, &lender);
 
-    let escrow_id = client.create_hold(&lender, &borrower, &5, &1_000_000);
+    let escrow_id = client.create_hold(&lender, &borrower, &token, &5, &1_000_000);
     let hold = client.get_hold(&escrow_id);
 
     assert_eq!(hold.held_at, START_TIMESTAMP);
@@ -114,14 +143,15 @@ fn test_create_hold_sets_expected_expiry_window() {
 fn test_deposit_and_withdraw_emit_events() {
     let (env, contract_id, _admin, lender, borrower) = setup();
     let client = EscrowContractClient::new(&env, &contract_id);
+    let token = new_token(&env, &lender);
 
     let pool_id = 42u32;
     let amount = 5_000_000i128;
 
-    let escrow_id = client.create_hold(&lender, &borrower, &pool_id, &amount);
+    let escrow_id = client.create_hold(&lender, &borrower, &token, &pool_id, &amount);
 
     assert_eq!(
-        env.events().all(),
+        escrow_events(&env, &contract_id),
         vec![
             &env,
             (
@@ -137,7 +167,7 @@ fn test_deposit_and_withdraw_emit_events() {
     client.revoke_hold(&lender, &escrow_id);
 
     assert_eq!(
-        env.events().all(),
+        escrow_events(&env, &contract_id),
         vec![
             &env,
             (
@@ -204,11 +234,12 @@ fn test_escrow_pause_activates_with_threshold() {
 fn test_escrow_create_hold_blocked_when_paused() {
     let (env, contract_id, admin, lender, borrower, signer1) = setup_with_multisig();
     let client = EscrowContractClient::new(&env, &contract_id);
+    let token = new_token(&env, &lender);
 
     client.pause(&admin);
     client.pause(&signer1);
 
-    client.create_hold(&lender, &borrower, &1, &5_000_000);
+    client.create_hold(&lender, &borrower, &token, &1, &5_000_000);
 }
 
 #[test]
@@ -216,9 +247,10 @@ fn test_escrow_create_hold_blocked_when_paused() {
 fn test_escrow_confirm_disbursement_blocked_when_paused() {
     let (env, contract_id, admin, lender, borrower, signer1) = setup_with_multisig();
     let client = EscrowContractClient::new(&env, &contract_id);
+    let token = new_token(&env, &lender);
 
     // Create a hold while unpaused
-    let escrow_id = client.create_hold(&lender, &borrower, &7, &5_000_000);
+    let escrow_id = client.create_hold(&lender, &borrower, &token, &7, &5_000_000);
     let hold = client.get_hold(&escrow_id);
 
     // Pause
@@ -234,9 +266,10 @@ fn test_escrow_confirm_disbursement_blocked_when_paused() {
 fn test_escrow_revoke_hold_allowed_when_paused() {
     let (env, contract_id, admin, lender, borrower, signer1) = setup_with_multisig();
     let client = EscrowContractClient::new(&env, &contract_id);
+    let token = new_token(&env, &lender);
 
     // Create a hold while unpaused
-    let escrow_id = client.create_hold(&lender, &borrower, &7, &5_000_000);
+    let escrow_id = client.create_hold(&lender, &borrower, &token, &7, &5_000_000);
     let hold = client.get_hold(&escrow_id);
 
     // Pause
@@ -255,6 +288,7 @@ fn test_escrow_revoke_hold_allowed_when_paused() {
 fn test_escrow_unpause_restores_operations() {
     let (env, contract_id, admin, lender, borrower, signer1) = setup_with_multisig();
     let client = EscrowContractClient::new(&env, &contract_id);
+    let token = new_token(&env, &lender);
 
     // Pause
     client.pause(&admin);
@@ -267,7 +301,7 @@ fn test_escrow_unpause_restores_operations() {
     assert!(!client.is_paused());
 
     // Create hold should work again
-    let escrow_id = client.create_hold(&lender, &borrower, &7, &5_000_000);
+    let escrow_id = client.create_hold(&lender, &borrower, &token, &7, &5_000_000);
     let hold = client.get_hold(&escrow_id);
     assert_eq!(hold.status, EscrowStatus::Held);
 }
@@ -280,4 +314,93 @@ fn test_escrow_non_admin_cannot_pause() {
 
     let random = Address::generate(&env);
     client.pause(&random);
+}
+
+// --- Token custody tests -----------------------------------------------------
+
+#[test]
+fn test_create_hold_moves_tokens_into_escrow() {
+    let (env, contract_id, _admin, lender, borrower) = setup();
+    let client = EscrowContractClient::new(&env, &contract_id);
+    let token = new_token(&env, &lender);
+    let tc = token::Client::new(&env, &token);
+
+    let amount = 5_000_000i128;
+    let escrow_id = client.create_hold(&lender, &borrower, &token, &1, &amount);
+
+    assert_eq!(tc.balance(&lender), MINTED - amount);
+    assert_eq!(tc.balance(&contract_id), amount);
+    assert_eq!(client.get_hold(&escrow_id).token, token);
+}
+
+#[test]
+fn test_balance_matches_active_holds() {
+    let (env, contract_id, _admin, lender, borrower) = setup();
+    let client = EscrowContractClient::new(&env, &contract_id);
+    let token = new_token(&env, &lender);
+    let tc = token::Client::new(&env, &token);
+
+    client.create_hold(&lender, &borrower, &token, &1, &2_000_000);
+    let second = client.create_hold(&lender, &borrower, &token, &2, &3_000_000);
+    assert_eq!(tc.balance(&contract_id), 5_000_000);
+
+    env.ledger().set_timestamp(START_TIMESTAMP + 1);
+    client.revoke_hold(&lender, &second);
+    assert_eq!(tc.balance(&contract_id), 2_000_000);
+}
+
+#[test]
+fn test_revoke_hold_refunds_lender() {
+    let (env, contract_id, _admin, lender, borrower) = setup();
+    let client = EscrowContractClient::new(&env, &contract_id);
+    let token = new_token(&env, &lender);
+    let tc = token::Client::new(&env, &token);
+
+    let escrow_id = client.create_hold(&lender, &borrower, &token, &1, &5_000_000);
+    client.revoke_hold(&lender, &escrow_id);
+
+    assert_eq!(tc.balance(&lender), MINTED);
+    assert_eq!(tc.balance(&contract_id), 0);
+    assert_eq!(tc.balance(&borrower), 0);
+}
+
+#[test]
+fn test_confirm_disbursement_pays_borrower() {
+    let (env, contract_id, admin, lender, borrower) = setup();
+    let client = EscrowContractClient::new(&env, &contract_id);
+    let token = new_token(&env, &lender);
+    let tc = token::Client::new(&env, &token);
+
+    let amount = 5_000_000i128;
+    let escrow_id = client.create_hold(&lender, &borrower, &token, &1, &amount);
+    env.ledger().set_timestamp(START_TIMESTAMP + WINDOW_SECONDS);
+    client.confirm_disbursement(&admin, &escrow_id);
+
+    assert_eq!(tc.balance(&borrower), amount);
+    assert_eq!(tc.balance(&contract_id), 0);
+    assert_eq!(tc.balance(&lender), MINTED - amount);
+}
+
+#[test]
+#[should_panic]
+fn test_create_hold_fails_without_funds() {
+    let (env, contract_id, _admin, lender, borrower) = setup();
+    let client = EscrowContractClient::new(&env, &contract_id);
+    let token = new_token(&env, &lender);
+
+    // More than the lender owns: nothing can be fabricated without custody.
+    client.create_hold(&lender, &borrower, &token, &1, &(MINTED + 1));
+}
+
+#[test]
+#[should_panic(expected = "Hold is not in HELD state")]
+fn test_disbursed_hold_cannot_be_revoked() {
+    let (env, contract_id, admin, lender, borrower) = setup();
+    let client = EscrowContractClient::new(&env, &contract_id);
+    let token = new_token(&env, &lender);
+
+    let escrow_id = client.create_hold(&lender, &borrower, &token, &1, &5_000_000);
+    env.ledger().set_timestamp(START_TIMESTAMP + WINDOW_SECONDS);
+    client.confirm_disbursement(&admin, &escrow_id);
+    client.revoke_hold(&lender, &escrow_id);
 }

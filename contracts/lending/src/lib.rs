@@ -883,6 +883,12 @@ impl LendingContract {
             .publish((symbol_short!("oracle"), symbol_short!("set")), oracle);
     }
 
+    /// Alias of `set_price_oracle` so the multisig `SetOracle` action, which
+    /// dispatches to `set_oracle`, can target the lending contract.
+    pub fn set_oracle(env: Env, caller: Address, oracle: Address) {
+        Self::set_price_oracle(env, caller, oracle);
+    }
+
     /// Get the authorized price oracle address.
     pub fn get_price_oracle(env: Env) -> Address {
         env.storage()

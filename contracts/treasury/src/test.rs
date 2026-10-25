@@ -163,7 +163,11 @@ fn setup_lending_with_fees(
     lending.set_multisig_admin(admin, admin);
 
     let borrower = Address::generate(env);
-    let collateral_asset = Address::generate(env);
+    // Loans are backed by collateral actually deposited into the vault.
+    let collateral_asset = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    mint_tokens(env, &collateral_asset, &borrower, 100_000_0000000);
     lending.whitelist_asset(admin, &collateral_asset);
     lending.set_asset_collateral_config(
         admin,
@@ -188,6 +192,8 @@ fn setup_lending_with_fees(
     lending.set_treasury(admin, &treasury.address);
     lending.set_fee_token(admin, fee_token);
     treasury.set_lending_contract(admin, &lending_id);
+
+    lending.deposit_collateral(&borrower, &collateral_asset, &100_000_0000000);
 
     // Create loan request (accrues platform fee)
     lending.create_loan_request(

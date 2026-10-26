@@ -3559,3 +3559,38 @@ fn test_sweep_cannot_take_uncollected_fees() {
     client.sweep_tokens(&admin, &fee_token, &recipient, &100);
     assert_eq!(token::Client::new(&env, &fee_token).balance(&contract_id), uncollected);
 }
+
+#[test]
+fn test_pause_unpause_multiple_cycles_clears_signers() {
+    let (env, contract_id, admin, _borrower, _collateral) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let signer1 = Address::generate(&env);
+    let admins = vec![&env, admin.clone(), signer1.clone()];
+    client.setup_multisig(&admin, &admins, &2);
+
+    // Cycle 1: pause -> unpause
+    client.pause(&admin);
+    assert!(!client.is_paused());
+    assert_eq!(client.get_pause_signer_count(), 1);
+    client.pause(&signer1);
+    assert!(client.is_paused());
+    assert_eq!(client.get_pause_signer_count(), 0);
+
+    client.unpause(&admin);
+    assert!(client.is_paused());
+    client.unpause(&signer1);
+    assert!(!client.is_paused());
+
+    // Cycle 2: same signers must be able to pause and unpause again without panic
+    client.pause(&admin);
+    assert!(!client.is_paused());
+    client.pause(&signer1);
+    assert!(client.is_paused());
+
+    client.unpause(&admin);
+    assert!(client.is_paused());
+    client.unpause(&signer1);
+    assert!(!client.is_paused());
+}
+

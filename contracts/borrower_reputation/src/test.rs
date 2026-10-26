@@ -577,3 +577,31 @@ fn test_packed_bitmask_zk_tier_upgrade_flag() {
     assert!((flags & FLAG_ZK_UPGRADED) != 0);
     assert!((flags & FLAG_IS_ACTIVE) != 0);
 }
+
+#[test]
+fn test_rep_pause_unpause_multiple_cycles_clears_signers() {
+    let (env, contract_id, admin, borrower, signer1) = setup_with_multisig();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+
+    // Cycle 1: pause -> unpause
+    client.pause(&admin);
+    client.pause(&signer1);
+    assert!(client.is_paused());
+
+    client.unpause(&admin);
+    client.unpause(&signer1);
+    assert!(!client.is_paused());
+
+    // Cycle 2: same signers can pause and unpause again
+    client.pause(&admin);
+    client.pause(&signer1);
+    assert!(client.is_paused());
+
+    client.unpause(&admin);
+    client.unpause(&signer1);
+    assert!(!client.is_paused());
+
+    client.add_reputation_event(&admin, &borrower, &ReputationEvent::TestLoanRepaid);
+    assert_eq!(client.get_profile(&borrower).reputation_score, 50);
+}
+

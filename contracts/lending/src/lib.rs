@@ -369,11 +369,30 @@ impl LendingContract {
             panic!("Threshold exceeds number of admins");
         }
 
+        // Clear any lingering signer authorizations from previous multisig sets
+        for existing_admin in Self::get_multisig_admins(env.clone()).iter() {
+            env.storage()
+                .instance()
+                .remove(&DataKey::PauseSigner(existing_admin.clone()));
+            env.storage()
+                .instance()
+                .remove(&DataKey::UnpauseSigner(existing_admin));
+        }
+
         // Ensure the single admin is included in the multisig list
         let mut final_admins = admins;
         let has_admin = final_admins.iter().any(|a| a == admin);
         if !has_admin {
             final_admins.push_back(admin);
+        }
+
+        for configured_admin in final_admins.iter() {
+            env.storage()
+                .instance()
+                .remove(&DataKey::PauseSigner(configured_admin.clone()));
+            env.storage()
+                .instance()
+                .remove(&DataKey::UnpauseSigner(configured_admin));
         }
 
         env.storage()
@@ -426,10 +445,15 @@ impl LendingContract {
         let threshold: u32 = Self::get_multisig_threshold(env.clone());
         if new_count >= threshold {
             env.storage().instance().set(&DataKey::IsPaused, &true);
-            // Reset signer tracking for next pause cycle
+            // Reset signer tracking and individual authorizations for next pause cycle
             env.storage()
                 .instance()
                 .set(&DataKey::PauseSignerCount, &0u32);
+            for admin in Self::get_multisig_admins(env.clone()).iter() {
+                env.storage()
+                    .instance()
+                    .remove(&DataKey::PauseSigner(admin));
+            }
             env.events()
                 .publish((symbol_short!("lending"), symbol_short!("paused")), ());
         }
@@ -471,6 +495,11 @@ impl LendingContract {
             env.storage()
                 .instance()
                 .set(&DataKey::UnpauseSignerCount, &0u32);
+            for admin in Self::get_multisig_admins(env.clone()).iter() {
+                env.storage()
+                    .instance()
+                    .remove(&DataKey::UnpauseSigner(admin));
+            }
             env.events()
                 .publish((symbol_short!("lending"), symbol_short!("unpaused")), ());
         }

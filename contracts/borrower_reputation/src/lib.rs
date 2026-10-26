@@ -207,9 +207,27 @@ impl BorrowerReputationContract {
             panic!("Threshold exceeds number of admins");
         }
 
+        for existing_admin in Self::get_multisig_admins(env.clone()).iter() {
+            env.storage()
+                .instance()
+                .remove(&DataKey::PauseSigner(existing_admin.clone()));
+            env.storage()
+                .instance()
+                .remove(&DataKey::UnpauseSigner(existing_admin));
+        }
+
         let mut final_admins = admins;
         if !final_admins.iter().any(|a| a == admin) {
             final_admins.push_back(admin);
+        }
+
+        for configured_admin in final_admins.iter() {
+            env.storage()
+                .instance()
+                .remove(&DataKey::PauseSigner(configured_admin.clone()));
+            env.storage()
+                .instance()
+                .remove(&DataKey::UnpauseSigner(configured_admin));
         }
 
         env.storage().instance().set(&DataKey::MultisigThreshold, &threshold);
@@ -252,6 +270,11 @@ impl BorrowerReputationContract {
         if new_count >= threshold {
             env.storage().instance().set(&DataKey::IsPaused, &true);
             env.storage().instance().set(&DataKey::PauseSignerCount, &0u32);
+            for admin in Self::get_multisig_admins(env.clone()).iter() {
+                env.storage()
+                    .instance()
+                    .remove(&DataKey::PauseSigner(admin));
+            }
             env.events().publish(
                 (symbol_short!("rep"), symbol_short!("paused")),
                 (),
@@ -292,6 +315,11 @@ impl BorrowerReputationContract {
         if new_count >= threshold {
             env.storage().instance().set(&DataKey::IsPaused, &false);
             env.storage().instance().set(&DataKey::UnpauseSignerCount, &0u32);
+            for admin in Self::get_multisig_admins(env.clone()).iter() {
+                env.storage()
+                    .instance()
+                    .remove(&DataKey::UnpauseSigner(admin));
+            }
             env.events().publish(
                 (symbol_short!("rep"), symbol_short!("unpaused")),
                 (),

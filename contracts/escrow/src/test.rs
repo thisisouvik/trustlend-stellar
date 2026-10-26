@@ -281,3 +281,32 @@ fn test_escrow_non_admin_cannot_pause() {
     let random = Address::generate(&env);
     client.pause(&random);
 }
+
+#[test]
+fn test_escrow_pause_unpause_multiple_cycles_clears_signers() {
+    let (env, contract_id, admin, lender, borrower, signer1) = setup_with_multisig();
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    // Cycle 1: pause -> unpause
+    client.pause(&admin);
+    client.pause(&signer1);
+    assert!(client.is_paused());
+
+    client.unpause(&admin);
+    client.unpause(&signer1);
+    assert!(!client.is_paused());
+
+    // Cycle 2: same signers can pause and unpause again
+    client.pause(&admin);
+    client.pause(&signer1);
+    assert!(client.is_paused());
+
+    client.unpause(&admin);
+    client.unpause(&signer1);
+    assert!(!client.is_paused());
+
+    // Verify contract operations work after second cycle
+    let escrow_id = client.create_hold(&lender, &borrower, &8, &5_000_000);
+    assert_eq!(client.get_hold(&escrow_id).status, EscrowStatus::Held);
+}
+

@@ -228,3 +228,31 @@ fn test_def_pause_threshold_count_tracking() {
     client.pause(&signer1);
     assert_eq!(client.get_pause_signer_count(), 0); // reset after activation
 }
+
+#[test]
+fn test_def_pause_unpause_multiple_cycles_clears_signers() {
+    let (env, contract_id, admin, signer1, borrower) = setup_with_multisig();
+    let client = DefaultManagementContractClient::new(&env, &contract_id);
+
+    // Cycle 1: pause -> unpause
+    client.pause(&admin);
+    client.pause(&signer1);
+    assert!(client.is_paused());
+
+    client.unpause(&admin);
+    client.unpause(&signer1);
+    assert!(!client.is_paused());
+
+    // Cycle 2: same signers can pause and unpause again
+    client.pause(&admin);
+    client.pause(&signer1);
+    assert!(client.is_paused());
+
+    client.unpause(&admin);
+    client.unpause(&signer1);
+    assert!(!client.is_paused());
+
+    let phase = client.record_default(&admin, &1, &borrower, &1_000_000, &5);
+    assert_eq!(phase, DefaultPhase::Friendly);
+}
+

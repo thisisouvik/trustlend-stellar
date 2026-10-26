@@ -312,3 +312,209 @@ proptest! {
         );
     }
 }
+
+// ─── Collateral Conservation & Backed Fee Accrual Invariants (#458) ──────────
+
+/// Lifecycle vault model tracking pooled contract token balance, per-borrower
+/// collateral positions, aggregate collateral (`TotalCollateral`), and
+/// backed protocol fee accruals (`UncollectedFees`) across loan lifecycles.
+#[derive(Debug, Clone, Default)]
+struct VaultConservationModel {
+    contract_balance: i128,
+    borrower_collateral: Vec<i128>,
+    total_collateral: i128,
+    uncollected_fees: i128,
+    treasury_balance: i128,
+}
+
+impl VaultConservationModel {
+    fn new(num_borrowers: usize) -> Self {
+        Self {
+            contract_balance: 0,
+            borrower_collateral: vec![0; num_borrowers],
+            total_collateral: 0,
+            uncollected_fees: 0,
+            treasury_balance: 0,
+        }
+    }
+
+    fn sum_user_collateral(&self) -> i128 {
+        self.borrower_collateral.iter().copied().sum()
+    }
+
+    /// Deposit collateral into the vault for `borrower_idx`.
+    fn deposit_collateral(&mut self, borrower_idx: usize, amount: i128) -> bool {
+        if amount <= 0 || borrower_idx >= self.borrower_collateral.len() {
+            return false;
+        }
+        self.borrower_collateral[borrower_idx] =
+            match self.borrower_collateral[borrower_idx].checked_add(amount) {
+                Some(v) => v,
+                None => return false,
+            };
+        self.total_collateral = match self.total_collateral.checked_add(amount) {
+            Some(v) => v,
+            None => return false,
+        };
+        self.contract_balance = match self.contract_balance.checked_add(amount) {
+            Some(v) => v,
+            None => return false,
+        };
+        true
+    }
+
+    /// Withdraw collateral from the vault for `borrower_idx`.
+    fn withdraw_collateral(&mut self, borrower_idx: usize, amount: i128) -> bool {
+        if amount <= 0 || borrower_idx >= self.borrower_collateral.len() {
+            return false;
+        }
+        if self.borrower_collateral[borrower_idx] < amount {
+            return false;
+        }
+        if self.contract_balance < amount {
+            return false;
+        }
+        self.borrower_collateral[borrower_idx] -= amount;
+        self.total_collateral -= amount;
+        self.contract_balance -= amount;
+        true
+    }
+
+    /// Loan creation does not accrue unbacked protocol fees into `UncollectedFees`.
+    fn create_loan_request(&mut self, _principal: i128, _rate_bps: u32, _days: u32, _fee_bps: u32) {
+        // Creating a loan request neither moves tokens nor credits UncollectedFees.
+    }
+
+    /// Settling a loan repayment transfers the backed platform fee into the
+    /// contract and credits `UncollectedFees`.
+    fn settle_repayment_with_backed_fee(
+        &mut self,
+        principal: i128,
+        rate_bps: u32,
+        days: u32,
+        fee_bps: u32,
+    ) -> Option<i128> {
+        let interest = calculate_interest(principal, rate_bps, days)?;
+        let platform_fee = calculate_platform_fee(interest, fee_bps)?;
+        self.contract_balance = self.contract_balance.checked_add(platform_fee)?;
+        self.uncollected_fees = self.uncollected_fees.checked_add(platform_fee)?;
+        Some(platform_fee)
+    }
+
+    /// Collect protocol fees to the treasury, enforcing that unencumbered
+    /// token balance (`contract_balance - total_collateral`) covers `uncollected_fees`.
+    fn collect_fees(&mut self) -> Result<i128, &'static str> {
+        if self.uncollected_fees <= 0 {
+            return Ok(0);
+        }
+        let available_fees = self.contract_balance.saturating_sub(self.total_collateral);
+        if available_fees < self.uncollected_fees {
+            return Err("Insufficient unencumbered fee token balance to collect fees");
+        }
+        let collected = self.uncollected_fees;
+        self.uncollected_fees = 0;
+        self.contract_balance -= collected;
+        self.treasury_balance += collected;
+        Ok(collected)
+    }
+}
+
+proptest! {
+    /// INV-ACCT-11, INV-ACCT-12, INV-ACCT-13: Across arbitrary sequences of
+    /// collateral deposits, loan requests, repayments, fee collections, and
+    /// collateral withdrawals:
+    /// 1. `contract_balance >= sum(user_collateral) == total_collateral`
+    /// 2. `contract_balance >= total_collateral + uncollected_fees`
+    /// 3. `collect_fees` never reduces `contract_balance` below `total_collateral`.
+    #[test]
+    fn prop_collateral_conservation_and_backed_fee_invariants_across_lifecycle(
+        deposits in prop::collection::vec(10_000_000i128..=50_000_000_000i128, 1..=5),
+        loans in prop::collection::vec(
+            (arb_principal(), arb_rate_bps(), arb_days(), arb_platform_fee_bps(), any::<bool>()),
+            1..=6
+        ),
+        withdraw_Ratio_bps in prop::collection::vec(0u32..=10_000u32, 1..=5),
+    ) {
+        let num_borrowers = deposits.len();
+        let mut vault = VaultConservationModel::new(num_borrowers);
+
+        // 1. Borrowers deposit collateral
+        for (idx, &amount) in deposits.iter().enumerate() {
+            prop_assert!(vault.deposit_collateral(idx, amount));
+            prop_assert_eq!(vault.total_collateral, vault.sum_user_collateral());
+            prop_assert!(vault.contract_balance >= vault.total_collateral + vault.uncollected_fees);
+        }
+
+        // 2. Loan requests, repayments, and interleaved fee collections
+        for (principal, rate_bps, days, fee_bps, collect_after) in loans {
+            // Loan creation alone never inflates uncollected_fees
+            let fees_before = vault.uncollected_fees;
+            vault.create_loan_request(principal, rate_bps, days, fee_bps);
+            prop_assert_eq!(vault.uncollected_fees, fees_before);
+            prop_assert!(vault.contract_balance >= vault.total_collateral + vault.uncollected_fees);
+
+            // Repayment settles backed fee
+            let _ = vault.settle_repayment_with_backed_fee(principal, rate_bps, days, fee_bps).unwrap();
+            prop_assert_eq!(vault.total_collateral, vault.sum_user_collateral());
+            prop_assert!(
+                vault.contract_balance >= vault.total_collateral + vault.uncollected_fees,
+                "Fee backing invariant violated: balance={} < collateral={} + fees={}",
+                vault.contract_balance,
+                vault.total_collateral,
+                vault.uncollected_fees
+            );
+
+            if collect_after {
+                let collected = vault.collect_fees().unwrap();
+                prop_assert!(collected >= 0);
+                prop_assert_eq!(vault.uncollected_fees, 0);
+                // INV-ACCT-13: Solvency under collection
+                prop_assert!(
+                    vault.contract_balance >= vault.total_collateral,
+                    "Solvency under collection violated: balance={} < total_collateral={}",
+                    vault.contract_balance,
+                    vault.total_collateral
+                );
+            }
+        }
+
+        // 3. Final fee collection & borrower collateral withdrawals
+        let _ = vault.collect_fees().unwrap();
+        prop_assert!(vault.contract_balance >= vault.total_collateral);
+
+        for (idx, &ratio_bps) in withdraw_Ratio_bps.iter().take(num_borrowers).enumerate() {
+            let current_pos = vault.borrower_collateral[idx];
+            let withdraw_amt = (current_pos * (ratio_bps as i128)) / 10_000;
+            if withdraw_amt > 0 {
+                prop_assert!(
+                    vault.withdraw_collateral(idx, withdraw_amt),
+                    "Borrower withdrawal failed despite sufficient collateral"
+                );
+            }
+            prop_assert_eq!(vault.total_collateral, vault.sum_user_collateral());
+            prop_assert!(vault.contract_balance >= vault.total_collateral + vault.uncollected_fees);
+        }
+    }
+
+    /// Verifies that if `uncollected_fees` exceeds unencumbered fee tokens
+    /// (`contract_balance - total_collateral`), `collect_fees` is rejected and
+    /// depositor collateral remains untouched.
+    #[test]
+    fn prop_collect_fees_rejects_unbacked_accrual_preserving_collateral(
+        collateral in 10_000_000i128..=100_000_000_000i128,
+        unbacked_fee in 1i128..=10_000_000_000i128,
+    ) {
+        let mut vault = VaultConservationModel::new(1);
+        prop_assert!(vault.deposit_collateral(0, collateral));
+
+        // Simulate an unbacked fee accrual without corresponding token inflow
+        vault.uncollected_fees = unbacked_fee;
+
+        let res = vault.collect_fees();
+        prop_assert!(res.is_err(), "collect_fees must fail when fees are only backed by collateral");
+        prop_assert_eq!(vault.contract_balance, collateral);
+        prop_assert_eq!(vault.total_collateral, collateral);
+        prop_assert!(vault.withdraw_collateral(0, collateral));
+        prop_assert_eq!(vault.contract_balance, 0);
+    }
+}

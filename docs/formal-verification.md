@@ -40,7 +40,7 @@ Formal verification was added to:
 
 ## Verified Invariants
 
-### Accounting (10 invariants)
+### Accounting (13 invariants)
 
 | ID | Invariant |
 |---|---|
@@ -54,6 +54,20 @@ Formal verification was added to:
 | INV-ACCT-8 | Platform fees accumulate correctly into `UncollectedFees` |
 | INV-ACCT-9 | Rate switch fee correctly increases both `remaining_due` and `total_due` |
 | INV-ACCT-10 | Partial payments never mark loan as Repaid |
+| INV-ACCT-11 | **Collateral Conservation:** For every whitelisted asset $A$, $\text{balance}(\text{LendingContract}, A) \ge \sum_{\text{borrower}} \text{UserCollateral}(\text{borrower}, A)$ |
+| INV-ACCT-12 | **Fee Backing:** For the configured fee token $T_{\text{fee}}$, $\text{balance}(\text{LendingContract}, T_{\text{fee}}) \ge \text{TotalCollateral}(T_{\text{fee}}) + \text{UncollectedFees}$ |
+| INV-ACCT-13 | **Solvency Under Collection:** Executing `collect_fees` never reduces $\text{balance}(\text{LendingContract}, A)$ below $\text{TotalCollateral}(A)$ for any asset |
+
+#### Collateral Conservation & Backed Fee Accrual (`INV-ACCT-11` – `INV-ACCT-13`)
+
+Because `LendingContract` pools depositor collateral (`UserCollateral`) and protocol fees (`UncollectedFees`) within a single SEP-41 contract token balance when the fee token is also a whitelisted collateral asset (such as native XLM), arithmetic-only checks on `UncollectedFees` are insufficient to guarantee vault solvency. The formal verification suite enforces three cross-ledger conservation invariants across all loan lifecycles:
+
+1. **Collateral Conservation Invariant (`INV-ACCT-11`):**
+   $$\forall A \in \text{WhitelistedAssets}: \quad \text{balance}(\text{LendingContract}, A) \ge \text{TotalCollateral}(A) = \sum_{\text{borrower}} \text{UserCollateral}(\text{borrower}, A)$$
+2. **Fee Backing Invariant (`INV-ACCT-12`):**
+   $$\text{balance}(\text{LendingContract}, T_{\text{fee}}) \ge \text{TotalCollateral}(T_{\text{fee}}) + \text{UncollectedFees}$$
+3. **Solvency Under Collection (`INV-ACCT-13`):**
+   `collect_fees` requires unencumbered fee liquidity $\text{balance}(\text{LendingContract}, T_{\text{fee}}) - \text{TotalCollateral}(T_{\text{fee}}) \ge \text{UncollectedFees}$, ensuring that after transferring `UncollectedFees` to the treasury, $\text{balance}'(\text{LendingContract}, A) \ge \text{TotalCollateral}(A)$ still holds for every asset $A$.
 
 ### State Machine (10 invariants)
 

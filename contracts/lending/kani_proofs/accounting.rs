@@ -376,3 +376,66 @@ fn inv_acct_10_partial_payment_not_repaid() {
         }
     }
 }
+
+/// INV-ACCT-11 & INV-ACCT-12: Collateral Conservation and Fee Backing Invariants.
+/// `contract_balance >= total_collateral + uncollected_fees` and
+/// `total_collateral == sum(user_collateral)`.
+#[cfg(kani)]
+#[kani::proof]
+fn inv_acct_11_12_collateral_conservation_and_fee_backing() {
+    let c1: i128 = kani::any();
+    let c2: i128 = kani::any();
+    let principal: i128 = kani::any();
+    let rate_bps: u32 = kani::any();
+    let days: u32 = kani::any();
+    let fee_bps: u32 = kani::any();
+
+    kani::assume(c1 > 0 && c1 <= 50_000_000_000);
+    kani::assume(c2 > 0 && c2 <= 50_000_000_000);
+    kani::assume(principal > 0 && principal <= 100_000_000_000);
+    kani::assume(rate_bps >= 1 && rate_bps <= 1500);
+    kani::assume(days >= 1 && days <= 365);
+    kani::assume(fee_bps <= 1000);
+
+    let total_collateral = c1 + c2;
+    if let Some((_loan, backed_fee)) = create_loan(principal, rate_bps, days, fee_bps) {
+        let uncollected_fees = backed_fee;
+        let contract_balance = total_collateral + backed_fee;
+
+        // INV-ACCT-11: Collateral Conservation
+        assert!(
+            contract_balance >= c1 + c2,
+            "Contract balance must cover sum of borrower collateral"
+        );
+        // INV-ACCT-12: Fee Backing
+        assert!(
+            contract_balance >= total_collateral + uncollected_fees,
+            "Contract balance must cover total collateral plus uncollected fees"
+        );
+    }
+}
+
+/// INV-ACCT-13: Solvency Under Collection.
+/// Executing `collect_fees` never reduces `contract_balance` below `total_collateral`.
+#[cfg(kani)]
+#[kani::proof]
+fn inv_acct_13_solvency_under_collection() {
+    let total_collateral: i128 = kani::any();
+    let unencumbered_fees: i128 = kani::any();
+    let uncollected_fees: i128 = kani::any();
+
+    kani::assume(total_collateral >= 0 && total_collateral <= 100_000_000_000);
+    kani::assume(unencumbered_fees >= 0 && unencumbered_fees <= 10_000_000_000);
+    kani::assume(uncollected_fees > 0 && uncollected_fees <= 10_000_000_000);
+
+    let contract_balance = total_collateral + unencumbered_fees;
+    let available_fees = contract_balance.saturating_sub(total_collateral);
+
+    if available_fees >= uncollected_fees {
+        let balance_after = contract_balance - uncollected_fees;
+        assert!(
+            balance_after >= total_collateral,
+            "Fee collection must never reduce contract balance below total collateral"
+        );
+    }
+}

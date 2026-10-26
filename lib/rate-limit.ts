@@ -30,6 +30,13 @@ const DEFAULT_POLICY: RateLimitPolicy = { limit: 20, window: "1 m" };
  */
 export const GLOBAL_API_POLICY: RateLimitPolicy = { limit: 100, window: "1 m" };
 
+/**
+ * Strict per-user and per-wallet rate limits for fee sponsorship (`/api/sponsor`)
+ * to prevent treasury XLM reserve depletion (Issue #330).
+ */
+export const SPONSOR_USER_POLICY: RateLimitPolicy = { limit: 5, window: "1 m" };
+export const SPONSOR_WALLET_POLICY: RateLimitPolicy = { limit: 5, window: "1 m" };
+
 const ROUTE_POLICIES: Record<string, RateLimitPolicy> = {
   "/api/loans/apply": { limit: 5, window: "10 m" },
   "/api/loans/fund": { limit: 10, window: "10 m" },
@@ -323,4 +330,90 @@ export async function enforceGlobalApiRateLimit(request: NextRequest) {
     GLOBAL_API_POLICY,
     "Too many requests, please slow down."
   );
+}
+
+async function enforceIdentifierPolicy(
+  identifierKey: string,
+  bucket: string,
+  policy: RateLimitPolicy,
+  message: string
+): Promise<NextResponse | null> {
+  const normalizedKey = identifierKey.trim();
+  if (!normalizedKey) {
+    return null;
+  }
+
+  const identifier = `${bucket}:${normalizedKey}`;
+  const result = redis
+    ? await getUpstashRateLimit(identifier, bucket, policy)
+    : getLocalRateLimit(identifier, policy);
+
+  if (!result || result.success) {
+    return null;
+  }
+
+  const retryAfterSeconds = Math.max(1, Math.ceil((result.reset - Date.now()) / 1_000));
+
+  return NextResponse.json(
+    { error: message },
+    {
+      status: 429,
+      headers: {
+        "Retry-After": String(retryAfterSeconds),
+        "X-RateLimit-Limit": String(result.limit),
+        "X-RateLimit-Remaining": String(result.remaining),
+        "X-RateLimit-Reset": String(result.reset),
+      },
+    }
+  );
+}
+
+/**
+ * Enforce strict per-user and per-wallet rate limits on fee sponsorship requests.
+ * Returns a 429 NextResponse if either the authenticated user ID or the target
+ * wallet address exceeds its sponsorship quota.
+ */
+export async function enforceSponsorRateLimit(params: {
+  userId: string;
+  walletAddresses?: Array<string | null | undefined>;
+  userPolicy?: RateLimitPolicy;
+  walletPolicy?: RateLimitPolicy;
+}): Promise<NextResponse | null> {
+  const userPolicy = params.userPolicy ?? SPONSOR_USER_POLICY;
+  const walletPolicy = params.walletPolicy ?? SPONSOR_WALLET_POLICY;
+
+  const userLimitResponse = await enforceIdentifierPolicy(
+    params.userId,
+    "sponsor:user",
+    userPolicy,
+    "Fee sponsorship rate limit exceeded for this user account. Please wait before requesting another sponsored transaction."
+  );
+  if (userLimitResponse) {
+    return userLimitResponse;
+  }
+
+  const uniqueWallets = new Set(
+    (params.walletAddresses ?? [])
+      .filter((addr): addr is string => typeof addr === "string" && addr.trim().length > 0)
+      .map((addr) => addr.trim())
+  );
+
+  for (const wallet of uniqueWallets) {
+    const walletLimitResponse = await enforceIdentifierPolicy(
+      wallet,
+      "sponsor:wallet",
+      walletPolicy,
+      "Fee sponsorship rate limit exceeded for this wallet address. Please wait before requesting another sponsored transaction."
+    );
+    if (walletLimitResponse) {
+      return walletLimitResponse;
+    }
+  }
+
+  return null;
+}
+
+/** Reset the in-memory rate-limit window store (for deterministic testing). */
+export function resetLocalRateLimitStore(): void {
+  localWindowStore.clear();
 }

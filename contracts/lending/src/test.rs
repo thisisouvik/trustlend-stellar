@@ -3852,7 +3852,7 @@ fn setup_fee_collection(fund: bool) -> (Env, Address, Address, Address, Address,
     client.set_treasury(&admin, &treasury_id);
     client.set_fee_token(&admin, &fee_token);
 
-    client.create_loan_request(
+    let loan_id = client.create_loan_request(
         &borrower,
         &create_request_struct(
             &env,
@@ -3865,6 +3865,12 @@ fn setup_fee_collection(fund: bool) -> (Env, Address, Address, Address, Address,
             InterestRateModel::Fixed,
         ),
     );
+    let lender = Address::generate(&env);
+    client.approve_loan(&lender, &loan_id, &1);
+    client.activate_loan(&admin, &loan_id);
+    let loan = client.get_loan(&loan_id);
+    client.record_payment(&admin, &loan_id, &loan.total_due);
+
     let uncollected = client.get_uncollected_fees();
     assert!(uncollected > 0);
     if fund {
@@ -4046,4 +4052,175 @@ fn test_settle_defaulted_loan_seizes_vault_collateral() {
     assert_eq!(token::Client::new(&env, &collateral_asset).balance(&lender), collateral_amount);
     assert_eq!(token::Client::new(&env, &collateral_asset).balance(&contract_id), 0);
     assert!(client.get_user_collateral_entries(&borrower).is_empty());
+}
+
+// ─── Collateral conservation & fee collection guard tests (Issue #457) ────────
+
+/// Verify `TotalCollateral(asset)` increments on deposit and decrements on withdrawal.
+#[test]
+fn test_total_collateral_tracks_deposits_and_withdrawals() {
+    let (env, contract_id, _admin, borrower, collateral_asset, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+    let borrower2 = Address::generate(&env);
+
+    assert_eq!(client.get_total_collateral(&collateral_asset), 0);
+
+    mint_tokens(&env, &collateral_asset, &borrower2, 300_0000000);
+
+    client.deposit_collateral(&borrower, &collateral_asset, &500_0000000);
+    assert_eq!(client.get_total_collateral(&collateral_asset), 500_0000000);
+
+    client.deposit_collateral(&borrower2, &collateral_asset, &300_0000000);
+    assert_eq!(client.get_total_collateral(&collateral_asset), 800_0000000);
+
+    client.withdraw_collateral(&borrower, &collateral_asset, &200_0000000);
+    assert_eq!(client.get_total_collateral(&collateral_asset), 600_0000000);
+
+    client.withdraw_collateral(&borrower2, &collateral_asset, &300_0000000);
+    assert_eq!(client.get_total_collateral(&collateral_asset), 300_0000000);
+}
+
+/// Verify protocol fees do not accrue at loan request creation or activation,
+/// and only accrue when interest payments are settled in `record_payment`.
+#[test]
+fn test_fees_accrue_only_when_interest_payments_settled() {
+    let (env, contract_id, admin, borrower, collateral_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+    let lender = Address::generate(&env);
+
+    let loan_id = client.create_loan_request(
+        &borrower,
+        &create_request_struct(
+            &env,
+            1_000_0000000,
+            30,
+            1000,
+            100_000_0000000,
+            &collateral_asset,
+            100_000_0000000,
+            InterestRateModel::Fixed,
+        ),
+    );
+    assert_eq!(client.get_uncollected_fees(), 0);
+
+    client.approve_loan(&lender, &loan_id, &1);
+    assert_eq!(client.get_uncollected_fees(), 0);
+
+    client.activate_loan(&admin, &loan_id);
+    assert_eq!(client.get_uncollected_fees(), 0);
+
+    let loan = client.get_loan(&loan_id);
+    // Partial payment covering only principal settles 0 interest -> 0 fee accrued.
+    client.record_payment(&admin, &loan_id, &loan.amount);
+    assert_eq!(client.get_uncollected_fees(), 0);
+
+    // Settling the remaining interest accrues the full platform_fee.
+    let remaining_interest = loan.total_due - loan.amount;
+    client.record_payment(&admin, &loan_id, &remaining_interest);
+    assert_eq!(client.get_uncollected_fees(), loan.platform_fee);
+}
+
+/// Verify `collect_fees` fails when the contract balance consists only of
+/// depositor collateral (when `FeeToken` is also a whitelisted collateral asset).
+#[test]
+fn test_collect_fees_fails_when_balance_is_only_depositor_collateral() {
+    let (env, contract_id, admin, borrower, collateral_asset, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &collateral_asset);
+    let lender = Address::generate(&env);
+
+    let treasury_id = env.register(mock_treasury::MockTreasury, ());
+    client.set_treasury(&admin, &treasury_id);
+    // Configure the whitelisted collateral asset (e.g. XLM) as the fee token.
+    client.set_fee_token(&admin, &collateral_asset);
+
+    let collateral_deposit: i128 = 2_000_0000000;
+    let borrower_before = token_client.balance(&borrower);
+    client.deposit_collateral(&borrower, &collateral_asset, &collateral_deposit);
+    assert_eq!(client.get_total_collateral(&collateral_asset), collateral_deposit);
+    assert_eq!(token_client.balance(&contract_id), collateral_deposit);
+
+    let loan_id = client.create_loan_request(
+        &borrower,
+        &create_request_struct(
+            &env,
+            1_000_0000000,
+            30,
+            1000,
+            100_000_0000000,
+            &collateral_asset,
+            collateral_deposit,
+            InterestRateModel::Fixed,
+        ),
+    );
+    client.approve_loan(&lender, &loan_id, &1);
+    client.activate_loan(&admin, &loan_id);
+    let loan = client.get_loan(&loan_id);
+    client.record_payment(&admin, &loan_id, &loan.total_due);
+
+    let uncollected = client.get_uncollected_fees();
+    assert!(uncollected > 0);
+
+    // Contract holds `collateral_deposit` tokens, all of which belong to the depositor.
+    // Attempting to collect protocol fees must fail rather than draining collateral.
+    assert!(client.try_collect_fees(&admin, &treasury_id).is_err());
+    assert!(client.try_collect_fees(&treasury_id, &treasury_id).is_err());
+    assert_eq!(client.get_uncollected_fees(), uncollected);
+    assert_eq!(token_client.balance(&contract_id), collateral_deposit);
+    assert_eq!(token_client.balance(&treasury_id), 0);
+
+    // Once the loan is repaid, the borrower can withdraw their full collateral.
+    client.withdraw_collateral(&borrower, &collateral_asset, &collateral_deposit);
+    assert_eq!(token_client.balance(&borrower), borrower_before);
+    assert_eq!(client.get_total_collateral(&collateral_asset), 0);
+}
+
+/// Verify `collect_fees` succeeds when unencumbered fee tokens exist above
+/// `TotalCollateral(fee_token)`, while preserving all depositor collateral.
+#[test]
+fn test_collect_fees_succeeds_with_unencumbered_tokens_preserving_collateral() {
+    let (env, contract_id, admin, borrower, collateral_asset, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &collateral_asset);
+    let lender = Address::generate(&env);
+
+    let treasury_id = env.register(mock_treasury::MockTreasury, ());
+    client.set_treasury(&admin, &treasury_id);
+    client.set_fee_token(&admin, &collateral_asset);
+
+    let collateral_deposit: i128 = 2_000_0000000;
+    let borrower_before = token_client.balance(&borrower);
+    client.deposit_collateral(&borrower, &collateral_asset, &collateral_deposit);
+
+    let loan_id = client.create_loan_request(
+        &borrower,
+        &create_request_struct(
+            &env,
+            1_000_0000000,
+            30,
+            1000,
+            100_000_0000000,
+            &collateral_asset,
+            collateral_deposit,
+            InterestRateModel::Fixed,
+        ),
+    );
+    client.approve_loan(&lender, &loan_id, &1);
+    client.activate_loan(&admin, &loan_id);
+    let loan = client.get_loan(&loan_id);
+    client.record_payment(&admin, &loan_id, &loan.total_due);
+
+    let uncollected = client.get_uncollected_fees();
+    // Fund the contract with the actual fee tokens backing the accrual.
+    mint_tokens(&env, &collateral_asset, &contract_id, uncollected);
+
+    let collected = client.collect_fees(&admin, &treasury_id);
+    assert_eq!(collected, uncollected);
+    assert_eq!(client.get_uncollected_fees(), 0);
+    assert_eq!(token_client.balance(&treasury_id), uncollected);
+    assert_eq!(token_client.balance(&contract_id), collateral_deposit);
+
+    // Borrower can still withdraw their full collateral deposit.
+    client.withdraw_collateral(&borrower, &collateral_asset, &collateral_deposit);
+    assert_eq!(token_client.balance(&borrower), borrower_before);
 }

@@ -276,6 +276,10 @@ pub enum DataKey {
     CollateralConfig(Address),
     /// User's deposited collateral positions: map user -> Vec<CollateralEntry>.
     UserCollateral(Address),
+    /// Aggregate deposited collateral per asset across all borrowers (Issue #457).
+    TotalCollateral(Address),
+    /// Platform fee already accrued into UncollectedFees for a given loan ID (Issue #457).
+    LoanAccruedFee(u32),
     /// Price oracle address that can post price feeds for collateral assets.
     PriceOracle,
     /// Aggregated oracle price samples for a collateral asset.
@@ -814,8 +818,12 @@ impl LendingContract {
             .expect("Fee token not configured");
         let token_client = token::Client::new(&env, &fee_token);
         let contract_address = env.current_contract_address();
-        if token_client.balance(&contract_address) < uncollected {
-            panic!("Insufficient fee token balance to collect fees");
+        let collateral_total = Self::get_total_collateral_for_asset(&env, &fee_token);
+        let available_fees = token_client
+            .balance(&contract_address)
+            .saturating_sub(collateral_total);
+        if available_fees < uncollected {
+            panic!("Insufficient unencumbered fee token balance to collect fees");
         }
 
         env.storage()
@@ -1186,6 +1194,14 @@ impl LendingContract {
 
         env.storage().persistent().set(&key, &new_entries);
 
+        let current_total = Self::get_total_collateral_for_asset(&env, &asset);
+        let new_total = current_total
+            .checked_add(amount)
+            .expect("Overflow updating total collateral");
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalCollateral(asset.clone()), &new_total);
+
         // Check if health factor improved after deposit (Issue #157)
         // If health factor is now >= 1.0, clear grace periods for all borrower's loans
         let health_factor = Self::get_health_factor(env.clone(), borrower.clone());
@@ -1295,6 +1311,14 @@ impl LendingContract {
             env.storage().persistent().set(&key, &new_entries);
         }
 
+        let current_total = Self::get_total_collateral_for_asset(&env, &asset);
+        let new_total = current_total
+            .checked_sub(amount)
+            .expect("Underflow updating total collateral");
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalCollateral(asset.clone()), &new_total);
+
         env.events().publish(
             (symbol_short!("collat"), symbol_short!("withdraw")),
             (borrower, asset, amount, remaining_amount),
@@ -1309,6 +1333,11 @@ impl LendingContract {
             .persistent()
             .get(&DataKey::UserCollateral(borrower))
             .unwrap_or(Vec::new(&env))
+    }
+
+    /// Return the aggregate collateral deposited across all borrowers for the given asset.
+    pub fn get_total_collateral(env: Env, asset: Address) -> i128 {
+        Self::get_total_collateral_for_asset(&env, &asset)
     }
 
     /// Get the total borrowing power for a borrower in the base asset's
@@ -1511,15 +1540,6 @@ impl LendingContract {
         env.storage()
             .persistent()
             .set(&DataKey::LoanReputationTier(loan_id), &reputation_tier);
-
-        let current_fees: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::UncollectedFees)
-            .unwrap_or(0);
-        env.storage()
-            .instance()
-            .set(&DataKey::UncollectedFees, &(current_fees + platform_fee));
 
         // Track per-borrower list
         Self::store_borrower_loan_id(&env, &borrower, loan_id);
@@ -1730,6 +1750,40 @@ impl LendingContract {
             }
         } else {
             loan.remaining_due -= amount;
+        }
+
+        // Accrue protocol fees only as interest payments are settled (Issue #457).
+        let total_interest = loan.total_due.saturating_sub(loan.amount);
+        let paid_after = loan.total_due.saturating_sub(loan.remaining_due);
+        let interest_settled = paid_after.saturating_sub(loan.amount);
+        let target_accrued_fee = if loan.remaining_due == 0 {
+            loan.platform_fee
+        } else if total_interest > 0 && interest_settled > 0 {
+            loan.platform_fee
+                .checked_mul(interest_settled)
+                .expect("Overflow computing settled platform fee")
+                / total_interest
+        } else {
+            0
+        };
+        let accrued_key = DataKey::LoanAccruedFee(loan_id);
+        let already_accrued: i128 = env.storage().persistent().get(&accrued_key).unwrap_or(0);
+        let newly_accrued = target_accrued_fee.saturating_sub(already_accrued);
+        if newly_accrued > 0 {
+            env.storage()
+                .persistent()
+                .set(&accrued_key, &target_accrued_fee);
+            let current_fees: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::UncollectedFees)
+                .unwrap_or(0);
+            let updated_fees = current_fees
+                .checked_add(newly_accrued)
+                .expect("Overflow updating uncollected fees");
+            env.storage()
+                .instance()
+                .set(&DataKey::UncollectedFees, &updated_fees);
         }
 
         env.storage()
@@ -2255,6 +2309,14 @@ impl LendingContract {
                 );
             }
         }
+    }
+
+    /// Read the aggregate collateral tracked for a single asset across all borrowers.
+    fn get_total_collateral_for_asset(env: &Env, asset: &Address) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalCollateral(asset.clone()))
+            .unwrap_or(0)
     }
 
     /// Compute borrowing power from a set of collateral entries.

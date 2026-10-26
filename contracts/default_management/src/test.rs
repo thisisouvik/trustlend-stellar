@@ -66,6 +66,7 @@ fn test_record_default() {
 fn test_insurance_payout() {
     let (env, contract_id, admin) = setup();
     let client = DefaultManagementContractClient::new(&env, &contract_id);
+    client.set_multisig_admin(&admin, &admin);
 
     let lender = Address::generate(&env);
     client.trigger_insurance_payout(&admin, &1, &lender, &5_000_000);
@@ -78,9 +79,62 @@ fn test_insurance_payout() {
 fn test_insurance_payout_insufficient_funds() {
     let (env, contract_id, admin) = setup();
     let client = DefaultManagementContractClient::new(&env, &contract_id);
+    client.set_multisig_admin(&admin, &admin);
 
     let lender = Address::generate(&env);
     client.trigger_insurance_payout(&admin, &1, &lender, &20_000_000);
+}
+
+#[test]
+#[should_panic(expected = "Multisig not configured")]
+fn test_insurance_payout_rejected_when_multisig_not_configured() {
+    let (env, contract_id, admin) = setup();
+    let client = DefaultManagementContractClient::new(&env, &contract_id);
+
+    let lender = Address::generate(&env);
+    client.trigger_insurance_payout(&admin, &1, &lender, &5_000_000);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorised: caller is not a multisig admin")]
+fn test_single_admin_cannot_trigger_insurance_payout_after_set_multisig_admin() {
+    let (env, contract_id, admin) = setup();
+    let client = DefaultManagementContractClient::new(&env, &contract_id);
+
+    let multisig = Address::generate(&env);
+    client.set_multisig_admin(&admin, &multisig);
+
+    let lender = Address::generate(&env);
+    client.trigger_insurance_payout(&admin, &1, &lender, &5_000_000);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorised: caller is not a multisig admin")]
+fn test_non_multisig_caller_cannot_trigger_insurance_payout() {
+    let (env, contract_id, admin) = setup();
+    let client = DefaultManagementContractClient::new(&env, &contract_id);
+
+    let multisig = Address::generate(&env);
+    client.set_multisig_admin(&admin, &multisig);
+
+    let stranger = Address::generate(&env);
+    let lender = Address::generate(&env);
+    client.trigger_insurance_payout(&stranger, &1, &lender, &5_000_000);
+}
+
+#[test]
+fn test_multisig_admin_can_trigger_insurance_payout_after_set_multisig_admin() {
+    let (env, contract_id, admin) = setup();
+    let client = DefaultManagementContractClient::new(&env, &contract_id);
+
+    let multisig = Address::generate(&env);
+    client.set_multisig_admin(&admin, &multisig);
+
+    let lender = Address::generate(&env);
+    client.trigger_insurance_payout(&multisig, &1, &lender, &5_000_000);
+
+    assert_eq!(client.get_insurance_balance(), 5_000_000);
+    assert_eq!(client.get_insurance_event_count(), 1);
 }
 
 // ─── Pausable / Multi-sig tests ──────────────────────────────────────────────

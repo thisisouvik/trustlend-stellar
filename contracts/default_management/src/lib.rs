@@ -329,7 +329,7 @@ impl DefaultManagementContract {
         amount: i128,
     ) {
         caller.require_auth();
-        Self::assert_admin(&env, &caller);
+        Self::assert_multisig_admin(&env, &caller);
         Self::assert_not_paused(&env);
 
         let balance = Self::get_insurance_balance(env.clone());

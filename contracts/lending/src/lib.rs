@@ -257,6 +257,8 @@ pub enum DataKey {
     CollateralConfig(Address),
     /// User's deposited collateral positions: map user -> Vec<CollateralEntry>.
     UserCollateral(Address),
+    /// Aggregate deposited collateral across all borrowers for an asset (Issue #457).
+    TotalCollateral(Address),
     /// Price oracle address that can post price feeds for collateral assets.
     PriceOracle,
     /// Aggregated oracle price samples for a collateral asset.
@@ -777,8 +779,12 @@ impl LendingContract {
             .expect("Fee token not configured");
         let token_client = token::Client::new(&env, &fee_token);
         let contract_address = env.current_contract_address();
-        if token_client.balance(&contract_address) < uncollected {
-            panic!("Insufficient fee token balance to collect fees");
+        let collateral_total = Self::get_total_collateral_for_asset(env.clone(), fee_token.clone());
+        let available_fees = token_client
+            .balance(&contract_address)
+            .saturating_sub(collateral_total);
+        if available_fees < uncollected {
+            panic!("Insufficient unencumbered fee token balance to collect fees");
         }
 
         env.storage()
@@ -1082,6 +1088,13 @@ impl LendingContract {
 
         env.storage().persistent().set(&key, &new_entries);
 
+        let total_key = DataKey::TotalCollateral(asset.clone());
+        let current_total: i128 = env.storage().persistent().get(&total_key).unwrap_or(0);
+        let updated_total = current_total
+            .checked_add(amount)
+            .expect("Overflow updating total collateral");
+        env.storage().persistent().set(&total_key, &updated_total);
+
         // Check if health factor improved after deposit (Issue #157)
         // If health factor is now >= 1.0, clear grace periods for all borrower's loans
         let health_factor = Self::get_health_factor(env.clone(), borrower.clone());
@@ -1184,6 +1197,17 @@ impl LendingContract {
             env.storage().persistent().set(&key, &new_entries);
         }
 
+        let total_key = DataKey::TotalCollateral(asset.clone());
+        let current_total: i128 = env.storage().persistent().get(&total_key).unwrap_or(0);
+        let updated_total = current_total
+            .checked_sub(amount)
+            .expect("Underflow updating total collateral");
+        if updated_total == 0 {
+            env.storage().persistent().remove(&total_key);
+        } else {
+            env.storage().persistent().set(&total_key, &updated_total);
+        }
+
         env.events().publish(
             (symbol_short!("collat"), symbol_short!("withdraw")),
             (borrower, asset, amount, remaining_amount),
@@ -1198,6 +1222,14 @@ impl LendingContract {
             .persistent()
             .get(&DataKey::UserCollateral(borrower))
             .unwrap_or(Vec::new(&env))
+    }
+
+    /// Get total deposited collateral across all borrowers for a given asset (Issue #457).
+    pub fn get_total_collateral_for_asset(env: Env, asset: Address) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::TotalCollateral(asset))
+            .unwrap_or(0)
     }
 
     /// Get the total borrowing power for a borrower in the base asset's
@@ -1378,15 +1410,6 @@ impl LendingContract {
             .persistent()
             .set(&DataKey::LoanReputationTier(loan_id), &reputation_tier);
 
-        let current_fees: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::UncollectedFees)
-            .unwrap_or(0);
-        env.storage()
-            .instance()
-            .set(&DataKey::UncollectedFees, &(current_fees + platform_fee));
-
         // Track per-borrower list
         Self::store_borrower_loan_id(&env, &borrower, loan_id);
 
@@ -1530,6 +1553,20 @@ impl LendingContract {
         if amount >= loan.remaining_due {
             loan.remaining_due = 0;
             loan.status = LoanStatus::Repaid;
+
+            if loan.platform_fee > 0 {
+                let current_fees: i128 = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::UncollectedFees)
+                    .unwrap_or(0);
+                let updated_fees = current_fees
+                    .checked_add(loan.platform_fee)
+                    .expect("Overflow accruing platform fees");
+                env.storage()
+                    .instance()
+                    .set(&DataKey::UncollectedFees, &updated_fees);
+            }
 
             // Distribute loyalty rewards if repaid on time
             let now = env.ledger().timestamp();

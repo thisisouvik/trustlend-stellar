@@ -3402,7 +3402,7 @@ fn setup_fee_collection(fund: bool) -> (Env, Address, Address, Address, Address,
     client.set_treasury(&admin, &treasury_id);
     client.set_fee_token(&admin, &fee_token);
 
-    client.create_loan_request(
+    let loan_id = client.create_loan_request(
         &borrower,
         &create_request_struct(
             &env,
@@ -3415,6 +3415,14 @@ fn setup_fee_collection(fund: bool) -> (Env, Address, Address, Address, Address,
             InterestRateModel::Fixed,
         ),
     );
+    // Fees do not accrue upfront before repayment (#457)
+    assert_eq!(client.get_uncollected_fees(), 0);
+    let lender = Address::generate(&env);
+    client.approve_loan(&lender, &loan_id, &1);
+    client.activate_loan(&admin, &loan_id);
+    let loan = client.get_loan(&loan_id);
+    client.record_payment(&admin, &loan_id, &loan.total_due);
+
     let uncollected = client.get_uncollected_fees();
     assert!(uncollected > 0);
     if fund {
@@ -3558,4 +3566,143 @@ fn test_sweep_cannot_take_uncollected_fees() {
 
     client.sweep_tokens(&admin, &fee_token, &recipient, &100);
     assert_eq!(token::Client::new(&env, &fee_token).balance(&contract_id), uncollected);
+}
+
+#[test]
+fn test_collect_fees_cannot_drain_depositor_collateral() {
+    let (env, contract_id, admin, borrower, _dummy_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Deploy a real SEP-41 asset contract that acts as both whitelisted collateral and fee token
+    let collateral_asset = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    client.whitelist_asset(&admin, &collateral_asset);
+    client.set_asset_collateral_config(
+        &admin,
+        &collateral_asset,
+        &AssetCollateralConfig {
+            collateral_factor_bps: DEFAULT_COLLATERAL_FACTOR_BPS,
+            has_price_oracle: true,
+            volatility_bps: 0,
+        },
+    );
+    client.set_asset_oracle_prices(&admin, &collateral_asset, &vec![&env, PRICE_PRECISION]);
+
+    let treasury_id = env.register(mock_treasury::MockTreasury, ());
+    client.set_treasury(&admin, &treasury_id);
+    client.set_fee_token(&admin, &collateral_asset);
+
+    // Borrower deposits 50,000 tokens of collateral
+    let collateral_deposit = 50_000_0000000i128;
+    mint_tokens(&env, &collateral_asset, &borrower, collateral_deposit);
+    client.deposit_collateral(&borrower, &collateral_asset, &collateral_deposit);
+    assert_eq!(
+        client.get_total_collateral_for_asset(&collateral_asset),
+        collateral_deposit
+    );
+
+    // Create, approve, activate, and repay a loan so platform fees accrue
+    let loan_id = client.create_loan_request(
+        &borrower,
+        &create_request_struct(
+            &env,
+            1_000_0000000,
+            30,
+            1000,
+            100_000_0000000,
+            &collateral_asset,
+            collateral_deposit,
+            InterestRateModel::Fixed,
+        ),
+    );
+    assert_eq!(client.get_uncollected_fees(), 0);
+
+    let lender = Address::generate(&env);
+    client.approve_loan(&lender, &loan_id, &1);
+    client.activate_loan(&admin, &loan_id);
+    let loan = client.get_loan(&loan_id);
+    client.record_payment(&admin, &loan_id, &loan.total_due);
+
+    let uncollected = client.get_uncollected_fees();
+    assert!(uncollected > 0);
+
+    // Contract holds only the borrower's collateral (no unencumbered fee tokens)
+    let token_client = token::Client::new(&env, &collateral_asset);
+    assert_eq!(token_client.balance(&contract_id), collateral_deposit);
+
+    // Fee collection must fail because all held tokens are encumbered collateral
+    assert!(client.try_collect_fees(&admin, &treasury_id).is_err());
+    assert_eq!(client.get_uncollected_fees(), uncollected);
+    assert_eq!(token_client.balance(&contract_id), collateral_deposit);
+    assert_eq!(token_client.balance(&treasury_id), 0);
+
+    // Borrower can still withdraw their full collateral position without panic
+    client.withdraw_collateral(&borrower, &collateral_asset, &collateral_deposit);
+    assert_eq!(client.get_total_collateral_for_asset(&collateral_asset), 0);
+    assert_eq!(token_client.balance(&borrower), collateral_deposit);
+}
+
+#[test]
+fn test_collect_fees_succeeds_when_unencumbered_fee_tokens_cover_accrual() {
+    let (env, contract_id, admin, borrower, _dummy_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let collateral_asset = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    client.whitelist_asset(&admin, &collateral_asset);
+    client.set_asset_collateral_config(
+        &admin,
+        &collateral_asset,
+        &AssetCollateralConfig {
+            collateral_factor_bps: DEFAULT_COLLATERAL_FACTOR_BPS,
+            has_price_oracle: true,
+            volatility_bps: 0,
+        },
+    );
+    client.set_asset_oracle_prices(&admin, &collateral_asset, &vec![&env, PRICE_PRECISION]);
+
+    let treasury_id = env.register(mock_treasury::MockTreasury, ());
+    client.set_treasury(&admin, &treasury_id);
+    client.set_fee_token(&admin, &collateral_asset);
+
+    let collateral_deposit = 50_000_0000000i128;
+    mint_tokens(&env, &collateral_asset, &borrower, collateral_deposit);
+    client.deposit_collateral(&borrower, &collateral_asset, &collateral_deposit);
+
+    let loan_id = client.create_loan_request(
+        &borrower,
+        &create_request_struct(
+            &env,
+            1_000_0000000,
+            30,
+            1000,
+            100_000_0000000,
+            &collateral_asset,
+            collateral_deposit,
+            InterestRateModel::Fixed,
+        ),
+    );
+    let lender = Address::generate(&env);
+    client.approve_loan(&lender, &loan_id, &1);
+    client.activate_loan(&admin, &loan_id);
+    let loan = client.get_loan(&loan_id);
+    client.record_payment(&admin, &loan_id, &loan.total_due);
+
+    let uncollected = client.get_uncollected_fees();
+    assert!(uncollected > 0);
+
+    // Fund the contract with the unencumbered fee tokens backing the accrual
+    mint_tokens(&env, &collateral_asset, &contract_id, uncollected);
+
+    let collected = client.collect_fees(&admin, &treasury_id);
+    assert_eq!(collected, uncollected);
+    assert_eq!(client.get_uncollected_fees(), 0);
+
+    // Depositor collateral remains 100% intact and withdrawable
+    let token_client = token::Client::new(&env, &collateral_asset);
+    assert_eq!(token_client.balance(&contract_id), collateral_deposit);
+    client.withdraw_collateral(&borrower, &collateral_asset, &collateral_deposit);
+    assert_eq!(token_client.balance(&borrower), collateral_deposit);
 }

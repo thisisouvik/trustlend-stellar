@@ -8,13 +8,29 @@ fn setup_test() -> (Env, Address, ZkCreditVerifierContractClient<'static>) {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(ZkCreditVerifierContract, ());
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ZkCreditVerifierContract, (&admin,));
     let client = ZkCreditVerifierContractClient::new(&env, &contract_id);
 
-    let admin = Address::generate(&env);
-    client.initialize(&admin);
-
     (env, admin, client)
+}
+
+#[test]
+#[should_panic(expected = "Contract already initialised")]
+fn test_cannot_reinitialize_after_constructor() {
+    let (env, _admin, client) = setup_test();
+    let attacker = Address::generate(&env);
+    client.initialize(&attacker);
+}
+
+#[test]
+fn test_initialize_requires_admin_auth() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ZkCreditVerifierContract, (&admin,));
+    let client = ZkCreditVerifierContractClient::new(&env, &contract_id);
+    let attacker = Address::generate(&env);
+    assert!(client.try_initialize(&attacker).is_err());
 }
 
 // ─── Provider helpers ─────────────────────────────────────────────────────────
@@ -375,9 +391,8 @@ fn test_proof_cannot_be_relabelled_to_another_provider() {
 #[test]
 fn test_proof_bound_to_verifier_contract() {
     let (env, admin, client) = setup_test();
-    let other_id = env.register(ZkCreditVerifierContract, ());
+    let other_id = env.register(ZkCreditVerifierContract, (&admin,));
     let other = ZkCreditVerifierContractClient::new(&env, &other_id);
-    other.initialize(&admin);
 
     let provider_id = String::from_str(&env, "zkTLS-Bank");
     let key = signing_key(11);

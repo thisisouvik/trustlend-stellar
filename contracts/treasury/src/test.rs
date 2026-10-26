@@ -27,16 +27,17 @@ fn setup_test() -> (
         .register_stellar_asset_contract_v2(token_admin)
         .address();
 
-    let treasury_id = env.register(TreasuryContract, ());
-    let client = TreasuryContractClient::new(&env, &treasury_id);
-
-    client.initialize(
-        &admin,
-        &insurance_fund,
-        &dao_treasury,
-        &DEFAULT_INSURANCE_SHARE_BPS,
-        &DEFAULT_DAO_SHARE_BPS,
+    let treasury_id = env.register(
+        TreasuryContract,
+        (
+            &admin,
+            &insurance_fund,
+            &dao_treasury,
+            &DEFAULT_INSURANCE_SHARE_BPS,
+            &DEFAULT_DAO_SHARE_BPS,
+        ),
     );
+    let client = TreasuryContractClient::new(&env, &treasury_id);
 
     (
         env,
@@ -67,6 +68,49 @@ fn test_initialize_treasury() {
 
     assert_eq!(client.get_total_collected_fees(), 0);
     assert_eq!(client.get_treasury_balance(&asset_token), 0);
+}
+
+#[test]
+#[should_panic(expected = "Treasury already initialised")]
+fn test_treasury_cannot_reinitialize_after_constructor() {
+    let (env, _admin, insurance_fund, dao_treasury, _asset_token, client) = setup_test();
+    let attacker = Address::generate(&env);
+    client.initialize(
+        &attacker,
+        &insurance_fund,
+        &dao_treasury,
+        &DEFAULT_INSURANCE_SHARE_BPS,
+        &DEFAULT_DAO_SHARE_BPS,
+    );
+}
+
+#[test]
+fn test_treasury_initialize_requires_admin_auth() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let insurance_fund = Address::generate(&env);
+    let dao_treasury = Address::generate(&env);
+    let treasury_id = env.register(
+        TreasuryContract,
+        (
+            &admin,
+            &insurance_fund,
+            &dao_treasury,
+            &DEFAULT_INSURANCE_SHARE_BPS,
+            &DEFAULT_DAO_SHARE_BPS,
+        ),
+    );
+    let client = TreasuryContractClient::new(&env, &treasury_id);
+    let attacker = Address::generate(&env);
+    assert!(client
+        .try_initialize(
+            &attacker,
+            &insurance_fund,
+            &dao_treasury,
+            &DEFAULT_INSURANCE_SHARE_BPS,
+            &DEFAULT_DAO_SHARE_BPS,
+        )
+        .is_err());
 }
 
 #[test]
@@ -157,9 +201,8 @@ fn setup_lending_with_fees(
     fee_token: &Address,
     fund: bool,
 ) -> (Address, i128) {
-    let lending_id = env.register(LendingContract, ());
+    let lending_id = env.register(LendingContract, (admin,));
     let lending = LendingContractClient::new(env, &lending_id);
-    lending.initialize(admin);
     lending.set_multisig_admin(admin, admin);
 
     let borrower = Address::generate(env);
@@ -177,10 +220,9 @@ fn setup_lending_with_fees(
     lending.set_asset_oracle_prices(admin, &collateral_asset, &vec![env, 10_000_000]);
 
     // Lending reads the borrower's credit limit from the reputation contract.
-    let reputation_id = env.register(borrower_reputation::BorrowerReputationContract, ());
+    let reputation_id = env.register(borrower_reputation::BorrowerReputationContract, (admin,));
     let reputation =
         borrower_reputation::BorrowerReputationContractClient::new(env, &reputation_id);
-    reputation.initialize(admin);
     reputation.init_borrower(&borrower);
     lending.set_reputation_contract(admin, &reputation_id);
 

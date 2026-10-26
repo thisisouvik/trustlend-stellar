@@ -28,20 +28,18 @@ fn setup<'a>() -> World<'a> {
     let carol = Address::generate(&env);
     let signers = [alice.clone(), bob.clone(), carol.clone()];
 
-    let msig_id = env.register(MultiSigAdminContract, ());
-    let msig = MultiSigAdminContractClient::new(&env, &msig_id);
     let mut signer_vec = Vec::new(&env);
     for s in &signers {
         signer_vec.push_back(s.clone());
     }
-    msig.initialize(&signer_vec, &THRESHOLD_2_OF_3);
+    let msig_id = env.register(MultiSigAdminContract, (signer_vec, THRESHOLD_2_OF_3));
+    let msig = MultiSigAdminContractClient::new(&env, &msig_id);
 
     // The lending contract's single admin bootstraps the link to the
     // multisig, then permanently loses direct access to the gated functions.
     let plain_admin = Address::generate(&env);
-    let lending_id = env.register(LendingContract, ());
+    let lending_id = env.register(LendingContract, (&plain_admin,));
     let lending = LendingContractClient::new(&env, &lending_id);
-    lending.initialize(&plain_admin);
     lending.set_multisig_admin(&plain_admin, &msig_id);
 
     World { env, signers, msig, lending, lending_id }
@@ -68,15 +66,27 @@ fn test_cannot_reinitialize() {
 }
 
 #[test]
+fn test_initialize_requires_first_signer_auth() {
+    let env = Env::default();
+    let signer = Address::generate(&env);
+    let mut v = Vec::new(&env);
+    v.push_back(signer);
+    let msig_id = env.register(MultiSigAdminContract, (v, 1_u32));
+    let msig = MultiSigAdminContractClient::new(&env, &msig_id);
+    let attacker = Address::generate(&env);
+    let mut attacker_v = Vec::new(&env);
+    attacker_v.push_back(attacker);
+    assert!(msig.try_initialize(&attacker_v, &1).is_err());
+}
+
+#[test]
 #[should_panic(expected = "Threshold must be between 1 and the number of signers")]
 fn test_initialize_rejects_zero_threshold() {
     let env = Env::default();
     env.mock_all_auths();
-    let msig_id = env.register(MultiSigAdminContract, ());
-    let msig = MultiSigAdminContractClient::new(&env, &msig_id);
     let mut v = Vec::new(&env);
     v.push_back(Address::generate(&env));
-    msig.initialize(&v, &0);
+    let _msig_id = env.register(MultiSigAdminContract, (v, 0_u32));
 }
 
 #[test]
@@ -84,11 +94,9 @@ fn test_initialize_rejects_zero_threshold() {
 fn test_initialize_rejects_threshold_above_signer_count() {
     let env = Env::default();
     env.mock_all_auths();
-    let msig_id = env.register(MultiSigAdminContract, ());
-    let msig = MultiSigAdminContractClient::new(&env, &msig_id);
     let mut v = Vec::new(&env);
     v.push_back(Address::generate(&env));
-    msig.initialize(&v, &2);
+    let _msig_id = env.register(MultiSigAdminContract, (v, 2_u32));
 }
 
 #[test]
@@ -96,13 +104,11 @@ fn test_initialize_rejects_threshold_above_signer_count() {
 fn test_initialize_rejects_duplicate_signers() {
     let env = Env::default();
     env.mock_all_auths();
-    let msig_id = env.register(MultiSigAdminContract, ());
-    let msig = MultiSigAdminContractClient::new(&env, &msig_id);
     let dup = Address::generate(&env);
     let mut v = Vec::new(&env);
     v.push_back(dup.clone());
     v.push_back(dup);
-    msig.initialize(&v, &1);
+    let _msig_id = env.register(MultiSigAdminContract, (v, 1_u32));
 }
 
 // ─── Core sequence: propose → approve (N times, distinct wallets) → execute ──────
@@ -189,9 +195,8 @@ fn test_setting_oracle_via_multisig() {
     let bob = w.signers[1].clone();
 
     let rep_admin = Address::generate(&w.env);
-    let rep_id = w.env.register(BorrowerReputationContract, ());
+    let rep_id = w.env.register(BorrowerReputationContract, (&rep_admin,));
     let rep = BorrowerReputationContractClient::new(&w.env, &rep_id);
-    rep.initialize(&rep_admin);
     rep.set_multisig_admin(&rep_admin, &w.msig.address);
 
     let oracle_addr = Address::generate(&w.env);
@@ -211,9 +216,8 @@ fn test_insurance_fund_add_and_payout_via_multisig() {
     let bob = w.signers[1].clone();
 
     let dm_admin = Address::generate(&w.env);
-    let dm_id = w.env.register(DefaultManagementContract, ());
+    let dm_id = w.env.register(DefaultManagementContract, (&dm_admin, &0_i128));
     let dm = default_management::DefaultManagementContractClient::new(&w.env, &dm_id);
-    dm.initialize(&dm_admin, &0);
     dm.set_multisig_admin(&dm_admin, &w.msig.address);
 
     // Fund the pool.

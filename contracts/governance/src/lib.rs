@@ -95,8 +95,55 @@ impl GovernanceContract {
     // ── Init / config ──────────────────────────────────────────────────────────
 
     #[allow(clippy::too_many_arguments)]
+    pub fn __constructor(
+        env: Env,
+        admin: Address,
+        lending: Address,
+        reputation: Address,
+        voting_period_secs: u64,
+        quorum_votes: i128,
+        min_proposer_power: i128,
+        max_fee_bps: u32,
+    ) {
+        Self::init_internal(
+            &env,
+            admin,
+            lending,
+            reputation,
+            voting_period_secs,
+            quorum_votes,
+            min_proposer_power,
+            max_fee_bps,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub fn initialize(
         env: Env,
+        admin: Address,
+        lending: Address,
+        reputation: Address,
+        voting_period_secs: u64,
+        quorum_votes: i128,
+        min_proposer_power: i128,
+        max_fee_bps: u32,
+    ) {
+        admin.require_auth();
+        Self::init_internal(
+            &env,
+            admin,
+            lending,
+            reputation,
+            voting_period_secs,
+            quorum_votes,
+            min_proposer_power,
+            max_fee_bps,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn init_internal(
+        env: &Env,
         admin: Address,
         lending: Address,
         reputation: Address,

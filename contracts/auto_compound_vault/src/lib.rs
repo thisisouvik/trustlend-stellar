@@ -38,9 +38,30 @@ pub struct AutoCompoundVaultContract;
 
 #[contractimpl]
 impl AutoCompoundVaultContract {
+    pub fn __constructor(
+        env: Env,
+        admin: Address,
+        asset_token: Address,
+        lending_contract: Address,
+        harvest_fee_bps: u32,
+    ) {
+        Self::init_internal(&env, admin, asset_token, lending_contract, harvest_fee_bps);
+    }
+
     /// Initialize the vault with configuration parameters.
     pub fn initialize(
         env: Env,
+        admin: Address,
+        asset_token: Address,
+        lending_contract: Address,
+        harvest_fee_bps: u32,
+    ) {
+        admin.require_auth();
+        Self::init_internal(&env, admin, asset_token, lending_contract, harvest_fee_bps);
+    }
+
+    fn init_internal(
+        env: &Env,
         admin: Address,
         asset_token: Address,
         lending_contract: Address,

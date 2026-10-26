@@ -31,31 +31,31 @@ fn setup<'a>() -> World<'a> {
     let admin = Address::generate(&env);
 
     // Reputation contract (voting power source).
-    let rep_id = env.register(BorrowerReputationContract, ());
+    let rep_id = env.register(BorrowerReputationContract, (&admin,));
     let rep = BorrowerReputationContractClient::new(&env, &rep_id);
-    rep.initialize(&admin);
 
     // Lending contract (fee parameter target).
-    let lending_id = env.register(LendingContract, ());
+    let lending_id = env.register(LendingContract, (&admin,));
     let lending = LendingContractClient::new(&env, &lending_id);
-    lending.initialize(&admin);
     // `set_governance` is multisig-gated (see the `multisig_admin` crate);
     // `admin` stands in as its own "multisig" here since this suite is
     // testing DAO voting, not the multisig approval flow itself.
     lending.set_multisig_admin(&admin, &admin);
 
     // Governance contract, wired to both.
-    let gov_id = env.register(GovernanceContract, ());
-    let gov = GovernanceContractClient::new(&env, &gov_id);
-    gov.initialize(
-        &admin,
-        &lending_id,
-        &rep_id,
-        &VOTING_PERIOD,
-        &QUORUM,
-        &MIN_PROPOSER_POWER,
-        &MAX_FEE_BPS,
+    let gov_id = env.register(
+        GovernanceContract,
+        (
+            &admin,
+            &lending_id,
+            &rep_id,
+            &VOTING_PERIOD,
+            &QUORUM,
+            &MIN_PROPOSER_POWER,
+            &MAX_FEE_BPS,
+        ),
     );
+    let gov = GovernanceContractClient::new(&env, &gov_id);
 
     // Link: only this governance contract may change the lending fee.
     lending.set_governance(&admin, &gov_id);
@@ -223,9 +223,57 @@ fn test_lending_fee_change_blocked_without_governance() {
     let env = Env::default();
     env.mock_all_auths();
     let admin = Address::generate(&env);
-    let lending_id = env.register(LendingContract, ());
+    let lending_id = env.register(LendingContract, (&admin,));
     let lending = LendingContractClient::new(&env, &lending_id);
-    lending.initialize(&admin);
     // No set_governance call → no on-chain path to change the fee.
     lending.set_platform_fee_bps(&admin, &200);
+}
+
+#[test]
+#[should_panic(expected = "Contract already initialised")]
+fn test_governance_cannot_reinitialize_after_constructor() {
+    let w = setup();
+    let attacker = Address::generate(&w.env);
+    let dummy = Address::generate(&w.env);
+    w.gov.initialize(
+        &attacker,
+        &dummy,
+        &dummy,
+        &VOTING_PERIOD,
+        &QUORUM,
+        &MIN_PROPOSER_POWER,
+        &MAX_FEE_BPS,
+    );
+}
+
+#[test]
+fn test_governance_initialize_requires_admin_auth() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let dummy = Address::generate(&env);
+    let gov_id = env.register(
+        GovernanceContract,
+        (
+            &admin,
+            &dummy,
+            &dummy,
+            &VOTING_PERIOD,
+            &QUORUM,
+            &MIN_PROPOSER_POWER,
+            &MAX_FEE_BPS,
+        ),
+    );
+    let gov = GovernanceContractClient::new(&env, &gov_id);
+    let attacker = Address::generate(&env);
+    assert!(gov
+        .try_initialize(
+            &attacker,
+            &dummy,
+            &dummy,
+            &VOTING_PERIOD,
+            &QUORUM,
+            &MIN_PROPOSER_POWER,
+            &MAX_FEE_BPS,
+        )
+        .is_err());
 }

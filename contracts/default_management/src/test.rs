@@ -7,11 +7,8 @@ fn setup() -> (Env, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(DefaultManagementContract, ());
-    let client = DefaultManagementContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
-    client.initialize(&admin, &10_000_000);
+    let contract_id = env.register(DefaultManagementContract, (&admin, &10_000_000_i128));
 
     (env, contract_id, admin)
 }
@@ -22,19 +19,36 @@ fn setup_with_multisig() -> (Env, Address, Address, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(DefaultManagementContract, ());
-    let client = DefaultManagementContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let signer1 = Address::generate(&env);
     let borrower = Address::generate(&env);
 
-    client.initialize(&admin, &10_000_000);
+    let contract_id = env.register(DefaultManagementContract, (&admin, &10_000_000_i128));
+    let client = DefaultManagementContractClient::new(&env, &contract_id);
 
     let admins = soroban_sdk::vec![&env, admin.clone(), signer1.clone()];
     client.setup_multisig(&admin, &admins, &2);
 
     (env, contract_id, admin, signer1, borrower)
+}
+
+#[test]
+#[should_panic(expected = "Contract already initialised")]
+fn test_def_cannot_reinitialize_after_constructor() {
+    let (env, contract_id, _admin) = setup();
+    let client = DefaultManagementContractClient::new(&env, &contract_id);
+    let attacker = Address::generate(&env);
+    client.initialize(&attacker, &0);
+}
+
+#[test]
+fn test_def_initialize_requires_admin_auth() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(DefaultManagementContract, (&admin, &10_000_000_i128));
+    let client = DefaultManagementContractClient::new(&env, &contract_id);
+    let attacker = Address::generate(&env);
+    assert!(client.try_initialize(&attacker, &0).is_err());
 }
 
 // ─── Basic tests ─────────────────────────────────────────────────────────────

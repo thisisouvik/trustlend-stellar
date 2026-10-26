@@ -69,7 +69,16 @@ pub struct DefaultManagementContract;
 impl DefaultManagementContract {
     // ── Admin ─────────────────────────────────────────────────────────────────
 
+    pub fn __constructor(env: Env, admin: Address, initial_insurance_balance: i128) {
+        Self::init_internal(&env, admin, initial_insurance_balance);
+    }
+
     pub fn initialize(env: Env, admin: Address, initial_insurance_balance: i128) {
+        admin.require_auth();
+        Self::init_internal(&env, admin, initial_insurance_balance);
+    }
+
+    fn init_internal(env: &Env, admin: Address, initial_insurance_balance: i128) {
         if env.storage().instance().has(&DataKey::Admin) {
             panic!("Contract already initialised");
         }

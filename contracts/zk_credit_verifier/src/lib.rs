@@ -95,8 +95,17 @@ pub struct ZkCreditVerifierContract;
 
 #[contractimpl]
 impl ZkCreditVerifierContract {
+    pub fn __constructor(env: Env, admin: Address) {
+        Self::init_internal(&env, admin);
+    }
+
     /// Initialize contract with admin address.
     pub fn initialize(env: Env, admin: Address) {
+        admin.require_auth();
+        Self::init_internal(&env, admin);
+    }
+
+    fn init_internal(env: &Env, admin: Address) {
         if env.storage().instance().has(&DataKey::Admin) {
             panic!("Contract already initialised");
         }

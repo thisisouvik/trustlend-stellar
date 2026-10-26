@@ -180,8 +180,17 @@ pub struct BorrowerReputationContract;
 impl BorrowerReputationContract {
     // ── Admin ─────────────────────────────────────────────────────────────────
 
+    pub fn __constructor(env: Env, admin: Address) {
+        Self::init_internal(&env, admin);
+    }
+
     /// One-time init — must be called right after deployment.
     pub fn initialize(env: Env, admin: Address) {
+        admin.require_auth();
+        Self::init_internal(&env, admin);
+    }
+
+    fn init_internal(env: &Env, admin: Address) {
         if env.storage().instance().has(&DataKey::Admin) {
             panic!("Contract already initialised");
         }

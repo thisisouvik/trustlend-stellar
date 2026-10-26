@@ -61,9 +61,46 @@ pub struct TreasuryContract;
 
 #[contractimpl]
 impl TreasuryContract {
+    pub fn __constructor(
+        env: Env,
+        admin: Address,
+        insurance_fund: Address,
+        dao_treasury: Address,
+        insurance_share_bps: u32,
+        dao_share_bps: u32,
+    ) {
+        Self::init_internal(
+            &env,
+            admin,
+            insurance_fund,
+            dao_treasury,
+            insurance_share_bps,
+            dao_share_bps,
+        );
+    }
+
     /// Initialize the Treasury with admin and destination configuration.
     pub fn initialize(
         env: Env,
+        admin: Address,
+        insurance_fund: Address,
+        dao_treasury: Address,
+        insurance_share_bps: u32,
+        dao_share_bps: u32,
+    ) {
+        admin.require_auth();
+        Self::init_internal(
+            &env,
+            admin,
+            insurance_fund,
+            dao_treasury,
+            insurance_share_bps,
+            dao_share_bps,
+        );
+    }
+
+    fn init_internal(
+        env: &Env,
         admin: Address,
         insurance_fund: Address,
         dao_treasury: Address,

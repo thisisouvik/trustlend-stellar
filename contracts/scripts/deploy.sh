@@ -53,14 +53,27 @@ stellar contract build
 echo "✔ Build complete"
 echo ""
 
-# ── Step 2: Deploy contracts ─────────────────────────────────────────────────
+# ── Step 2: Deploy and atomically initialise contracts via __constructor ──────
 # Order matters: Reputation + Escrow first (no deps), then Lending, then Default
+
+MULTISIG_SIGNERS="${MULTISIG_SIGNERS:-$ADMIN_ADDRESS}"
+MULTISIG_THRESHOLD="${MULTISIG_THRESHOLD:-1}"
+
+IFS=',' read -ra SIGNER_ARR <<< "$MULTISIG_SIGNERS"
+SIGNERS_JSON="["
+for i in "${!SIGNER_ARR[@]}"; do
+  [ "$i" -gt 0 ] && SIGNERS_JSON+=","
+  SIGNERS_JSON+="\"${SIGNER_ARR[$i]}\""
+done
+SIGNERS_JSON+="]"
 
 echo "▶ Deploying BorrowerReputationContract…"
 REPUTATION_ID=$(stellar contract deploy \
   --wasm target/wasm32v1-none/release/borrower_reputation.wasm \
   --network "$NETWORK" \
-  --source "$ADMIN_KEY")
+  --source "$ADMIN_KEY" \
+  -- \
+  --admin "$ADMIN_ADDRESS")
 echo "  ✔ REPUTATION_CONTRACT_ID = $REPUTATION_ID"
 
 echo ""
@@ -68,7 +81,9 @@ echo "▶ Deploying EscrowContract…"
 ESCROW_ID=$(stellar contract deploy \
   --wasm target/wasm32v1-none/release/escrow.wasm \
   --network "$NETWORK" \
-  --source "$ADMIN_KEY")
+  --source "$ADMIN_KEY" \
+  -- \
+  --admin "$ADMIN_ADDRESS")
 echo "  ✔ ESCROW_CONTRACT_ID = $ESCROW_ID"
 
 echo ""
@@ -76,7 +91,9 @@ echo "▶ Deploying LendingContract…"
 LENDING_ID=$(stellar contract deploy \
   --wasm target/wasm32v1-none/release/lending.wasm \
   --network "$NETWORK" \
-  --source "$ADMIN_KEY")
+  --source "$ADMIN_KEY" \
+  -- \
+  --admin "$ADMIN_ADDRESS")
 echo "  ✔ LENDING_CONTRACT_ID = $LENDING_ID"
 
 echo ""
@@ -84,7 +101,10 @@ echo "▶ Deploying DefaultManagementContract…"
 DEFAULT_ID=$(stellar contract deploy \
   --wasm target/wasm32v1-none/release/default_management.wasm \
   --network "$NETWORK" \
-  --source "$ADMIN_KEY")
+  --source "$ADMIN_KEY" \
+  -- \
+  --admin "$ADMIN_ADDRESS" \
+  --initial_insurance_balance 0)
 echo "  ✔ DEFAULT_CONTRACT_ID = $DEFAULT_ID"
 
 echo ""
@@ -92,15 +112,26 @@ echo "▶ Deploying GovernanceContract…"
 GOVERNANCE_ID=$(stellar contract deploy \
   --wasm target/wasm32v1-none/release/governance.wasm \
   --network "$NETWORK" \
-  --source "$ADMIN_KEY")
+  --source "$ADMIN_KEY" \
+  -- \
+  --admin "$ADMIN_ADDRESS" \
+  --lending "$LENDING_ID" \
+  --reputation "$REPUTATION_ID" \
+  --voting_period_secs 259200 \
+  --quorum_votes 500 \
+  --min_proposer_power 150 \
+  --max_fee_bps 1000)
 echo "  ✔ GOVERNANCE_CONTRACT_ID = $GOVERNANCE_ID"
 
 echo ""
-echo "▶ Deploying MultiSigAdminContract…"
+echo "▶ Deploying MultiSigAdminContract (${MULTISIG_THRESHOLD}-of-${#SIGNER_ARR[@]})…"
 MULTISIG_ID=$(stellar contract deploy \
   --wasm target/wasm32v1-none/release/multisig_admin.wasm \
   --network "$NETWORK" \
-  --source "$ADMIN_KEY")
+  --source "$ADMIN_KEY" \
+  -- \
+  --signers "$SIGNERS_JSON" \
+  --threshold "$MULTISIG_THRESHOLD")
 echo "  ✔ MULTISIG_ADMIN_CONTRACT_ID = $MULTISIG_ID"
 
 # ── TLEND governance token + distribution (issue #107) ───────────────────────
@@ -129,33 +160,9 @@ TLEND_AIRDROP_ID=$(stellar contract deploy \
   --source "$ADMIN_KEY")
 echo "  ✔ TLEND_AIRDROP_CONTRACT_ID = $TLEND_AIRDROP_ID"
 
-# ── Step 3: Initialise contracts ──────────────────────────────────────────────
+# ── Step 3: Wire contracts together ───────────────────────────────────────────
 
 echo ""
-echo "▶ Initialising BorrowerReputationContract…"
-stellar contract invoke \
-  --id "$REPUTATION_ID" \
-  --source "$ADMIN_KEY" \
-  --network "$NETWORK" \
-  -- initialize \
-  --admin "$ADMIN_ADDRESS"
-
-echo "▶ Initialising EscrowContract…"
-stellar contract invoke \
-  --id "$ESCROW_ID" \
-  --source "$ADMIN_KEY" \
-  --network "$NETWORK" \
-  -- initialize \
-  --admin "$ADMIN_ADDRESS"
-
-echo "▶ Initialising LendingContract…"
-stellar contract invoke \
-  --id "$LENDING_ID" \
-  --source "$ADMIN_KEY" \
-  --network "$NETWORK" \
-  -- initialize \
-  --admin "$ADMIN_ADDRESS"
-
 # Lending reads every borrower's tier and credit limit from the reputation
 # contract (Issue #335); loan requests are rejected until this link exists.
 echo "▶ Linking LendingContract → BorrowerReputationContract…"
@@ -166,59 +173,6 @@ stellar contract invoke \
   -- set_reputation_contract \
   --admin "$ADMIN_ADDRESS" \
   --reputation "$REPUTATION_ID"
-
-echo "▶ Initialising DefaultManagementContract (insurance_balance = 0)…"
-stellar contract invoke \
-  --id "$DEFAULT_ID" \
-  --source "$ADMIN_KEY" \
-  --network "$NETWORK" \
-  -- initialize \
-  --admin "$ADMIN_ADDRESS" \
-  --initial_insurance_balance 0
-
-# Governance: 3-day voting window, quorum 500, min proposer power 150 (Silver),
-# fee cap 1000 bps (10 %). Voting power = reputation score.
-echo "▶ Initialising GovernanceContract…"
-stellar contract invoke \
-  --id "$GOVERNANCE_ID" \
-  --source "$ADMIN_KEY" \
-  --network "$NETWORK" \
-  -- initialize \
-  --admin "$ADMIN_ADDRESS" \
-  --lending "$LENDING_ID" \
-  --reputation "$REPUTATION_ID" \
-  --voting_period_secs 259200 \
-  --quorum_votes 500 \
-  --min_proposer_power 150 \
-  --max_fee_bps 1000
-
-# ── Multi-Sig Admin (issue #73) ────────────────────────────────────────────────
-# Comma-separated G... signer addresses + how many must approve before a rare,
-# high-impact config change (whitelisting assets, fee tables, linking
-# governance/oracle, moving insurance funds) executes. Defaults to a 1-of-1
-# multisig using the deploying admin alone — expand the signer set later via
-# the contract's own AddSigner/SetThreshold actions.
-#   export MULTISIG_SIGNERS="G...,G...,G..."
-#   export MULTISIG_THRESHOLD=2
-MULTISIG_SIGNERS="${MULTISIG_SIGNERS:-$ADMIN_ADDRESS}"
-MULTISIG_THRESHOLD="${MULTISIG_THRESHOLD:-1}"
-
-IFS=',' read -ra SIGNER_ARR <<< "$MULTISIG_SIGNERS"
-SIGNERS_JSON="["
-for i in "${!SIGNER_ARR[@]}"; do
-  [ "$i" -gt 0 ] && SIGNERS_JSON+=","
-  SIGNERS_JSON+="\"${SIGNER_ARR[$i]}\""
-done
-SIGNERS_JSON+="]"
-
-echo "▶ Initialising MultiSigAdminContract (${MULTISIG_THRESHOLD}-of-${#SIGNER_ARR[@]})…"
-stellar contract invoke \
-  --id "$MULTISIG_ID" \
-  --source "$ADMIN_KEY" \
-  --network "$NETWORK" \
-  -- initialize \
-  --signers "$SIGNERS_JSON" \
-  --threshold "$MULTISIG_THRESHOLD"
 
 echo "▶ Linking MultiSigAdmin → Lending, Default Management, Reputation…"
 stellar contract invoke --id "$LENDING_ID" --source "$ADMIN_KEY" --network "$NETWORK" \

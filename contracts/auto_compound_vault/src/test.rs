@@ -14,11 +14,38 @@ fn setup_test() -> (Env, Address, Address, Address, Address, AutoCompoundVaultCo
     let asset_token_id = env.register_stellar_asset_contract_v2(token_admin.clone()).address();
     let lending_id = Address::generate(&env);
 
-    let vault_id = env.register(AutoCompoundVaultContract, ());
+    let vault_id = env.register(
+        AutoCompoundVaultContract,
+        (&admin, &asset_token_id, &lending_id, &100_u32),
+    );
     let client = AutoCompoundVaultContractClient::new(&env, &vault_id);
-    client.initialize(&admin, &asset_token_id, &lending_id, &100); // 1% harvest fee
 
     (env, admin, asset_token_id, lending_id, vault_id, client)
+}
+
+#[test]
+#[should_panic(expected = "Vault already initialised")]
+fn test_vault_cannot_reinitialize_after_constructor() {
+    let (env, _admin, asset_token_id, lending_id, _vault_id, client) = setup_test();
+    let attacker = Address::generate(&env);
+    client.initialize(&attacker, &asset_token_id, &lending_id, &100);
+}
+
+#[test]
+fn test_vault_initialize_requires_admin_auth() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let asset_token_id = Address::generate(&env);
+    let lending_id = Address::generate(&env);
+    let vault_id = env.register(
+        AutoCompoundVaultContract,
+        (&admin, &asset_token_id, &lending_id, &100_u32),
+    );
+    let client = AutoCompoundVaultContractClient::new(&env, &vault_id);
+    let attacker = Address::generate(&env);
+    assert!(client
+        .try_initialize(&attacker, &asset_token_id, &lending_id, &100)
+        .is_err());
 }
 
 fn mint_tokens(env: &Env, asset_token: &Address, recipient: &Address, amount: i128) {

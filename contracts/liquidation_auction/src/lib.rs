@@ -49,11 +49,13 @@ pub struct LiquidationAuctionContract;
 
 #[contractimpl]
 impl LiquidationAuctionContract {
+    pub fn __constructor(env: Env, admin: Address) {
+        Self::init_internal(&env, admin);
+    }
+
     pub fn initialize(env: Env, admin: Address) {
-        if env.storage().instance().has(&DataKey::Admin) {
-            panic!("Contract already initialised");
-        }
-        env.storage().instance().set(&DataKey::Admin, &admin);
+        admin.require_auth();
+        Self::init_internal(&env, admin);
     }
 
     pub fn start_auction(
@@ -244,6 +246,13 @@ impl LiquidationAuctionContract {
         }
 
         auction
+    }
+
+    fn init_internal(env: &Env, admin: Address) {
+        if env.storage().instance().has(&DataKey::Admin) {
+            panic!("Contract already initialised");
+        }
+        env.storage().instance().set(&DataKey::Admin, &admin);
     }
 
     fn assert_admin(env: &Env, caller: &Address) {

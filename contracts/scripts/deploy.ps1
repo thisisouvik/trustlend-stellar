@@ -19,16 +19,21 @@ $ADMIN_ADDRESS = (stellar keys address $ADMIN_KEY).Trim()
 
 Write-Host "Admin Address: $ADMIN_ADDRESS"
 
-function Deploy-Contract([string]$name, [string]$wasmPath) {
+function Deploy-Contract([string]$name, [string]$wasmPath, [string[]]$ctorArgs = @()) {
     Write-Host "Deploying $name..."
     $maxRetries = 3
     $retryCount = 0
     while ($retryCount -lt $maxRetries) {
         try {
-            $id = (stellar contract deploy --wasm $wasmPath --network $NETWORK --source $ADMIN_KEY 2>&1 | Select-String "C[A-Z0-9]{55}").Matches.Value | Select-Object -Last 1
+            $deployArgs = @("contract", "deploy", "--wasm", $wasmPath, "--network", $NETWORK, "--source", $ADMIN_KEY)
+            if ($ctorArgs.Count -gt 0) {
+                $deployArgs += "--"
+                $deployArgs += $ctorArgs
+            }
+            $id = (stellar @deployArgs 2>&1 | Select-String "C[A-Z0-9]{55}").Matches.Value | Select-Object -Last 1
             if ([string]::IsNullOrWhiteSpace($id)) {
                 # Fallback extraction if not outputting just the ID
-                $output = stellar contract deploy --wasm $wasmPath --network $NETWORK --source $ADMIN_KEY
+                $output = stellar @deployArgs
                 $id = $output.Trim()
             }
             if (![string]::IsNullOrWhiteSpace($id)) {
@@ -44,39 +49,17 @@ function Deploy-Contract([string]$name, [string]$wasmPath) {
     throw "Failed to deploy $name after 3 attempts."
 }
 
-$REPUTATION_ID = Deploy-Contract "BorrowerReputation" "target/wasm32v1-none/release/borrower_reputation.wasm"
-$ESCROW_ID = Deploy-Contract "Escrow" "target/wasm32v1-none/release/escrow.wasm"
-$LENDING_ID = Deploy-Contract "Lending" "target/wasm32v1-none/release/lending.wasm"
-$DEFAULT_ID = Deploy-Contract "DefaultManagement" "target/wasm32v1-none/release/default_management.wasm"
-$GOVERNANCE_ID = Deploy-Contract "Governance" "target/wasm32v1-none/release/governance.wasm"
-$MULTISIG_ID = Deploy-Contract "MultiSigAdmin" "target/wasm32v1-none/release/multisig_admin.wasm"
-
-Write-Host "Initializing Reputation..."
-stellar contract invoke --id $REPUTATION_ID --source $ADMIN_KEY --network $NETWORK -- initialize --admin $ADMIN_ADDRESS
-
-Write-Host "Initializing Escrow..."
-stellar contract invoke --id $ESCROW_ID --source $ADMIN_KEY --network $NETWORK -- initialize --admin $ADMIN_ADDRESS
-
-Write-Host "Initializing Lending..."
-stellar contract invoke --id $LENDING_ID --source $ADMIN_KEY --network $NETWORK -- initialize --admin $ADMIN_ADDRESS
-
-Write-Host "Initializing Default Management..."
-stellar contract invoke --id $DEFAULT_ID --source $ADMIN_KEY --network $NETWORK -- initialize --admin $ADMIN_ADDRESS --initial_insurance_balance 0
-
-Write-Host "Initializing Governance..."
-stellar contract invoke --id $GOVERNANCE_ID --source $ADMIN_KEY --network $NETWORK -- initialize --admin $ADMIN_ADDRESS --lending $LENDING_ID --reputation $REPUTATION_ID --voting_period_secs 259200 --quorum_votes 500 --min_proposer_power 150 --max_fee_bps 1000
-
-# Multi-Sig Admin (issue #73): comma-separated signers + threshold. Defaults
-# to a 1-of-1 multisig using the deploying admin alone.
-#   $env:MULTISIG_SIGNERS = "G...,G...,G..."
-#   $env:MULTISIG_THRESHOLD = "2"
 $MultisigSigners = if ($env:MULTISIG_SIGNERS) { $env:MULTISIG_SIGNERS } else { $ADMIN_ADDRESS }
 $MultisigThreshold = if ($env:MULTISIG_THRESHOLD) { $env:MULTISIG_THRESHOLD } else { "1" }
 $SignerArr = $MultisigSigners -split ","
 $SignersJson = "[" + (($SignerArr | ForEach-Object { "`"$_`"" }) -join ",") + "]"
 
-Write-Host "Initializing MultiSigAdmin ($MultisigThreshold-of-$($SignerArr.Count))..."
-stellar contract invoke --id $MULTISIG_ID --source $ADMIN_KEY --network $NETWORK -- initialize --signers $SignersJson --threshold $MultisigThreshold
+$REPUTATION_ID = Deploy-Contract "BorrowerReputation" "target/wasm32v1-none/release/borrower_reputation.wasm" @("--admin", $ADMIN_ADDRESS)
+$ESCROW_ID = Deploy-Contract "Escrow" "target/wasm32v1-none/release/escrow.wasm" @("--admin", $ADMIN_ADDRESS)
+$LENDING_ID = Deploy-Contract "Lending" "target/wasm32v1-none/release/lending.wasm" @("--admin", $ADMIN_ADDRESS)
+$DEFAULT_ID = Deploy-Contract "DefaultManagement" "target/wasm32v1-none/release/default_management.wasm" @("--admin", $ADMIN_ADDRESS, "--initial_insurance_balance", "0")
+$GOVERNANCE_ID = Deploy-Contract "Governance" "target/wasm32v1-none/release/governance.wasm" @("--admin", $ADMIN_ADDRESS, "--lending", $LENDING_ID, "--reputation", $REPUTATION_ID, "--voting_period_secs", "259200", "--quorum_votes", "500", "--min_proposer_power", "150", "--max_fee_bps", "1000")
+$MULTISIG_ID = Deploy-Contract "MultiSigAdmin" "target/wasm32v1-none/release/multisig_admin.wasm" @("--signers", $SignersJson, "--threshold", $MultisigThreshold)
 
 Write-Host "Linking MultiSigAdmin to Lending, Default Management, Reputation..."
 stellar contract invoke --id $LENDING_ID --source $ADMIN_KEY --network $NETWORK -- set_multisig_admin --admin $ADMIN_ADDRESS --multisig $MULTISIG_ID

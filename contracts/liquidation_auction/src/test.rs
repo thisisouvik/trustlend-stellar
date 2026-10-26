@@ -10,16 +10,32 @@ fn setup() -> (Env, Address, Address, Address, Address) {
     env.mock_all_auths();
     env.ledger().set_timestamp(START_TIMESTAMP);
 
-    let contract_id = env.register(LiquidationAuctionContract, ());
-    let client = LiquidationAuctionContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
     let bidder = Address::generate(&env);
 
-    client.initialize(&admin);
+    let contract_id = env.register(LiquidationAuctionContract, (&admin,));
 
     (env, contract_id, admin, borrower, bidder)
+}
+
+#[test]
+#[should_panic(expected = "Contract already initialised")]
+fn test_cannot_reinitialize_after_constructor() {
+    let (env, contract_id, _admin, _borrower, _bidder) = setup();
+    let client = LiquidationAuctionContractClient::new(&env, &contract_id);
+    let attacker = Address::generate(&env);
+    client.initialize(&attacker);
+}
+
+#[test]
+fn test_initialize_requires_admin_auth() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(LiquidationAuctionContract, (&admin,));
+    let client = LiquidationAuctionContractClient::new(&env, &contract_id);
+    let attacker = Address::generate(&env);
+    assert!(client.try_initialize(&attacker).is_err());
 }
 
 #[test]

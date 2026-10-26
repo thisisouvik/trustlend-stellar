@@ -402,7 +402,97 @@ function buildContracts(): void {
   log.ok("Build complete");
 }
 
-function deployContract(spec: ContractSpec, options: Options): string {
+function constructorArgsFor(
+  key: string,
+  ids: Record<string, string>,
+  adminAddress: string,
+  options: Options
+): string[] {
+  const xlm = nativeAssetContractId(options.network);
+
+  switch (key) {
+    case "reputation":
+    case "escrow":
+    case "lending":
+    case "liquidation_auction":
+    case "zk_credit_verifier":
+      return ["--admin", adminAddress];
+
+    case "default_management":
+      return ["--admin", adminAddress, "--initial_insurance_balance", "0"];
+
+    case "governance": {
+      if (!ids.lending || !ids.reputation) {
+        die(
+          "GovernanceContract needs the lending and reputation contracts.",
+          "Deploy them in the same run, or re-run with --resume so their ids are reused."
+        );
+      }
+      return [
+        "--admin", adminAddress,
+        "--lending", ids.lending,
+        "--reputation", ids.reputation,
+        "--voting_period_secs", "259200",
+        "--quorum_votes", "500",
+        "--min_proposer_power", "150",
+        "--max_fee_bps", "1000",
+      ];
+    }
+
+    case "multisig_admin": {
+      const signers = (process.env.MULTISIG_SIGNERS ?? adminAddress)
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      const threshold = process.env.MULTISIG_THRESHOLD ?? "1";
+      if (Number(threshold) < 1 || Number(threshold) > signers.length) {
+        die(
+          `MULTISIG_THRESHOLD=${threshold} is invalid for ${signers.length} signer(s).`,
+          "It must be between 1 and the number of entries in MULTISIG_SIGNERS."
+        );
+      }
+      return ["--signers", JSON.stringify(signers), "--threshold", threshold];
+    }
+
+    case "treasury": {
+      const insuranceFund =
+        process.env.INSURANCE_FUND_ADDRESS ?? ids.default_management ?? adminAddress;
+      const daoTreasury = process.env.DAO_TREASURY_ADDRESS ?? adminAddress;
+      return [
+        "--admin", adminAddress,
+        "--insurance_fund", insuranceFund,
+        "--dao_treasury", daoTreasury,
+        "--insurance_share_bps", "5000",
+        "--dao_share_bps", "5000",
+      ];
+    }
+
+    case "auto_compound_vault": {
+      if (!ids.lending) {
+        die(
+          "AutoCompoundVaultContract needs the lending contract.",
+          "Deploy it in the same run, or re-run with --resume so its id is reused."
+        );
+      }
+      return [
+        "--admin", adminAddress,
+        "--asset_token", xlm,
+        "--lending_contract", ids.lending,
+        "--harvest_fee_bps", "100",
+      ];
+    }
+
+    default:
+      return [];
+  }
+}
+
+function deployContract(
+  spec: ContractSpec,
+  ids: Record<string, string>,
+  adminAddress: string,
+  options: Options
+): string {
   const wasmPath = path.join(WASM_DIR, spec.wasm);
 
   if (!DRY_RUN && !fs.existsSync(wasmPath)) {
@@ -414,20 +504,20 @@ function deployContract(spec: ContractSpec, options: Options): string {
     );
   }
 
-  const id = run(
-    "stellar",
-    [
-      "contract",
-      "deploy",
-      "--wasm",
-      wasmPath,
-      "--network",
-      options.network,
-      "--source",
-      options.adminKey,
-    ],
-    { capture: true, cwd: CONTRACTS_DIR }
-  );
+  const ctorArgs = constructorArgsFor(spec.key, ids, adminAddress, options);
+  const deployArgs = [
+    "contract",
+    "deploy",
+    "--wasm",
+    wasmPath,
+    "--network",
+    options.network,
+    "--source",
+    options.adminKey,
+    ...(ctorArgs.length > 0 ? ["--", ...ctorArgs] : []),
+  ];
+
+  const id = run("stellar", deployArgs, { capture: true, cwd: CONTRACTS_DIR });
 
   // The CLI can emit progress lines before the id; the id is the last line.
   const contractId = id.split(/\r?\n/).filter(Boolean).pop() ?? "";
@@ -473,21 +563,18 @@ function initializeContracts(
 ): void {
   const has = (key: string) => Boolean(ids[key]);
 
-  log.step("Initializing contracts…");
+  log.step("Initializing and linking contracts…");
 
   if (has("reputation")) {
-    invoke(ids.reputation, "initialize", ["--admin", adminAddress], options);
-    log.ok("BorrowerReputationContract initialized");
+    log.ok("BorrowerReputationContract initialized via __constructor");
   }
 
   if (has("escrow")) {
-    invoke(ids.escrow, "initialize", ["--admin", adminAddress], options);
-    log.ok("EscrowContract initialized");
+    log.ok("EscrowContract initialized via __constructor");
   }
 
   if (has("lending")) {
-    invoke(ids.lending, "initialize", ["--admin", adminAddress], options);
-    log.ok("LendingContract initialized");
+    log.ok("LendingContract initialized via __constructor");
 
     // Loan requests read each borrower's tier and credit limit from the
     // reputation contract (Issue #335) and are rejected until it is linked.
@@ -505,13 +592,7 @@ function initializeContracts(
   }
 
   if (has("default_management")) {
-    invoke(
-      ids.default_management,
-      "initialize",
-      ["--admin", adminAddress, "--initial_insurance_balance", "0"],
-      options
-    );
-    log.ok("DefaultManagementContract initialized (insurance balance 0)");
+    log.ok("DefaultManagementContract initialized via __constructor (insurance balance 0)");
   }
 
   if (has("pooled_lending")) {
@@ -535,30 +616,7 @@ function initializeContracts(
   }
 
   if (has("governance")) {
-    if (!has("lending") || !has("reputation")) {
-      die(
-        "GovernanceContract needs the lending and reputation contracts.",
-        "Deploy them in the same run, or re-run with --resume so their ids are reused."
-      );
-    }
-
-    // 3-day voting window, quorum 500, min proposer power 150 (Silver tier),
-    // fee cap 1000 bps (10%). Voting power = reputation score.
-    invoke(
-      ids.governance,
-      "initialize",
-      [
-        "--admin", adminAddress,
-        "--lending", ids.lending,
-        "--reputation", ids.reputation,
-        "--voting_period_secs", "259200",
-        "--quorum_votes", "500",
-        "--min_proposer_power", "150",
-        "--max_fee_bps", "1000",
-      ],
-      options
-    );
-    log.ok("GovernanceContract initialized");
+    log.ok("GovernanceContract initialized via __constructor");
   }
 
   if (has("multisig_admin")) {
@@ -675,21 +733,7 @@ function initializeSatellites(
   }
 
   if (has("treasury")) {
-    const insuranceFund = process.env.INSURANCE_FUND_ADDRESS ?? ids.default_management ?? adminAddress;
-    const daoTreasury = process.env.DAO_TREASURY_ADDRESS ?? adminAddress;
-    invoke(
-      ids.treasury,
-      "initialize",
-      [
-        "--admin", adminAddress,
-        "--insurance_fund", insuranceFund,
-        "--dao_treasury", daoTreasury,
-        "--insurance_share_bps", "5000",
-        "--dao_share_bps", "5000",
-      ],
-      options
-    );
-    log.ok("TreasuryContract initialized (50/50 insurance / DAO split)");
+    log.ok("TreasuryContract initialized via __constructor (50/50 insurance / DAO split)");
 
     if (has("lending")) {
       // Platform fees are paid in XLM and can only be collected into this
@@ -707,28 +751,15 @@ function initializeSatellites(
   }
 
   if (has("auto_compound_vault") && has("lending")) {
-    invoke(
-      ids.auto_compound_vault,
-      "initialize",
-      [
-        "--admin", adminAddress,
-        "--asset_token", xlm,
-        "--lending_contract", ids.lending,
-        "--harvest_fee_bps", "100",
-      ],
-      options
-    );
-    log.ok("AutoCompoundVaultContract initialized (1% harvest fee)");
+    log.ok("AutoCompoundVaultContract initialized via __constructor (1% harvest fee)");
   }
 
   if (has("liquidation_auction")) {
-    invoke(ids.liquidation_auction, "initialize", ["--admin", adminAddress], options);
-    log.ok("LiquidationAuctionContract initialized");
+    log.ok("LiquidationAuctionContract initialized via __constructor");
   }
 
   if (has("zk_credit_verifier")) {
-    invoke(ids.zk_credit_verifier, "initialize", ["--admin", adminAddress], options);
-    log.ok("ZkCreditVerifierContract initialized");
+    log.ok("ZkCreditVerifierContract initialized via __constructor");
   }
 
   if (has("usdc_lending_pool")) {
@@ -759,20 +790,7 @@ function initializeMultisig(
     .filter(Boolean);
   const threshold = process.env.MULTISIG_THRESHOLD ?? "1";
 
-  if (Number(threshold) < 1 || Number(threshold) > signers.length) {
-    die(
-      `MULTISIG_THRESHOLD=${threshold} is invalid for ${signers.length} signer(s).`,
-      "It must be between 1 and the number of entries in MULTISIG_SIGNERS."
-    );
-  }
-
-  invoke(
-    ids.multisig_admin,
-    "initialize",
-    ["--signers", JSON.stringify(signers), "--threshold", threshold],
-    options
-  );
-  log.ok(`MultiSigAdminContract initialized (${threshold}-of-${signers.length})`);
+  log.ok(`MultiSigAdminContract initialized via __constructor (${threshold}-of-${signers.length})`);
 
   // Hand the gated admin operations over to the multisig.
   for (const key of ["lending", "default_management", "reputation"]) {
@@ -1053,7 +1071,7 @@ async function main(): Promise<void> {
     log.step(`Deploying ${toDeploy.length} contract(s) to ${options.network}…`);
 
     for (const spec of toDeploy) {
-      const id = deployContract(spec, options);
+      const id = deployContract(spec, ids, adminAddress, options);
       ids[spec.key] = id;
       log.ok(`${spec.label} → ${id}`);
 

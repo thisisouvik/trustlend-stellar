@@ -14,16 +14,32 @@ fn setup() -> (Env, Address, Address, Address, Address) {
     env.mock_all_auths();
     env.ledger().set_timestamp(START_TIMESTAMP);
 
-    let contract_id = env.register(EscrowContract, ());
-    let client = EscrowContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let lender = Address::generate(&env);
     let borrower = Address::generate(&env);
 
-    client.initialize(&admin);
+    let contract_id = env.register(EscrowContract, (&admin,));
 
     (env, contract_id, admin, lender, borrower)
+}
+
+#[test]
+#[should_panic(expected = "Contract already initialised")]
+fn test_escrow_cannot_reinitialize_after_constructor() {
+    let (env, contract_id, _admin, _lender, _borrower) = setup();
+    let client = EscrowContractClient::new(&env, &contract_id);
+    let attacker = Address::generate(&env);
+    client.initialize(&attacker);
+}
+
+#[test]
+fn test_escrow_initialize_requires_admin_auth() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(EscrowContract, (&admin,));
+    let client = EscrowContractClient::new(&env, &contract_id);
+    let attacker = Address::generate(&env);
+    assert!(client.try_initialize(&attacker).is_err());
 }
 
 #[test]
@@ -156,15 +172,13 @@ fn setup_with_multisig() -> (Env, Address, Address, Address, Address, Address) {
     env.mock_all_auths();
     env.ledger().set_timestamp(START_TIMESTAMP);
 
-    let contract_id = env.register(EscrowContract, ());
-    let client = EscrowContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let lender = Address::generate(&env);
     let borrower = Address::generate(&env);
     let signer1 = Address::generate(&env);
 
-    client.initialize(&admin);
+    let contract_id = env.register(EscrowContract, (&admin,));
+    let client = EscrowContractClient::new(&env, &contract_id);
 
     let admins = soroban_sdk::vec![&env, admin.clone(), signer1.clone()];
     client.setup_multisig(&admin, &admins, &2);

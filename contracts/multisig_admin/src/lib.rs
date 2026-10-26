@@ -99,11 +99,23 @@ pub struct MultiSigAdminContract;
 impl MultiSigAdminContract {
     // ── Init ─────────────────────────────────────────────────────────────────────
 
+    pub fn __constructor(env: Env, signers: Vec<Address>, threshold: u32) {
+        Self::init_internal(&env, signers, threshold);
+    }
+
     /// Bootstrap the initial signer set + approval threshold. One-time only —
     /// membership changes thereafter go through `propose`/`approve`/`execute`
     /// (`AddSigner` / `RemoveSigner` / `SetThreshold`), same as every other
     /// admin action this contract protects.
     pub fn initialize(env: Env, signers: Vec<Address>, threshold: u32) {
+        if signers.is_empty() {
+            panic!("At least one signer is required");
+        }
+        signers.get(0).unwrap().require_auth();
+        Self::init_internal(&env, signers, threshold);
+    }
+
+    fn init_internal(env: &Env, signers: Vec<Address>, threshold: u32) {
         if env.storage().instance().has(&DataKey::Signers) {
             panic!("Contract already initialised");
         }

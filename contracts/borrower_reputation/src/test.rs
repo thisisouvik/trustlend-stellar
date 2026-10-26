@@ -7,13 +7,12 @@ fn setup() -> (Env, Address, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(BorrowerReputationContract, ());
-    let client = BorrowerReputationContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
 
-    client.initialize(&admin);
+    let contract_id = env.register(BorrowerReputationContract, (&admin,));
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+
     client.init_borrower(&borrower);
 
     (env, contract_id, admin, borrower)
@@ -22,24 +21,39 @@ fn setup() -> (Env, Address, Address, Address) {
 #[test]
 fn test_initialization() {
     let env = Env::default();
-    let contract_id = env.register(BorrowerReputationContract, ());
-    let client = BorrowerReputationContractClient::new(&env, &contract_id);
-    
     let admin = Address::generate(&env);
-    client.initialize(&admin);
+    let contract_id = env.register(BorrowerReputationContract, (&admin,));
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
 
     assert_eq!(client.get_admin(), admin);
+}
+
+#[test]
+#[should_panic(expected = "Contract already initialised")]
+fn test_rep_cannot_reinitialize_after_constructor() {
+    let (env, contract_id, _admin, _borrower) = setup();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+    let attacker = Address::generate(&env);
+    client.initialize(&attacker);
+}
+
+#[test]
+fn test_rep_initialize_requires_admin_auth() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(BorrowerReputationContract, (&admin,));
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+    let attacker = Address::generate(&env);
+    assert!(client.try_initialize(&attacker).is_err());
 }
 
 #[test]
 fn test_default_tier() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(BorrowerReputationContract, ());
-    let client = BorrowerReputationContractClient::new(&env, &contract_id);
-    
     let admin = Address::generate(&env);
-    client.initialize(&admin);
+    let contract_id = env.register(BorrowerReputationContract, (&admin,));
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
 
     let borrower = Address::generate(&env);
     client.init_borrower(&borrower);
@@ -165,14 +179,12 @@ fn setup_with_oracle() -> (Env, Address, Address, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(BorrowerReputationContract, ());
-    let client = BorrowerReputationContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let oracle = Address::generate(&env);
     let borrower = Address::generate(&env);
 
-    client.initialize(&admin);
+    let contract_id = env.register(BorrowerReputationContract, (&admin,));
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
     // `set_oracle` is multisig-gated via `assert_multisig_admin`, which checks
     // the `MultisigAdmins` Vec. We configure a single-admin multisig so the
     // guard passes; this suite focuses on oracle ingestion, not multisig flow.
@@ -328,14 +340,13 @@ fn setup_with_multisig() -> (Env, Address, Address, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(BorrowerReputationContract, ());
-    let client = BorrowerReputationContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
     let signer1 = Address::generate(&env);
 
-    client.initialize(&admin);
+    let contract_id = env.register(BorrowerReputationContract, (&admin,));
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+
     client.init_borrower(&borrower);
 
     let admins = soroban_sdk::vec![&env, admin.clone(), signer1.clone()];

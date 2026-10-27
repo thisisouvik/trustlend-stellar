@@ -257,6 +257,16 @@ pub enum DataKey {
     CollateralConfig(Address),
     /// User's deposited collateral positions: map user -> Vec<CollateralEntry>.
     UserCollateral(Address),
+    /// Aggregate deposited collateral per asset across all borrowers (Issue #457).
+    TotalCollateral(Address),
+    /// Whether a borrower's legacy `UserCollateral` has been backfilled into `TotalCollateral`.
+    CollateralBackfilled(Address),
+    /// Explicit migration-complete flag gating `collect_fees` until legacy `UserCollateral` is backfilled.
+    CollateralMigrationComplete,
+    /// Platform fee already accrued into UncollectedFees for a given loan ID (Issue #457).
+    LoanAccruedFee(u32),
+    /// Whether legacy loans have been migrated to settled-interest fee accounting.
+    LoanFeeMigrationComplete,
     /// Price oracle address that can post price feeds for collateral assets.
     PriceOracle,
     /// Aggregated oracle price samples for a collateral asset.
@@ -341,6 +351,12 @@ impl LendingContract {
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::LoanCount, &0u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::CollateralMigrationComplete, &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::LoanFeeMigrationComplete, &true);
         // Whitelist XLM as default collateral asset (using dummy address for now)
         // In real implementation, we'd use the native asset identifier
         env.storage()
@@ -349,10 +365,74 @@ impl LendingContract {
     }
 
     /// Upgrade the contract's code while preserving its storage.
+    /// Marks legacy collateral migration as incomplete (unless already completed)
+    /// and reconciles legacy loan fee accounting.
     pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) {
         caller.require_auth();
         Self::assert_admin(&env, &caller);
+        if !Self::is_collateral_migration_complete(&env) {
+            env.storage()
+                .instance()
+                .set(&DataKey::CollateralMigrationComplete, &false);
+        }
+        Self::ensure_legacy_loan_fees_migrated(&env);
         env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+
+    /// Backfill legacy `UserCollateral` positions into `TotalCollateral` across
+    /// all known loan borrowers and any additional `users` supplied by the admin.
+    /// Sets `CollateralMigrationComplete` only when `complete` is `true`.
+    pub fn migrate_legacy_collateral(
+        env: Env,
+        caller: Address,
+        users: Vec<Address>,
+        complete: bool,
+    ) {
+        caller.require_auth();
+        Self::assert_admin(&env, &caller);
+        Self::ensure_legacy_loan_fees_migrated(&env);
+
+        let loan_count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::LoanCount)
+            .unwrap_or(0);
+        for loan_id in 1..=loan_count {
+            if let Some(loan) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, LoanRecord>(&DataKey::Loan(loan_id))
+            {
+                Self::ensure_user_collateral_backfilled(&env, &loan.borrower);
+            }
+        }
+
+        for user in users.iter() {
+            Self::ensure_user_collateral_backfilled(&env, &user);
+        }
+
+        if complete {
+            env.storage()
+                .instance()
+                .set(&DataKey::CollateralMigrationComplete, &true);
+        } else if !Self::is_collateral_migration_complete(&env) {
+            env.storage()
+                .instance()
+                .set(&DataKey::CollateralMigrationComplete, &false);
+        }
+    }
+
+    /// Reconcile legacy loans' `LoanAccruedFee` entries and `UncollectedFees`
+    /// from persisted settled-interest state.
+    pub fn migrate_legacy_loans(env: Env, caller: Address) {
+        caller.require_auth();
+        Self::assert_admin(&env, &caller);
+        Self::ensure_legacy_loan_fees_migrated(&env);
+    }
+
+    /// Return whether the legacy `UserCollateral` backfill is complete.
+    pub fn is_collateral_migrated(env: Env) -> bool {
+        Self::is_collateral_migration_complete(&env)
     }
 
     /// Configure multi-sig admin set for pause/unpause.
@@ -707,6 +787,7 @@ impl LendingContract {
     }
 
     pub fn get_uncollected_fees(env: Env) -> i128 {
+        Self::ensure_legacy_loan_fees_migrated(&env);
         env.storage()
             .instance()
             .get(&DataKey::UncollectedFees)
@@ -764,6 +845,10 @@ impl LendingContract {
         if treasury_address != treasury {
             panic!("Fees can only be collected to the configured treasury");
         }
+        if !Self::is_collateral_migration_complete(&env) {
+            panic!("Collateral migration not complete: backfill legacy UserCollateral before collecting fees");
+        }
+        Self::ensure_legacy_loan_fees_migrated(&env);
 
         let uncollected: i128 = Self::get_uncollected_fees(env.clone());
         if uncollected <= 0 {
@@ -777,8 +862,12 @@ impl LendingContract {
             .expect("Fee token not configured");
         let token_client = token::Client::new(&env, &fee_token);
         let contract_address = env.current_contract_address();
-        if token_client.balance(&contract_address) < uncollected {
-            panic!("Insufficient fee token balance to collect fees");
+        let collateral_total = Self::get_total_collateral_for_asset(&env, &fee_token);
+        let available_fees = token_client
+            .balance(&contract_address)
+            .saturating_sub(collateral_total);
+        if available_fees < uncollected {
+            panic!("Insufficient unencumbered fee token balance to collect fees");
         }
 
         env.storage()
@@ -1043,6 +1132,8 @@ impl LendingContract {
             panic!("Asset is not whitelisted");
         }
 
+        Self::ensure_user_collateral_backfilled(&env, &borrower);
+
         let token_client = token::Client::new(&env, &asset);
         token_client.transfer(&borrower, &env.current_contract_address(), &amount);
 
@@ -1081,6 +1172,14 @@ impl LendingContract {
         }
 
         env.storage().persistent().set(&key, &new_entries);
+
+        let current_total = Self::get_total_collateral_for_asset(&env, &asset);
+        let new_total = current_total
+            .checked_add(amount)
+            .expect("Overflow updating total collateral");
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalCollateral(asset.clone()), &new_total);
 
         // Check if health factor improved after deposit (Issue #157)
         // If health factor is now >= 1.0, clear grace periods for all borrower's loans
@@ -1124,6 +1223,8 @@ impl LendingContract {
         if amount <= 0 {
             panic!("Withdrawal amount must be positive");
         }
+
+        Self::ensure_user_collateral_backfilled(&env, &borrower);
 
         let key = DataKey::UserCollateral(borrower.clone());
         let entries: Vec<CollateralEntry> = env
@@ -1184,6 +1285,14 @@ impl LendingContract {
             env.storage().persistent().set(&key, &new_entries);
         }
 
+        let current_total = Self::get_total_collateral_for_asset(&env, &asset);
+        let new_total = current_total
+            .checked_sub(amount)
+            .expect("Underflow updating total collateral");
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalCollateral(asset.clone()), &new_total);
+
         env.events().publish(
             (symbol_short!("collat"), symbol_short!("withdraw")),
             (borrower, asset, amount, remaining_amount),
@@ -1198,6 +1307,11 @@ impl LendingContract {
             .persistent()
             .get(&DataKey::UserCollateral(borrower))
             .unwrap_or(Vec::new(&env))
+    }
+
+    /// Return the aggregate collateral deposited across all borrowers for the given asset.
+    pub fn get_total_collateral(env: Env, asset: Address) -> i128 {
+        Self::get_total_collateral_for_asset(&env, &asset)
     }
 
     /// Get the total borrowing power for a borrower in the base asset's
@@ -1377,15 +1491,9 @@ impl LendingContract {
         env.storage()
             .persistent()
             .set(&DataKey::LoanReputationTier(loan_id), &reputation_tier);
-
-        let current_fees: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::UncollectedFees)
-            .unwrap_or(0);
         env.storage()
-            .instance()
-            .set(&DataKey::UncollectedFees, &(current_fees + platform_fee));
+            .persistent()
+            .set(&DataKey::LoanAccruedFee(loan_id), &0i128);
 
         // Track per-borrower list
         Self::store_borrower_loan_id(&env, &borrower, loan_id);
@@ -1561,6 +1669,32 @@ impl LendingContract {
             }
         } else {
             loan.remaining_due -= amount;
+        }
+
+        // Ensure legacy loans created before Issue #457 have their settled fee
+        // baseline and `UncollectedFees` reconciled before accruing new fees.
+        Self::ensure_legacy_loan_fees_migrated(&env);
+
+        // Accrue protocol fees only as interest payments are settled (Issue #457).
+        let target_accrued_fee = Self::compute_settled_fee_for_loan(&loan);
+        let accrued_key = DataKey::LoanAccruedFee(loan_id);
+        let already_accrued: i128 = env.storage().persistent().get(&accrued_key).unwrap_or(0);
+        let newly_accrued = target_accrued_fee.saturating_sub(already_accrued).max(0);
+        if newly_accrued > 0 {
+            env.storage()
+                .persistent()
+                .set(&accrued_key, &target_accrued_fee);
+            let current_fees: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::UncollectedFees)
+                .unwrap_or(0);
+            let updated_fees = current_fees
+                .checked_add(newly_accrued)
+                .expect("Overflow updating uncollected fees");
+            env.storage()
+                .instance()
+                .set(&DataKey::UncollectedFees, &updated_fees);
         }
 
         env.storage()
@@ -1973,6 +2107,153 @@ impl LendingContract {
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /// Read the aggregate collateral tracked for a single asset across all borrowers.
+    fn get_total_collateral_for_asset(env: &Env, asset: &Address) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalCollateral(asset.clone()))
+            .unwrap_or(0)
+    }
+
+    /// Check whether the legacy `UserCollateral` backfill has been completed.
+    fn is_collateral_migration_complete(env: &Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::CollateralMigrationComplete)
+            .unwrap_or(false)
+    }
+
+    /// Backfill a single borrower's pre-upgrade `UserCollateral` entries into
+    /// `TotalCollateral` once, guarded by `DataKey::CollateralBackfilled`.
+    fn ensure_user_collateral_backfilled(env: &Env, borrower: &Address) {
+        let backfilled_key = DataKey::CollateralBackfilled(borrower.clone());
+        let already_backfilled: bool = env
+            .storage()
+            .persistent()
+            .get(&backfilled_key)
+            .unwrap_or(false);
+        if already_backfilled {
+            return;
+        }
+        if !Self::is_collateral_migration_complete(env) {
+            let entries: Vec<CollateralEntry> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::UserCollateral(borrower.clone()))
+                .unwrap_or(Vec::new(env));
+            for entry in entries.iter() {
+                if entry.amount > 0 {
+                    let current_total = Self::get_total_collateral_for_asset(env, &entry.asset);
+                    let new_total = current_total
+                        .checked_add(entry.amount)
+                        .expect("Overflow backfilling total collateral");
+                    env.storage()
+                        .instance()
+                        .set(&DataKey::TotalCollateral(entry.asset.clone()), &new_total);
+                }
+            }
+        }
+        env.storage().persistent().set(&backfilled_key, &true);
+    }
+
+    /// Compute the platform fee share corresponding to settled interest for `loan`.
+    fn compute_settled_fee_for_loan(loan: &LoanRecord) -> i128 {
+        let total_interest = loan.total_due.saturating_sub(loan.amount).max(0);
+        let paid_so_far = loan.total_due.saturating_sub(loan.remaining_due).max(0);
+        let interest_settled = paid_so_far.saturating_sub(loan.amount).max(0);
+        if loan.remaining_due == 0 || loan.status == LoanStatus::Repaid {
+            loan.platform_fee
+        } else if total_interest > 0 && interest_settled > 0 {
+            loan.platform_fee
+                .checked_mul(interest_settled)
+                .expect("Overflow computing settled platform fee")
+                / total_interest
+        } else {
+            0
+        }
+    }
+
+    /// Reconcile legacy loans missing `DataKey::LoanAccruedFee(loan_id)` by
+    /// deriving each loan's accrued fee from its persisted settled-interest state
+    /// and removing still-uncollected creation-time fees from `UncollectedFees`.
+    /// Accounts for lack of per-loan collection history by crediting any
+    /// already-collected unearned fee portion into the legacy loans' `LoanAccruedFee`
+    /// baseline so previously collected fees are neither underflowed nor re-collected.
+    fn ensure_legacy_loan_fees_migrated(env: &Env) {
+        let migrated: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::LoanFeeMigrationComplete)
+            .unwrap_or(false);
+        if migrated {
+            return;
+        }
+
+        let loan_count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::LoanCount)
+            .unwrap_or(0);
+
+        let mut total_unearned: i128 = 0;
+        for loan_id in 1..=loan_count {
+            let accrued_key = DataKey::LoanAccruedFee(loan_id);
+            if !env.storage().persistent().has(&accrued_key) {
+                if let Some(loan) = env
+                    .storage()
+                    .persistent()
+                    .get::<DataKey, LoanRecord>(&DataKey::Loan(loan_id))
+                {
+                    let settled_fee = Self::compute_settled_fee_for_loan(&loan);
+                    let unearned = loan.platform_fee.saturating_sub(settled_fee).max(0);
+                    total_unearned = total_unearned
+                        .checked_add(unearned)
+                        .expect("Overflow summing legacy unearned fees");
+                }
+            }
+        }
+
+        let current_uncollected: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::UncollectedFees)
+            .unwrap_or(0);
+        let uncollected_unearned = current_uncollected.min(total_unearned).max(0);
+        let mut remaining_already_collected_unearned =
+            total_unearned.saturating_sub(current_uncollected).max(0);
+        let reconciled_uncollected = current_uncollected.saturating_sub(uncollected_unearned).max(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::UncollectedFees, &reconciled_uncollected);
+
+        for loan_id in 1..=loan_count {
+            let accrued_key = DataKey::LoanAccruedFee(loan_id);
+            if !env.storage().persistent().has(&accrued_key) {
+                if let Some(loan) = env
+                    .storage()
+                    .persistent()
+                    .get::<DataKey, LoanRecord>(&DataKey::Loan(loan_id))
+                {
+                    let settled_fee = Self::compute_settled_fee_for_loan(&loan);
+                    let unearned = loan.platform_fee.saturating_sub(settled_fee).max(0);
+                    let credit = unearned.min(remaining_already_collected_unearned).max(0);
+                    remaining_already_collected_unearned =
+                        remaining_already_collected_unearned.saturating_sub(credit).max(0);
+                    let baseline_accrued = settled_fee
+                        .checked_add(credit)
+                        .expect("Overflow computing legacy loan accrued fee");
+                    env.storage()
+                        .persistent()
+                        .set(&accrued_key, &baseline_accrued);
+                }
+            }
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::LoanFeeMigrationComplete, &true);
+    }
 
     /// Compute borrowing power from a set of collateral entries.
     ///

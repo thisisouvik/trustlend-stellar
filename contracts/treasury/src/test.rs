@@ -189,8 +189,8 @@ fn setup_lending_with_fees(
     lending.set_fee_token(admin, fee_token);
     treasury.set_lending_contract(admin, &lending_id);
 
-    // Create loan request (accrues platform fee)
-    lending.create_loan_request(
+    // Create, activate, and repay loan so platform fee is settled
+    let loan_id = lending.create_loan_request(
         &borrower,
         &LoanRequestInput {
             amount: 1_000_0000000,
@@ -208,6 +208,11 @@ fn setup_lending_with_fees(
             reputation_tier: 0,
         },
     );
+    let lender = Address::generate(env);
+    lending.approve_loan(&lender, &loan_id, &1);
+    lending.activate_loan(admin, &loan_id);
+    let loan = lending.get_loan(&loan_id);
+    lending.record_payment(admin, &loan_id, &loan.total_due);
 
     let uncollected = lending.get_uncollected_fees();
     assert!(uncollected > 0);

@@ -3402,7 +3402,7 @@ fn setup_fee_collection(fund: bool) -> (Env, Address, Address, Address, Address,
     client.set_treasury(&admin, &treasury_id);
     client.set_fee_token(&admin, &fee_token);
 
-    client.create_loan_request(
+    let loan_id = client.create_loan_request(
         &borrower,
         &create_request_struct(
             &env,
@@ -3415,6 +3415,12 @@ fn setup_fee_collection(fund: bool) -> (Env, Address, Address, Address, Address,
             InterestRateModel::Fixed,
         ),
     );
+    let lender = Address::generate(&env);
+    client.approve_loan(&lender, &loan_id, &1);
+    client.activate_loan(&admin, &loan_id);
+    let loan = client.get_loan(&loan_id);
+    client.record_payment(&admin, &loan_id, &loan.total_due);
+
     let uncollected = client.get_uncollected_fees();
     assert!(uncollected > 0);
     if fund {
@@ -3558,4 +3564,387 @@ fn test_sweep_cannot_take_uncollected_fees() {
 
     client.sweep_tokens(&admin, &fee_token, &recipient, &100);
     assert_eq!(token::Client::new(&env, &fee_token).balance(&contract_id), uncollected);
+}
+
+// ─── Collateral conservation & fee collection guard tests (Issue #457) ────────
+
+/// Verify `TotalCollateral(asset)` increments on deposit and decrements on withdrawal.
+#[test]
+fn test_total_collateral_tracks_deposits_and_withdrawals() {
+    let (env, contract_id, _admin, borrower, collateral_asset, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+    let borrower2 = Address::generate(&env);
+
+    assert_eq!(client.get_total_collateral(&collateral_asset), 0);
+
+    mint_tokens(&env, &collateral_asset, &borrower2, 300_0000000);
+
+    client.deposit_collateral(&borrower, &collateral_asset, &500_0000000);
+    assert_eq!(client.get_total_collateral(&collateral_asset), 500_0000000);
+
+    client.deposit_collateral(&borrower2, &collateral_asset, &300_0000000);
+    assert_eq!(client.get_total_collateral(&collateral_asset), 800_0000000);
+
+    client.withdraw_collateral(&borrower, &collateral_asset, &200_0000000);
+    assert_eq!(client.get_total_collateral(&collateral_asset), 600_0000000);
+
+    client.withdraw_collateral(&borrower2, &collateral_asset, &300_0000000);
+    assert_eq!(client.get_total_collateral(&collateral_asset), 300_0000000);
+}
+
+/// Verify protocol fees do not accrue at loan request creation or activation,
+/// and only accrue when interest payments are settled in `record_payment`.
+#[test]
+fn test_fees_accrue_only_when_interest_payments_settled() {
+    let (env, contract_id, admin, borrower, collateral_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+    let lender = Address::generate(&env);
+
+    let loan_id = client.create_loan_request(
+        &borrower,
+        &create_request_struct(
+            &env,
+            1_000_0000000,
+            30,
+            1000,
+            100_000_0000000,
+            &collateral_asset,
+            100_000_0000000,
+            InterestRateModel::Fixed,
+        ),
+    );
+    assert_eq!(client.get_uncollected_fees(), 0);
+
+    client.approve_loan(&lender, &loan_id, &1);
+    assert_eq!(client.get_uncollected_fees(), 0);
+
+    client.activate_loan(&admin, &loan_id);
+    assert_eq!(client.get_uncollected_fees(), 0);
+
+    let loan = client.get_loan(&loan_id);
+    // Partial payment covering only principal settles 0 interest -> 0 fee accrued.
+    client.record_payment(&admin, &loan_id, &loan.amount);
+    assert_eq!(client.get_uncollected_fees(), 0);
+
+    // Settling the remaining interest accrues the full platform_fee.
+    let remaining_interest = loan.total_due - loan.amount;
+    client.record_payment(&admin, &loan_id, &remaining_interest);
+    assert_eq!(client.get_uncollected_fees(), loan.platform_fee);
+}
+
+/// Verify `collect_fees` fails when the contract balance consists only of
+/// depositor collateral (when `FeeToken` is also a whitelisted collateral asset).
+#[test]
+fn test_collect_fees_fails_when_balance_is_only_depositor_collateral() {
+    let (env, contract_id, admin, borrower, collateral_asset, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &collateral_asset);
+    let lender = Address::generate(&env);
+
+    let treasury_id = env.register(mock_treasury::MockTreasury, ());
+    client.set_treasury(&admin, &treasury_id);
+    // Configure the whitelisted collateral asset (e.g. XLM) as the fee token.
+    client.set_fee_token(&admin, &collateral_asset);
+
+    let collateral_deposit: i128 = 2_000_0000000;
+    let borrower_before = token_client.balance(&borrower);
+    client.deposit_collateral(&borrower, &collateral_asset, &collateral_deposit);
+    assert_eq!(client.get_total_collateral(&collateral_asset), collateral_deposit);
+    assert_eq!(token_client.balance(&contract_id), collateral_deposit);
+
+    let loan_id = client.create_loan_request(
+        &borrower,
+        &create_request_struct(
+            &env,
+            1_000_0000000,
+            30,
+            1000,
+            100_000_0000000,
+            &collateral_asset,
+            collateral_deposit,
+            InterestRateModel::Fixed,
+        ),
+    );
+    client.approve_loan(&lender, &loan_id, &1);
+    client.activate_loan(&admin, &loan_id);
+    let loan = client.get_loan(&loan_id);
+    client.record_payment(&admin, &loan_id, &loan.total_due);
+
+    let uncollected = client.get_uncollected_fees();
+    assert!(uncollected > 0);
+
+    // Contract holds `collateral_deposit` tokens, all of which belong to the depositor.
+    // Attempting to collect protocol fees must fail rather than draining collateral.
+    assert!(client.try_collect_fees(&admin, &treasury_id).is_err());
+    assert!(client.try_collect_fees(&treasury_id, &treasury_id).is_err());
+    assert_eq!(client.get_uncollected_fees(), uncollected);
+    assert_eq!(token_client.balance(&contract_id), collateral_deposit);
+    assert_eq!(token_client.balance(&treasury_id), 0);
+
+    // Once the loan is repaid, the borrower can withdraw their full collateral.
+    client.withdraw_collateral(&borrower, &collateral_asset, &collateral_deposit);
+    assert_eq!(token_client.balance(&borrower), borrower_before);
+    assert_eq!(client.get_total_collateral(&collateral_asset), 0);
+}
+
+/// Verify `collect_fees` succeeds when unencumbered fee tokens exist above
+/// `TotalCollateral(fee_token)`, while preserving all depositor collateral.
+#[test]
+fn test_collect_fees_succeeds_with_unencumbered_tokens_preserving_collateral() {
+    let (env, contract_id, admin, borrower, collateral_asset, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &collateral_asset);
+    let lender = Address::generate(&env);
+
+    let treasury_id = env.register(mock_treasury::MockTreasury, ());
+    client.set_treasury(&admin, &treasury_id);
+    client.set_fee_token(&admin, &collateral_asset);
+
+    let collateral_deposit: i128 = 2_000_0000000;
+    let borrower_before = token_client.balance(&borrower);
+    client.deposit_collateral(&borrower, &collateral_asset, &collateral_deposit);
+
+    let loan_id = client.create_loan_request(
+        &borrower,
+        &create_request_struct(
+            &env,
+            1_000_0000000,
+            30,
+            1000,
+            100_000_0000000,
+            &collateral_asset,
+            collateral_deposit,
+            InterestRateModel::Fixed,
+        ),
+    );
+    client.approve_loan(&lender, &loan_id, &1);
+    client.activate_loan(&admin, &loan_id);
+    let loan = client.get_loan(&loan_id);
+    client.record_payment(&admin, &loan_id, &loan.total_due);
+
+    let uncollected = client.get_uncollected_fees();
+    // Fund the contract with the actual fee tokens backing the accrual.
+    mint_tokens(&env, &collateral_asset, &contract_id, uncollected);
+
+    let collected = client.collect_fees(&admin, &treasury_id);
+    assert_eq!(collected, uncollected);
+    assert_eq!(client.get_uncollected_fees(), 0);
+    assert_eq!(token_client.balance(&treasury_id), uncollected);
+    assert_eq!(token_client.balance(&contract_id), collateral_deposit);
+
+    // Borrower can still withdraw their full collateral deposit.
+    client.withdraw_collateral(&borrower, &collateral_asset, &collateral_deposit);
+    assert_eq!(token_client.balance(&borrower), borrower_before);
+}
+
+/// Verify `collect_fees` is blocked after an upgrade until `migrate_legacy_collateral`
+/// finishes backfilling legacy `UserCollateral` and sets `CollateralMigrationComplete`.
+#[test]
+fn test_collect_fees_gated_on_collateral_migration_complete() {
+    let (env, contract_id, admin, borrower, collateral_asset, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &collateral_asset);
+    let lender = Address::generate(&env);
+
+    let treasury_id = env.register(mock_treasury::MockTreasury, ());
+    client.set_treasury(&admin, &treasury_id);
+    client.set_fee_token(&admin, &collateral_asset);
+
+    let collateral_deposit: i128 = 2_000_0000000;
+    client.deposit_collateral(&borrower, &collateral_asset, &collateral_deposit);
+
+    let loan_id = client.create_loan_request(
+        &borrower,
+        &create_request_struct(
+            &env,
+            1_000_0000000,
+            30,
+            1000,
+            100_000_0000000,
+            &collateral_asset,
+            collateral_deposit,
+            InterestRateModel::Fixed,
+        ),
+    );
+    client.approve_loan(&lender, &loan_id, &1);
+    client.activate_loan(&admin, &loan_id);
+    let loan = client.get_loan(&loan_id);
+    client.record_payment(&admin, &loan_id, &loan.total_due);
+    let uncollected = client.get_uncollected_fees();
+
+    // Simulate legacy pre-upgrade state: `UserCollateral(borrower)` exists,
+    // but `TotalCollateral`, `CollateralBackfilled`, and `CollateralMigrationComplete` are absent.
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .instance()
+            .remove(&DataKey::TotalCollateral(collateral_asset.clone()));
+        env.storage()
+            .instance()
+            .remove(&DataKey::CollateralMigrationComplete);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::CollateralBackfilled(borrower.clone()));
+    });
+
+    assert!(!client.is_collateral_migrated());
+    assert_eq!(client.get_total_collateral(&collateral_asset), 0);
+
+    // Even before TotalCollateral is backfilled, `collect_fees` is blocked by the migration flag.
+    assert!(client.try_collect_fees(&admin, &treasury_id).is_err());
+
+    // Partial migration batch (`complete = false`) backfills TotalCollateral but keeps collection gated.
+    client.migrate_legacy_collateral(&admin, &vec![&env, borrower.clone()], &false);
+    assert!(!client.is_collateral_migrated());
+    assert_eq!(client.get_total_collateral(&collateral_asset), collateral_deposit);
+    assert!(client.try_collect_fees(&admin, &treasury_id).is_err());
+
+    // Completing migration (`complete = true`) is idempotent on TotalCollateral and unlocks collection.
+    client.migrate_legacy_collateral(&admin, &vec![&env, borrower.clone()], &true);
+    assert!(client.is_collateral_migrated());
+    assert_eq!(client.get_total_collateral(&collateral_asset), collateral_deposit);
+
+    // Collection still fails without unencumbered fee tokens (cannot drain backfilled collateral).
+    assert!(client.try_collect_fees(&admin, &treasury_id).is_err());
+
+    // Once backed fee tokens are present, collection succeeds and preserves collateral.
+    mint_tokens(&env, &collateral_asset, &contract_id, uncollected);
+    assert_eq!(client.collect_fees(&admin, &treasury_id), uncollected);
+    assert_eq!(token_client.balance(&contract_id), collateral_deposit);
+}
+
+/// Verify legacy loans created before Issue #457 have their `LoanAccruedFee`
+/// derived from persisted settled-interest state and `UncollectedFees` reconciled
+/// to remove unearned creation-time fees without double-counting on repayment.
+#[test]
+fn test_legacy_loan_fee_migration_reconciles_settled_interest_and_uncollected_fees() {
+    let (env, contract_id, admin, borrower, collateral_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+    let lender = Address::generate(&env);
+
+    // Create two loans and activate both.
+    let loan1_id = client.create_loan_request(
+        &borrower,
+        &create_request_struct(
+            &env,
+            1_000_0000000,
+            30,
+            1000,
+            100_000_0000000,
+            &collateral_asset,
+            100_000_0000000,
+            InterestRateModel::Fixed,
+        ),
+    );
+    let loan2_id = client.create_loan_request(
+        &borrower,
+        &create_request_struct(
+            &env,
+            1_000_0000000,
+            30,
+            1000,
+            100_000_0000000,
+            &collateral_asset,
+            100_000_0000000,
+            InterestRateModel::Fixed,
+        ),
+    );
+    client.approve_loan(&lender, &loan1_id, &1);
+    client.activate_loan(&admin, &loan1_id);
+    client.approve_loan(&lender, &loan2_id, &2);
+    client.activate_loan(&admin, &loan2_id);
+
+    let loan1 = client.get_loan(&loan1_id);
+    let loan2 = client.get_loan(&loan2_id);
+    let loan2_interest = loan2.total_due - loan2.amount;
+    let half_interest = loan2_interest / 2;
+
+    // Simulate legacy pre-upgrade state:
+    // - Loan 1 has 0 paid (`remaining_due == total_due`)
+    // - Loan 2 has principal + half of interest paid before upgrade
+    // - `UncollectedFees` holds the full creation-time `loan1.platform_fee + loan2.platform_fee`
+    // - Neither loan has `DataKey::LoanAccruedFee`
+    env.as_contract(&contract_id, || {
+        let mut l2 = loan2.clone();
+        l2.remaining_due = loan2.total_due - (loan2.amount + half_interest);
+        env.storage().persistent().set(&DataKey::Loan(loan2_id), &l2);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::LoanAccruedFee(loan1_id));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::LoanAccruedFee(loan2_id));
+        env.storage().instance().set(
+            &DataKey::UncollectedFees,
+            &(loan1.platform_fee + loan2.platform_fee),
+        );
+        env.storage()
+            .instance()
+            .remove(&DataKey::LoanFeeMigrationComplete);
+    });
+
+    let expected_loan2_settled_fee = loan2.platform_fee * half_interest / loan2_interest;
+    client.migrate_legacy_loans(&admin);
+
+    // UncollectedFees must be reconciled down to only the settled interest share of Loan 2.
+    assert_eq!(client.get_uncollected_fees(), expected_loan2_settled_fee);
+
+    // Repaying Loan 1 in full accrues `loan1.platform_fee` exactly once.
+    client.record_payment(&admin, &loan1_id, &loan1.total_due);
+    assert_eq!(
+        client.get_uncollected_fees(),
+        expected_loan2_settled_fee + loan1.platform_fee
+    );
+
+    // Repaying the remaining half of Loan 2 accrues only the remaining half of `loan2.platform_fee`.
+    let loan2_after = client.get_loan(&loan2_id);
+    client.record_payment(&admin, &loan2_id, &loan2_after.remaining_due);
+    assert_eq!(
+        client.get_uncollected_fees(),
+        loan1.platform_fee + loan2.platform_fee
+    );
+}
+
+/// Verify that if a legacy loan's creation-time fee was already collected prior
+/// to upgrade, migration does not underflow `UncollectedFees` and repayment
+/// does not collect the fee a second time.
+#[test]
+fn test_legacy_loan_fee_migration_accounts_for_already_collected_fees() {
+    let (env, contract_id, admin, borrower, collateral_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+    let lender = Address::generate(&env);
+
+    let loan_id = client.create_loan_request(
+        &borrower,
+        &create_request_struct(
+            &env,
+            1_000_0000000,
+            30,
+            1000,
+            100_000_0000000,
+            &collateral_asset,
+            100_000_0000000,
+            InterestRateModel::Fixed,
+        ),
+    );
+    client.approve_loan(&lender, &loan_id, &1);
+    client.activate_loan(&admin, &loan_id);
+    let loan = client.get_loan(&loan_id);
+
+    // Simulate legacy state where the creation-time fee was already collected (`UncollectedFees == 0`).
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .persistent()
+            .remove(&DataKey::LoanAccruedFee(loan_id));
+        env.storage().instance().set(&DataKey::UncollectedFees, &0i128);
+        env.storage()
+            .instance()
+            .remove(&DataKey::LoanFeeMigrationComplete);
+    });
+
+    client.migrate_legacy_loans(&admin);
+    assert_eq!(client.get_uncollected_fees(), 0);
+
+    // Full repayment after upgrade must not re-accrue the already-collected fee.
+    client.record_payment(&admin, &loan_id, &loan.total_due);
+    assert_eq!(client.get_uncollected_fees(), 0);
 }

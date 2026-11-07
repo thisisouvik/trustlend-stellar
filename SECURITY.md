@@ -1,12 +1,14 @@
-# Security Policy & Bug Bounty Program
+# Security Policy & Coordinated Vulnerability Disclosure
 
-TrustLend is dedicated to ensuring the security and safety of our decentralized lending protocol built on Stellar and Soroban. We welcome white-hat security researchers and developers to inspect our smart contracts, API endpoints, and infrastructure to help identify potential vulnerabilities.
+TrustLend is an open-source decentralized lending protocol built on Stellar and Soroban. We welcome security researchers, developers, and community members to inspect our smart contracts, API endpoints, and infrastructure to help identify potential vulnerabilities.
+
+> **Program Notice:** TrustLend is an open-source educational and community project. We do **not** operate a paid bug bounty program and do **not** offer financial rewards, bounties, or monetary compensation for vulnerability submissions. We provide safe harbor, public acknowledgment, and contributor attribution in repository release notes and security advisories for confirmed responsible disclosures.
 
 ---
 
 ## 1. Reporting a Vulnerability
 
-If you discover a security vulnerability within TrustLend, **do NOT open a public GitHub issue** or publicly disclose the issue until it has been acknowledged, investigated, and remediated by the TrustLend team.
+If you discover a security vulnerability within TrustLend, **do NOT open a public GitHub issue** or publicly disclose the issue until it has been acknowledged, investigated, and remediated by the maintainers.
 
 ### Secure Disclosure Instructions
 1. **Email:** Send your report securely to `souvikmandals10@gmail.com` (Maintainer Email) or submit via GitHub Private Vulnerability Reporting.
@@ -18,11 +20,11 @@ If you discover a security vulnerability within TrustLend, **do NOT open a publi
 3. **Response SLA:**
    - **Initial Response:** Within 48 hours acknowledging receipt of report.
    - **Triage & Evaluation:** Status update within 5 business days.
-   - **Remediation & Reward:** Resolution and bounty payout upon patch deployment and confirmation.
+   - **Remediation & Attribution:** Resolution timeline, advisory publication, and public contributor credit in release notes upon patch confirmation.
 
 ---
 
-## 2. Bug Bounty Program Scope
+## 2. Security Disclosure Scope
 
 ### In-Scope Assets
 
@@ -50,16 +52,16 @@ If you discover a security vulnerability within TrustLend, **do NOT open a publi
 
 ---
 
-## 3. Severity Classification & Reward Tiers
+## 3. Vulnerability Severity Classification
 
-Bounties are rewarded in **USDC** or equivalent **XLM** based on severity assessment following standard CVSS v3.1 frameworks and threat modeling specific to DeFi protocols.
+Vulnerabilities are evaluated based on standard CVSS v3.1 frameworks and threat modeling specific to DeFi protocols to prioritize remediation:
 
-| Severity Level | Description & Examples | Reward Tier (USDC / XLM) |
+| Severity Level | Description & Protocol Impact | Priority |
 | :--- | :--- | :--- |
-| **Critical** | Direct theft/loss of user funds or escrowed collateral, unauthorized minting/draining of liquidity pool assets, flash loan exploits causing uncollateralized fund extraction, or full admin key / governance takeover. | **$5,000 – $15,000** |
-| **High** | Permanent lockup/freeze of collateral without recovery mechanism, manipulation of oracle credit scores/price feeds leading to unauthorized borrowing/liquidation, or unauthorized manipulation of borrower reputation scores. | **$1,500 – $5,000** |
-| **Medium** | Partial fee/interest loss, rate limiting / fee-sponsorship bypass draining sponsor reserve balance, or high-impact API authentication / session bypass without direct access to vault collateral. | **$500 – $1,500** |
-| **Low** | Minor API information disclosure, telemetry data leakage, non-critical state inconsistencies, or isolated contract panic / DoS conditions on non-essential functions. | **$100 – $500** |
+| **Critical** | Direct theft/loss of user funds or escrowed collateral, unauthorized draining of liquidity pool assets, flash loan exploits causing uncollateralized fund extraction, or full admin key / governance takeover. | **P0 (Critical)** |
+| **High** | Permanent lockup/freeze of collateral without recovery mechanism, manipulation of oracle credit scores/price feeds leading to unauthorized borrowing/liquidation, or unauthorized manipulation of borrower reputation scores. | **P1 (High)** |
+| **Medium** | Partial fee/interest loss, rate limiting / fee-sponsorship bypass draining sponsor reserve balance, or high-impact API authentication / session bypass without direct access to vault collateral. | **P2 (Medium)** |
+| **Low** | Minor API information disclosure, telemetry data leakage, non-critical state inconsistencies, or isolated contract panic / DoS conditions on non-essential functions. | **P3 (Low)** |
 
 ---
 
@@ -74,7 +76,7 @@ Bounties are rewarded in **USDC** or equivalent **XLM** based on severity assess
 TrustLend considers security research conducted in accordance with this policy to be:
 - Authorized under applicable anti-hacking laws, and we will not initiate legal action against researchers for good-faith security research.
 - Exempt from restrictions in our Terms of Service that prohibit reverse engineering or probing.
-- Supported and valued as a essential contribution to protocol security.
+- Supported and valued as an essential contribution to protocol security.
 
 ---
 

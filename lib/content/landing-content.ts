@@ -198,7 +198,7 @@ export const howItWorksSteps: HowItWorksStep[] = [
  */
 export const trustBadges: TrustBadge[] = [
   {
-    label: "Security policy & bug bounty",
+    label: "Security policy & disclosure",
     detail: "Coordinated disclosure process with a 48-hour response SLA.",
     href: `${REPO_URL}/blob/main/SECURITY.md`,
     icon: "shield",

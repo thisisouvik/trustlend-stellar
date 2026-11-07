@@ -1313,14 +1313,31 @@ impl LendingContract {
             }
         }
 
-        // Check borrowing power: total borrowing power must be >= loan amount
-        let borrowing_power = Self::compute_borrowing_power_from_entries(&env, &collateral_entries);
+        // Borrowing power is derived from the collateral the borrower has
+        // actually deposited into the vault (`DataKey::UserCollateral`), never
+        // from the caller-supplied entries.
+        let vault_entries = Self::get_user_collateral_entries(env.clone(), borrower.clone());
+        let borrowing_power = Self::compute_borrowing_power_from_entries(&env, &vault_entries);
 
         if borrowing_power < amount {
             panic!(
                 "Insufficient borrowing power: {} < {}",
                 borrowing_power, amount
             );
+        }
+
+        // Every declared entry must be backed by the deposited vault balance.
+        for entry in collateral_entries.iter() {
+            let mut deposited: i128 = 0;
+            for vault_entry in vault_entries.iter() {
+                if vault_entry.asset == entry.asset {
+                    deposited = vault_entry.amount;
+                    break;
+                }
+            }
+            if entry.amount > deposited {
+                panic!("Declared collateral exceeds deposited vault balance");
+            }
         }
 
         // interest = principal × rate_bps × days / (10_000 × 365)

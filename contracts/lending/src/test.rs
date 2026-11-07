@@ -1925,6 +1925,94 @@ fn test_withdraw_collateral_allowed_with_no_active_loans() {
     assert_eq!(entries.get(0).unwrap().asset, asset_b);
 }
 
+/// Create a minimum-rate loan request backed by `collateral_amount` of `asset`.
+fn request_loan_against(
+    env: &Env,
+    client: &LendingContractClient,
+    borrower: &Address,
+    asset: &Address,
+    amount: i128,
+    collateral_amount: i128,
+) -> u32 {
+    client.create_loan_request(
+        borrower,
+        &LoanRequestInput {
+            amount,
+            duration_days: 30,
+            interest_rate_bps: MIN_INTEREST_RATE_BPS,
+            max_loan_amount: 100_000_0000000,
+            collateral_entries: vec![
+                env,
+                CollateralEntry {
+                    asset: asset.clone(),
+                    amount: collateral_amount,
+                },
+            ],
+            rate_model: InterestRateModel::Fixed,
+            reputation_tier: 0,
+        },
+    )
+}
+
+/// A pending loan request locks collateral: the borrower cannot withdraw below
+/// the requested amount, but may withdraw the unencumbered surplus.
+#[test]
+fn test_withdraw_collateral_blocked_by_pending_loan_request() {
+    let (env, contract_id, _admin, borrower, asset_a, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    client.deposit_collateral(&borrower, &asset_a, &10_000_0000000);
+    // Borrowing power is 75% of 10_000 = 7_500; request 5_000.
+    request_loan_against(&env, &client, &borrower, &asset_a, 5_000_0000000, 10_000_0000000);
+
+    // Withdrawing 5_000 would leave power 3_750 < 5_000 of pending debt.
+    let drain = client.try_withdraw_collateral(&borrower, &asset_a, &5_000_0000000);
+    assert!(drain.is_err(), "pending loan must lock collateral");
+    let full = client.try_withdraw_collateral(&borrower, &asset_a, &10_000_0000000);
+    assert!(full.is_err(), "full drain must be rejected");
+
+    // Withdrawing 1_000 leaves power 6_750 >= 5_000, which is allowed.
+    client.withdraw_collateral(&borrower, &asset_a, &1_000_0000000);
+    let entries = client.get_user_collateral_entries(&borrower);
+    assert_eq!(entries.get(0).unwrap().amount, 9_000_0000000);
+}
+
+/// The lock persists through approval, so the borrower cannot drain the vault
+/// between approval and activation either.
+#[test]
+fn test_withdraw_collateral_blocked_by_approved_loan() {
+    let (env, contract_id, _admin, borrower, asset_a, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    client.deposit_collateral(&borrower, &asset_a, &10_000_0000000);
+    let loan_id =
+        request_loan_against(&env, &client, &borrower, &asset_a, 5_000_0000000, 10_000_0000000);
+    let lender = Address::generate(&env);
+    client.approve_loan(&lender, &loan_id, &1);
+    assert_eq!(client.get_loan(&loan_id).status, LoanStatus::Approved);
+
+    let drain = client.try_withdraw_collateral(&borrower, &asset_a, &10_000_0000000);
+    assert!(drain.is_err(), "approved loan must lock collateral");
+}
+
+/// Revoking approval returns the loan to Pending, which keeps the lock.
+#[test]
+fn test_withdraw_collateral_blocked_after_approval_revoked() {
+    let (env, contract_id, _admin, borrower, asset_a, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    client.deposit_collateral(&borrower, &asset_a, &10_000_0000000);
+    let loan_id =
+        request_loan_against(&env, &client, &borrower, &asset_a, 5_000_0000000, 10_000_0000000);
+    let lender = Address::generate(&env);
+    client.approve_loan(&lender, &loan_id, &1);
+    client.revoke_approval(&lender, &loan_id);
+    assert_eq!(client.get_loan(&loan_id).status, LoanStatus::Pending);
+
+    let drain = client.try_withdraw_collateral(&borrower, &asset_a, &10_000_0000000);
+    assert!(drain.is_err(), "pending loan must keep the lock");
+}
+
 /// Get user collateral entries for a borrower with no collateral returns empty Vec.
 #[test]
 fn test_get_user_collateral_entries_empty_for_new_borrower() {

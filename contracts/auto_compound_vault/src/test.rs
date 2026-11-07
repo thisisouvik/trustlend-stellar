@@ -397,3 +397,56 @@ fn test_managed_assets_always_backed_by_vault_balance() {
     assert_backed(&env, &asset_token, &vault_id, &client);
     assert_eq!(client.get_total_shares(), 0);
 }
+
+// ─── Share inflation / donation attack ───────────────────────────────────────
+
+#[test]
+fn test_donation_does_not_round_victim_deposit_to_zero_shares() {
+    let (env, admin, asset_token, _lending_id, vault_id, client) = setup_test();
+    let attacker = Address::generate(&env);
+    let victim = Address::generate(&env);
+    let keeper = add_keeper(&env, &admin, &client);
+
+    // Attacker becomes the first depositor with 1 stroop.
+    mint_tokens(&env, &asset_token, &attacker, 1);
+    assert_eq!(client.deposit(&attacker, &1), 1);
+
+    // Attacker donates 10,000 XLM straight to the vault and harvests it in.
+    let donation = 10_000_0000000i128;
+    mint_tokens(&env, &asset_token, &vault_id, donation);
+    client.harvest(&keeper);
+
+    // Without a virtual offset this deposit yields zero shares and reverts.
+    let victim_deposit = 5_000_0000000i128;
+    mint_tokens(&env, &asset_token, &victim, victim_deposit);
+    let victim_shares = client.deposit(&victim, &victim_deposit);
+    assert!(victim_shares > 0);
+
+    // The victim can redeem nearly everything they put in.
+    let payout = client.get_user_asset_balance(&victim);
+    assert!(payout >= victim_deposit - victim_deposit / 100, "victim lost value to rounding");
+}
+
+#[test]
+fn test_donation_attack_is_unprofitable_for_attacker() {
+    let (env, admin, asset_token, _lending_id, vault_id, client) = setup_test();
+    let attacker = Address::generate(&env);
+    let victim = Address::generate(&env);
+    let keeper = add_keeper(&env, &admin, &client);
+
+    mint_tokens(&env, &asset_token, &attacker, 1);
+    let attacker_shares = client.deposit(&attacker, &1);
+
+    let donation = 10_000_0000000i128;
+    mint_tokens(&env, &asset_token, &vault_id, donation);
+    client.harvest(&keeper);
+
+    let victim_deposit = 20_000_0000000i128;
+    mint_tokens(&env, &asset_token, &victim, victim_deposit);
+    client.deposit(&victim, &victim_deposit);
+
+    // Attacker started with 1 stroop and donated `donation` (minus the 1% keeper
+    // fee, which also went to the keeper). Redeeming must return far less than that.
+    let attacker_out = client.withdraw(&attacker, &attacker_shares);
+    assert!(attacker_out < donation / 10, "attacker recovered the donation");
+}

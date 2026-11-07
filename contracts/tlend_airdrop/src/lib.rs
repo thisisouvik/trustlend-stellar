@@ -116,6 +116,31 @@ impl TlendAirdropContract {
         );
     }
 
+    /// Recover unclaimed TLEND from the pool to `to`. Admin only; intended for
+    /// use once an airdrop round has closed or expired, so tokens allocated to
+    /// addresses that never claimed are not trapped in the contract.
+    pub fn sweep_unclaimed(env: Env, caller: Address, to: Address, amount: i128) {
+        caller.require_auth();
+        let admin = Self::get_admin(env.clone());
+        if caller != admin {
+            panic!("Unauthorised caller: not admin");
+        }
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
+        let token_addr = Self::get_token(env.clone());
+        let token_client = token::Client::new(&env, &token_addr);
+        if token_client.balance(&env.current_contract_address()) < amount {
+            panic!("Insufficient airdrop balance");
+        }
+        token_client.transfer(&env.current_contract_address(), &to, &amount);
+
+        env.events().publish(
+            (symbol_short!("airdrop"), symbol_short!("sweep")),
+            (to, amount),
+        );
+    }
+
     // ── Queries ──────────────────────────────────────────────────────────────
 
     pub fn get_admin(env: Env) -> Address {

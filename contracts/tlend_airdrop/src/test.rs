@@ -168,3 +168,48 @@ fn test_non_admin_cannot_set_root() {
     let attacker = Address::generate(&w.env);
     w.airdrop.set_merkle_root(&attacker, &w.root);
 }
+
+#[test]
+fn test_admin_sweeps_unclaimed_tokens() {
+    let w = setup();
+    w.airdrop.claim(&w.c0, &AMOUNTS[0], &w.proof0);
+
+    let treasury = Address::generate(&w.env);
+    let remaining = w.token.balance(&w.airdrop.address);
+    assert_eq!(remaining, 900);
+
+    w.airdrop.sweep_unclaimed(&w.admin, &treasury, &remaining);
+    assert_eq!(w.token.balance(&treasury), 900);
+    assert_eq!(w.token.balance(&w.airdrop.address), 0);
+}
+
+#[test]
+fn test_admin_can_partially_sweep() {
+    let w = setup();
+    let treasury = Address::generate(&w.env);
+    w.airdrop.sweep_unclaimed(&w.admin, &treasury, &250);
+    assert_eq!(w.token.balance(&treasury), 250);
+    assert_eq!(w.token.balance(&w.airdrop.address), 750);
+}
+
+#[test]
+#[should_panic(expected = "not admin")]
+fn test_non_admin_cannot_sweep() {
+    let w = setup();
+    let attacker = Address::generate(&w.env);
+    w.airdrop.sweep_unclaimed(&attacker, &attacker, &100);
+}
+
+#[test]
+#[should_panic(expected = "amount must be positive")]
+fn test_sweep_rejects_non_positive_amount() {
+    let w = setup();
+    w.airdrop.sweep_unclaimed(&w.admin, &w.admin, &0);
+}
+
+#[test]
+#[should_panic(expected = "Insufficient airdrop balance")]
+fn test_sweep_rejects_amount_above_balance() {
+    let w = setup();
+    w.airdrop.sweep_unclaimed(&w.admin, &w.admin, &1_001);
+}

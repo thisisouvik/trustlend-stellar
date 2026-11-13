@@ -26,7 +26,7 @@ Install these tools on your machine before cloning the repo.
 | **npm** | ^10 | Package manager |
 | **Rust** | stable (via `rustup`) | Soroban smart contract compilation |
 | **Soroban CLI** | latest | Contract deployment & interaction |
-| **Freighter Wallet** | latest (browser ext.) | Stellar wallet for testnet interactions |
+| **Varial Wallet** | latest (browser ext.) | Stellar wallet for testnet interactions (formerly Freighter) |
 
 ### Verify Installations
 

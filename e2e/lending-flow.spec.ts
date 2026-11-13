@@ -1,13 +1,13 @@
 import { test, expect } from "@playwright/test";
-import freighterMock from "./setup/freighter-mock";
+import varialMock from "./setup/varial-mock";
 
 // Mock constant values to simulate deterministic chain data
 const MOCK_LENDING_CONTRACT = "CA_MOCK_LENDING_CONTRACT_ID";
 
 test.describe("TrustLend Complete Lending Flow", () => {
-  // Apply our global mock before any navigation so the window object contains `freighter`
+  // Apply our global mock before any navigation so the window object contains `varial` / `freighter`
   test.beforeEach(async ({ page }) => {
-    await page.addInitScript(freighterMock);
+    await page.addInitScript(varialMock);
 
     // Provide mock RPC endpoints to prevent Soroban testnet calls from actually failing
     await page.route("**/soroban-testnet.stellar.org", async (route) => {
@@ -87,10 +87,10 @@ test.describe("TrustLend Complete Lending Flow", () => {
     const connectButton = page.getByRole("button", { name: /Connect Wallet/i }).first();
     await connectButton.click();
     
-    // We expect the wallet selection modal, choose Freighter
-    const freighterButton = page.getByRole("button", { name: /Freighter/i });
-    if (await freighterButton.isVisible()) {
-      await freighterButton.click();
+    // We expect the wallet selection modal, choose Varial
+    const varialButton = page.getByRole("button", { name: /Varial|Freighter/i });
+    if (await varialButton.isVisible()) {
+      await varialButton.click();
     }
     
     // Validate we are connected (usually UI shows an abbreviated account string)

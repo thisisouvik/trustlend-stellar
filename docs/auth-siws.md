@@ -3,7 +3,7 @@
 > Implements issue **#69 — [Backend/Integration] Implement Web3 authentication via SIWS**
 
 "Sign in with Stellar" is the only login method: users authenticate by
-**signing a challenge with their wallet** (Freighter, xBull, Albedo, or a
+**signing a challenge with their wallet** (Varial, xBull, Albedo, or a
 WalletConnect mobile wallet) instead of typing a password, and the backend turns
 that proof into a signed session cookie.
 
@@ -67,7 +67,7 @@ like any other TrustLend wallet transaction.
 
 Clicking the button opens the wallet picker
 ([components/ui/WalletSelectionModal.tsx](../components/ui/WalletSelectionModal.tsx),
-shared with the dashboard's `WalletCard`), which offers **Freighter**,
+shared with the dashboard's `WalletCard`), which offers **Varial**,
 **WalletConnect**, **xBull** and **Albedo**. The chosen provider is passed into
 `signInWithStellar(provider, role)`, so the login challenge is signed by whichever
 wallet the user picked.
@@ -75,7 +75,7 @@ wallet the user picked.
 ### Mobile wallets (WalletConnect v2)
 
 Choosing **WalletConnect** opens a QR code the user scans with a mobile Stellar
-wallet (LOBSTR, Freighter Mobile, …); the sign request is then relayed to the
+wallet (LOBSTR, Varial Mobile, …); the sign request is then relayed to the
 phone for approval, and the signed XDR comes back over the same session. A few
 details matter for this to work end to end:
 
@@ -95,7 +95,7 @@ details matter for this to work end to end:
 - **Sessions.** The kit persists the address, selected module and WalletConnect
   session topics in `localStorage`, so a reload keeps signing. A cached address is
   only reused when it belongs to the wallet being requested — otherwise a previously
-  connected Freighter address would be handed to a WalletConnect request that has no
+  connected Varial address would be handed to a WalletConnect request that has no
   matching session. Disconnecting calls `disconnectWallet()`, which closes the pairing.
 - **CSP.** The relay and Reown AppKit origins are allowlisted in
   [next.config.ts](../next.config.ts); without them the browser blocks the relay socket.
@@ -137,7 +137,7 @@ client-side (`mapVerifyError` in [lib/auth/siws-client.ts](../lib/auth/siws-clie
 | `address_mismatch` | 400 | "The signature didn't match the connected wallet. Reconnect and retry." |
 | `not_configured` / `session_failed` | 503/500 | "Stellar sign-in is temporarily unavailable. Please try another method." |
 
-The button also surfaces wallet-level errors (Freighter not installed, wrong
+The button also surfaces wallet-level errors (Varial not installed, wrong
 network, user rejected) via the existing `signTransactionWithWallet` error paths.
 
 ## 6. Configuration

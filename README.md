@@ -67,7 +67,7 @@ The protocol runs on a hybrid architecture: **trust-critical logic on Soroban sm
 flowchart LR
     subgraph Client
         WA["Web app<br/>Next.js 16 · React 19"]
-        WL["Stellar wallet<br/>Freighter · xBull · Albedo · WalletConnect"]
+        WL["Stellar wallet<br/>Varial · xBull · Albedo · WalletConnect"]
     end
 
     subgraph Backend["Backend (Next.js)"]

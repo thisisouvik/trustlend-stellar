@@ -107,7 +107,7 @@ export async function isAccountFrozen(
   return result as boolean;
 }
 
-// ─── Write functions (require Freighter signature) ────────────────────────────
+// ─── Write functions (require Varial signature) ────────────────────────────
 
 /**
  * Borrower registers their on-chain profile (called after KYC approval).

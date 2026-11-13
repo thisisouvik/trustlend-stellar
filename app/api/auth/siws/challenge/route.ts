@@ -7,7 +7,7 @@ import { isValidStellarAddress } from "@/lib/http/request-validation";
  * POST /api/auth/siws/challenge
  *
  * Step 1 of Sign-In with Stellar (SEP-0010). Given a wallet address, returns a
- * server-signed challenge transaction for the wallet to sign with Freighter.
+ * server-signed challenge transaction for the wallet to sign with Varial.
  *
  * Body: { address: "G..." }
  * 200:  { transaction, networkPassphrase }

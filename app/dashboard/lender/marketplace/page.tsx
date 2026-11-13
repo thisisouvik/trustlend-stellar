@@ -100,7 +100,7 @@ export default async function LenderMarketplacePage({
     <WorkspaceFrame
       roleLabel="Lender Dashboard"
       heading="Loan Marketplace"
-      description="Browse open borrower requests. Fund directly with Freighter or Albedo - XLM goes straight to the borrower's Stellar wallet. Full on-chain transparency."
+      description="Browse open borrower requests. Fund directly with Varial or Albedo - XLM goes straight to the borrower's Stellar wallet. Full on-chain transparency."
       email={user.email ?? null}
       userName={String(
         user.fullName ?? profile?.full_name ?? "",

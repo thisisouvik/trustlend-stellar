@@ -317,7 +317,7 @@ export async function invokeContract({
 // ─── Read: simulation only (no signing required) ──────────────────────────────
 
 /**
- * Read-only contract call via simulation — no Freighter signing needed.
+ * Read-only contract call via simulation — no Varial signing needed.
  * Use for all get_* / is_* / calculate_* view functions.
  */
 export async function simulateContractCall({

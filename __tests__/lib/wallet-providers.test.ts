@@ -67,12 +67,12 @@ describe("provider guards and labels", () => {
   it("labels each provider for display", () => {
     expect(getWalletProviderLabel("walletconnect")).toBe("WalletConnect");
     expect(getWalletProviderLabel("xbull")).toBe("xBull");
-    expect(getWalletProviderLabel("freighter")).toBe("Freighter");
+    expect(getWalletProviderLabel("freighter")).toBe("Varial");
     expect(getWalletProviderLabel("albedo")).toBe("Albedo");
   });
 
-  it("falls back to Freighter's label for an unknown provider", () => {
-    expect(getWalletProviderLabel("nope" as StellarWalletProvider)).toBe("Freighter");
+  it("falls back to Varial's label for an unknown provider", () => {
+    expect(getWalletProviderLabel("nope" as StellarWalletProvider)).toBe("Varial");
   });
 
   it("flags only WalletConnect as the mobile bridge flow", () => {

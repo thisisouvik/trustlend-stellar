@@ -4,8 +4,8 @@
  * lib/stellar/wallet.ts
  *
  * Thin browser-side wrapper around StellarWalletsKit. Handles the desktop
- * extension wallets (Freighter, xBull), the Albedo web flow, and — for mobile —
- * WalletConnect v2, where the user scans a QR code with LOBSTR / Freighter
+ * extension wallets (Varial, xBull), the Albedo web flow, and — for mobile —
+ * WalletConnect v2, where the user scans a QR code with LOBSTR / Varial
  * Mobile / any other Stellar WalletConnect wallet.
  *
  * All provider metadata lives in `./wallet-providers` (kit-free, unit tested);
@@ -286,7 +286,7 @@ export async function getConnectedWallet(
 
   // Read before `selectWallet()` clobbers it: the kit keeps a single active
   // address, so a cached one only belongs to the wallet that produced it.
-  // Reusing a Freighter address for a WalletConnect request would skip the QR
+  // Reusing a Varial address for a WalletConnect request would skip the QR
   // modal and then fail at signing with no matching session.
   const activeProvider = getActiveKitProvider();
 

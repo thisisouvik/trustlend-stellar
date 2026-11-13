@@ -126,7 +126,7 @@ export const faqItems: FaqItem[] = [
   {
     question: "Do I need to create an account with email and password?",
     answer:
-      "No. TrustLend uses Sign-In with Stellar (SEP-10): you prove ownership of a wallet by signing a challenge, and that wallet is your account. Freighter, xBull, Albedo and WalletConnect mobile wallets are supported.",
+      "No. TrustLend uses Sign-In with Stellar (SEP-10): you prove ownership of a wallet by signing a challenge, and that wallet is your account. Varial, xBull, Albedo and WalletConnect mobile wallets are supported.",
   },
   {
     question: "How is reputation calculated?",
@@ -160,7 +160,7 @@ export const howItWorksSteps: HowItWorksStep[] = [
     caption: "Connect",
     title: "Sign in with your Stellar wallet",
     description:
-      "Authenticate by signing a SEP-10 challenge with Freighter, xBull, Albedo, or any mobile wallet over WalletConnect. No password, and TrustLend never holds your keys.",
+      "Authenticate by signing a SEP-10 challenge with Varial, xBull, Albedo, or any mobile wallet over WalletConnect. No password, and TrustLend never holds your keys.",
     visual: "wallet",
   },
   {

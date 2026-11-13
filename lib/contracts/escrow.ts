@@ -67,7 +67,7 @@ export async function getEscrowCount(callerAddress: string): Promise<number> {
  * Returns the new escrow ID.
  *
  * Step-by-step flow:
- * 1. Lender sends XLM to borrower's address via Freighter PAYMENT op.
+ * 1. Lender sends XLM to borrower's address via Varial PAYMENT op.
  * 2. Frontend calls `createEscrowHold()` so the hold is recorded on-chain.
  * 3. After 3 minutes the admin calls `confirmDisbursement()`.
  */

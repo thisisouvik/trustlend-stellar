@@ -439,7 +439,7 @@ export function DepositFiatButton({ walletAddress }: DepositFiatButtonProps) {
   );
 }
 
-// Wallet provider label is best-effort for the helper copy; default to Freighter.
+// Wallet provider label is best-effort for the helper copy; default to Varial.
 function getConnectedWalletProviderSafe() {
   if (typeof window === "undefined") return "freighter" as const;
   const stored = window.localStorage.getItem("wallet_provider");

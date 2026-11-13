@@ -34,7 +34,7 @@ export const WALLET_MODULE_IDS: Record<StellarWalletProvider, string> = {
 };
 
 const WALLET_PROVIDER_LABELS: Record<StellarWalletProvider, string> = {
-  freighter: "Freighter",
+  freighter: "Varial",
   albedo: "Albedo",
   walletconnect: "WalletConnect",
   xbull: "xBull",

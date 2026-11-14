@@ -615,7 +615,8 @@ impl BorrowerReputationContract {
         }
 
         let (delta, flag_default, flag_repaid) = Self::event_info(&event);
-        let new_score = (profile.reputation_score as i32 + delta).max(0) as i128;
+        let delta_128 = delta as i128;
+        let new_score = profile.reputation_score.saturating_add(delta_128).max(0);
         profile.reputation_score = new_score;
         profile.reputation_tier = Self::score_to_tier(new_score);
 

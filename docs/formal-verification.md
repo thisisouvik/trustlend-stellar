@@ -40,7 +40,7 @@ Formal verification was added to:
 
 ## Verified Invariants
 
-### Accounting (10 invariants)
+### Accounting & Asset Conservation (13 invariants)
 
 | ID | Invariant |
 |---|---|
@@ -51,9 +51,31 @@ Formal verification was added to:
 | INV-ACCT-5 | Payment reduces `remaining_due` by at most `payment_amount` |
 | INV-ACCT-6 | `remaining_due == 0` implies `status == Repaid` |
 | INV-ACCT-7 | Full payment zeroes `remaining_due` exactly |
-| INV-ACCT-8 | Platform fees accumulate correctly into `UncollectedFees` |
+| INV-ACCT-8 | Platform fees accumulate into `UncollectedFees` only as interest is settled |
 | INV-ACCT-9 | Rate switch fee correctly increases both `remaining_due` and `total_due` |
 | INV-ACCT-10 | Partial payments never mark loan as Repaid |
+| INV-ACCT-11 | **Collateral Conservation:** $\text{balance}(\text{LendingContract}, A) \ge \sum_{\text{borrower}} \text{UserCollateral}(\text{borrower}, A)$ |
+| INV-ACCT-12 | **Fee Backing:** $\text{balance}(\text{LendingContract}, T_{\text{fee}}) \ge \text{TotalCollateral}(T_{\text{fee}}) + \text{UncollectedFees}$ |
+| INV-ACCT-13 | **Solvency Under Collection:** Executing `collect_fees` never reduces $\text{balance}(\text{LendingContract}, A)$ below $\text{TotalCollateral}(A)$ |
+
+#### Collateral Conservation & Backed Fee Accrual Specifications
+
+When the configured fee token $T_{\text{fee}}$ is also a whitelisted collateral asset (such as native XLM), `LendingContract` holds both depositor collateral (`UserCollateral`) and protocol fees (`UncollectedFees`) in a single contract token balance. To prevent fee accrual or collection from encroaching on depositor collateral, this change specifies three desired conservation laws. The added Kani harnesses and property tests verify standalone reference models; they do not invoke or establish enforcement by production `LendingContract`.
+
+1. **Collateral Conservation Invariant (`INV-ACCT-11`):**
+   For every whitelisted asset $A$:
+   $$\text{balance}(\text{LendingContract}, A) \ge \text{TotalCollateral}(A) = \sum_{\text{borrower}} \text{UserCollateral}(\text{borrower}, A)$$
+
+2. **Fee Backing Invariant (`INV-ACCT-12`):**
+   For the configured fee token $T_{\text{fee}}$:
+   $$\text{balance}(\text{LendingContract}, T_{\text{fee}}) \ge \text{TotalCollateral}(T_{\text{fee}}) + \text{UncollectedFees}$$
+
+3. **Solvency Under Collection (`INV-ACCT-13`):**
+   The proposed reference-model `collect_fees` guard requires $\text{balance}(\text{LendingContract}, T_{\text{fee}}) - \text{TotalCollateral}(T_{\text{fee}}) \ge \text{UncollectedFees}$ and must never reduce $\text{balance}(\text{LendingContract}, A)$ below $\text{TotalCollateral}(A)$ for any asset.
+
+**Coverage boundary:** `ConservationVault` delays fee accrual until modeled settlement, credits the corresponding tokens, and applies a collateral-aware collection guard. Production `create_loan_request` currently accrues `UncollectedFees` without the matching inflow, `record_payment` updates loan/payment records, and `collect_fees` checks the fee-token balance rather than subtracting collateral. These tests do not prove production solvency or implement that separate accounting change. INV-ACCT-11 through INV-ACCT-13 remain specifications for production until real-contract integration tests and the corresponding implementation are added.
+
+The new negative controls independently vary token inflow and fee liability and remove collateral tokens to ensure the reference-model checks detect underfunding. Kani settlement also receives an independent inflow and rejects unbacked accrual rather than assuming matching funds.
 
 ### State Machine (10 invariants)
 
@@ -194,7 +216,7 @@ Verification runs automatically in CI via `.github/workflows/formal-verification
 contracts/lending/
   kani_proofs/
     mod.rs              # Module root with documentation
-    accounting.rs       # 10 accounting invariants
+    accounting.rs       # 13 accounting & conservation invariants
     state_machine.rs    # 10 state machine invariants
     flash_loan.rs       # 10 flash loan invariants
     fees.rs             # 13 fee invariants

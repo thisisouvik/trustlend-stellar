@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { GET } from "@/app/api/metrics/route";
 
@@ -9,10 +9,58 @@ vi.mock("@/lib/monitoring/metrics", () => ({
   generateMetricsResponse: () => mockGenerateMetricsResponse(),
 }));
 
+const TEST_METRICS_SECRET = "test-metrics-secret";
+
+function makeMetricsRequest(token: string | null = TEST_METRICS_SECRET) {
+  return new NextRequest(
+    "http://localhost/api/metrics",
+    token !== null
+      ? { headers: { Authorization: `Bearer ${token}` } }
+      : undefined,
+  );
+}
+
 describe("GET /api/metrics", () => {
+  const originalSecret = process.env.METRICS_SECRET;
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockGenerateMetricsResponse.mockReset();
+    process.env.METRICS_SECRET = TEST_METRICS_SECRET;
+  });
+
+  afterEach(() => {
+    if (originalSecret === undefined) {
+      delete process.env.METRICS_SECRET;
+    } else {
+      process.env.METRICS_SECRET = originalSecret;
+    }
+  });
+
+  it("returns 401 when Authorization header is missing", async () => {
+    const response = await GET(makeMetricsRequest(null));
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Unauthorized" });
+    expect(mockGenerateMetricsResponse).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 when bearer token is invalid", async () => {
+    const response = await GET(makeMetricsRequest("wrong-secret"));
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Unauthorized" });
+    expect(mockGenerateMetricsResponse).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 when METRICS_SECRET is not configured", async () => {
+    delete process.env.METRICS_SECRET;
+
+    const response = await GET(makeMetricsRequest(TEST_METRICS_SECRET));
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Unauthorized" });
+    expect(mockGenerateMetricsResponse).not.toHaveBeenCalled();
   });
 
   it("returns 200 with prometheus content-type on success", async () => {
@@ -28,7 +76,7 @@ describe("GET /api/metrics", () => {
 
     mockGenerateMetricsResponse.mockResolvedValue(fakeMetrics);
 
-    const response = await GET(new NextRequest("http://localhost/api/metrics"));
+    const response = await GET(makeMetricsRequest());
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
@@ -51,7 +99,7 @@ describe("GET /api/metrics", () => {
 
     mockGenerateMetricsResponse.mockResolvedValue(metricsBlock);
 
-    const response = await GET(new NextRequest("http://localhost/api/metrics"));
+    const response = await GET(makeMetricsRequest());
     const text = await response.text();
 
     // Every line should be valid Prometheus exposition format:
@@ -69,7 +117,7 @@ describe("GET /api/metrics", () => {
   it("returns 500 when metrics generation fails", async () => {
     mockGenerateMetricsResponse.mockRejectedValue(new Error("Registry error"));
 
-    const response = await GET(new NextRequest("http://localhost/api/metrics"));
+    const response = await GET(makeMetricsRequest());
 
     expect(response.status).toBe(500);
 
@@ -80,7 +128,7 @@ describe("GET /api/metrics", () => {
   it("returns 500 with generic message when non-error is thrown", async () => {
     mockGenerateMetricsResponse.mockRejectedValue("string error");
 
-    const response = await GET(new NextRequest("http://localhost/api/metrics"));
+    const response = await GET(makeMetricsRequest());
 
     expect(response.status).toBe(500);
 
@@ -100,7 +148,7 @@ describe("GET /api/metrics", () => {
 
     mockGenerateMetricsResponse.mockResolvedValue(metricsWithMemory);
 
-    const response = await GET(new NextRequest("http://localhost/api/metrics"));
+    const response = await GET(makeMetricsRequest());
     const text = await response.text();
 
     expect(text).toContain('memory_type="rss"');
@@ -112,7 +160,7 @@ describe("GET /api/metrics", () => {
   it("handles empty metrics gracefully", async () => {
     mockGenerateMetricsResponse.mockResolvedValue("");
 
-    const response = await GET(new NextRequest("http://localhost/api/metrics"));
+    const response = await GET(makeMetricsRequest());
 
     expect(response.status).toBe(200);
 

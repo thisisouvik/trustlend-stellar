@@ -1,5 +1,6 @@
 import { get } from "@vercel/blob";
 import { NextRequest, NextResponse } from "next/server";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { requireApiAdmin, UnauthorizedError } from "@/lib/auth/session";
 
 /**
@@ -12,8 +13,15 @@ export async function GET(request: NextRequest) {
   try {
     await requireApiAdmin();
   } catch (err) {
-    const status = err instanceof UnauthorizedError ? 403 : 500;
-    return NextResponse.json({ error: "Admin access required" }, { status });
+    if (isRedirectError(err)) throw err;
+    if (err instanceof UnauthorizedError) {
+      const unauthenticated = err.message === "Not authenticated";
+      return NextResponse.json(
+        { error: unauthenticated ? "Authentication required" : "Admin access required" },
+        { status: unauthenticated ? 401 : 403 }
+      );
+    }
+    return NextResponse.json({ error: "Admin access required" }, { status: 500 });
   }
 
   const path = request.nextUrl.searchParams.get("path") ?? "";

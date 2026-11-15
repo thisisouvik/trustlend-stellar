@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { and, desc, eq, gt, inArray, lt } from "drizzle-orm";
-import { requireAuthenticatedUser } from "@/lib/auth/session";
+import { requireAuthenticatedUser, UnauthorizedError } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 import { metaString } from "@/lib/db/metadata";
 import { ledgerTransactions, loanRepayments, loans } from "@/lib/db/schema";
@@ -177,6 +178,14 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ transactions, hasMore, nextCursor });
   } catch (err) {
+    if (isRedirectError(err)) throw err;
+    if (err instanceof UnauthorizedError) {
+      const unauthenticated = err.message === "Not authenticated";
+      return NextResponse.json(
+        { error: unauthenticated ? "Authentication required" : err.message },
+        { status: unauthenticated ? 401 : 403 },
+      );
+    }
     console.error("Transactions fetch error:", err);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuthenticatedUser } from "@/lib/auth/session";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
+import { requireAuthenticatedUser, UnauthorizedError } from "@/lib/auth/session";
 import { enforceRouteRateLimit } from "@/lib/rate-limit";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db/client";
@@ -136,6 +137,16 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, transaction });
   } catch (error) {
+    if (isRedirectError(error)) {
+      throw error;
+    }
+    if (error instanceof UnauthorizedError) {
+      const unauthenticated = error.message === "Not authenticated";
+      return NextResponse.json(
+        { error: unauthenticated ? "Authentication required" : error.message },
+        { status: unauthenticated ? 401 : 403 }
+      );
+    }
     console.error("Failed to record SEP-31 deposit:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

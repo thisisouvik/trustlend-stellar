@@ -11,6 +11,10 @@ mod test;
 pub const DEFAULT_HARVEST_FEE_BPS: u32 = 100; // 1%
 pub const MAX_HARVEST_FEE_BPS: u32 = 1000; // 10%
 pub const PRECISION: i128 = 10_000_000; // 1.0000000 precision scaling factor
+/// Virtual shares and virtual assets added to the exchange rate (ERC-4626 style
+/// offset). It keeps the first mint 1:1 but makes a donation-inflated rate cost
+/// the attacker roughly `VIRTUAL_OFFSET` times more than it can extract.
+pub const VIRTUAL_OFFSET: i128 = 1_000;
 
 #[contracttype]
 pub enum DataKey {
@@ -84,11 +88,7 @@ impl AutoCompoundVaultContract {
         let total_shares = Self::get_total_shares(env.clone());
         let total_managed = Self::get_total_managed_assets(env.clone());
 
-        let shares = if total_shares == 0 || total_managed == 0 {
-            received
-        } else {
-            (received * total_shares) / total_managed
-        };
+        let shares = (received * (total_shares + VIRTUAL_OFFSET)) / (total_managed + VIRTUAL_OFFSET);
 
         if shares <= 0 {
             panic!("Deposit yielded zero shares");
@@ -125,7 +125,12 @@ impl AutoCompoundVaultContract {
         let total_shares = Self::get_total_shares(env.clone());
         let total_managed = Self::get_total_managed_assets(env.clone());
 
-        let amount = (shares * total_managed) / total_shares;
+        // The last redeemer takes everything left so no dust is stranded.
+        let amount = if shares == total_shares {
+            total_managed
+        } else {
+            (shares * (total_managed + VIRTUAL_OFFSET)) / (total_shares + VIRTUAL_OFFSET)
+        };
         if amount <= 0 {
             panic!("Shares yield zero asset payout");
         }
@@ -291,7 +296,7 @@ impl AutoCompoundVaultContract {
         }
         let user_shares = Self::get_shares_of(env.clone(), user);
         let total_managed = Self::get_total_managed_assets(env);
-        (user_shares * total_managed) / total_shares
+        (user_shares * (total_managed + VIRTUAL_OFFSET)) / (total_shares + VIRTUAL_OFFSET)
     }
 
     pub fn get_exchange_rate(env: Env) -> i128 {
@@ -300,7 +305,7 @@ impl AutoCompoundVaultContract {
             return PRECISION;
         }
         let total_managed = Self::get_total_managed_assets(env);
-        (total_managed * PRECISION) / total_shares
+        ((total_managed + VIRTUAL_OFFSET) * PRECISION) / (total_shares + VIRTUAL_OFFSET)
     }
 
     fn require_harvester(env: &Env, caller: &Address) {

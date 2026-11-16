@@ -41,8 +41,36 @@ fn setup() -> (Env, Address, Address, Address, Address) {
     client.set_asset_oracle_prices(&admin, &collateral_asset, &vec![&env, PRICE_PRECISION]);
 
     link_reputation(&env, &client, &admin, &borrower);
+    seed_vault(&env, &contract_id, &borrower, &collateral_asset, VAULT_SEED);
 
     (env, contract_id, admin, borrower, collateral_asset)
+}
+
+/// Default vault balance seeded for the borrower in the shared fixtures.
+const VAULT_SEED: i128 = 1_000_000_0000000;
+
+/// Write a collateral position straight into the vault storage so loan tests
+/// are backed by deposited collateral without needing a real token contract.
+fn seed_vault(
+    env: &Env,
+    contract_id: &Address,
+    borrower: &Address,
+    asset: &Address,
+    amount: i128,
+) {
+    env.as_contract(contract_id, || {
+        let key = DataKey::UserCollateral(borrower.clone());
+        let mut entries: Vec<CollateralEntry> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(Vec::new(env));
+        entries.push_back(CollateralEntry {
+            asset: asset.clone(),
+            amount,
+        });
+        env.storage().persistent().set(&key, &entries);
+    });
 }
 
 /// Deploy a real BorrowerReputationContract, link it to the lending contract
@@ -748,6 +776,7 @@ fn setup_with_multisig() -> (Env, Address, Address, Address, Address, Address, A
     client.set_asset_oracle_prices(&admin, &collateral_asset, &vec![&env, PRICE_PRECISION]);
 
     link_reputation(&env, &client, &admin, &borrower);
+    seed_vault(&env, &contract_id, &borrower, &collateral_asset, VAULT_SEED);
 
     (
         env,
@@ -2481,6 +2510,7 @@ fn test_repayment_calls_loyalty_contract() {
 
     // The borrower is Platinum on-chain, so the loan is snapshotted as tier 4
     link_reputation(&env, &client, &admin, &borrower);
+    seed_vault(&env, &contract_id, &borrower, &collateral_asset, VAULT_SEED);
     let loan_amount: i128 = 10_000_0000000;
     let loan_id = client.create_loan_request(
         &borrower,
@@ -2584,6 +2614,7 @@ fn test_late_repayment_no_reward() {
 
     client.set_loyalty_contract(&admin, &loyalty_id);
     link_reputation(&env, &client, &admin, &borrower);
+    seed_vault(&env, &contract_id, &borrower, &collateral_asset, VAULT_SEED);
 
     let loan_id = client.create_loan_request(
         &borrower,
@@ -2681,6 +2712,7 @@ fn setup_with_referral() -> (Env, Address, Address, Address, Address, Address, A
 
     client.set_referral_contract(&admin, &referral_id);
     link_reputation(&env, &client, &admin, &borrower);
+    seed_vault(&env, &contract_id, &borrower, &collateral_asset, VAULT_SEED);
 
     (
         env,
@@ -2898,6 +2930,7 @@ fn test_activation_succeeds_when_referral_pool_is_empty() {
     client.set_referral_contract(&admin, &referral_id);
     referral_client.register_referral(&borrower, &referrer);
     link_reputation(&env, &client, &admin, &borrower);
+    seed_vault(&env, &contract_id, &borrower, &collateral_asset, VAULT_SEED);
 
     let loan_id = client.create_loan_request(
         &borrower,
@@ -3156,6 +3189,7 @@ fn test_spoofed_max_loan_amount_cannot_bypass_credit_limit() {
 
     let borrower = Address::generate(&env);
     give_reputation_profile(&env, &client, &admin, &borrower, 0);
+    seed_vault(&env, &contract_id, &borrower, &collateral_asset, VAULT_SEED);
 
     client.create_loan_request(
         &borrower,
@@ -3173,6 +3207,7 @@ fn test_credit_limit_boundary_comes_from_reputation_contract() {
     // Silver: 5 000 XLM on-chain limit.
     let borrower = Address::generate(&env);
     give_reputation_profile(&env, &client, &admin, &borrower, 2);
+    seed_vault(&env, &contract_id, &borrower, &collateral_asset, VAULT_SEED);
     let limit: i128 = 5_000_0000000;
 
     let over = client.try_create_loan_request(
@@ -3198,6 +3233,7 @@ fn test_understated_client_values_are_ignored() {
     // Gold: 10 000 XLM on-chain limit.
     let borrower = Address::generate(&env);
     give_reputation_profile(&env, &client, &admin, &borrower, 3);
+    seed_vault(&env, &contract_id, &borrower, &collateral_asset, VAULT_SEED);
 
     let loan_id = client.create_loan_request(
         &borrower,
@@ -3216,6 +3252,7 @@ fn test_spoofed_reputation_tier_is_ignored() {
 
     let borrower = Address::generate(&env);
     give_reputation_profile(&env, &client, &admin, &borrower, 0);
+    seed_vault(&env, &contract_id, &borrower, &collateral_asset, VAULT_SEED);
 
     let loan_id = client.create_loan_request(
         &borrower,
@@ -3237,6 +3274,7 @@ fn test_loan_tier_tracks_on_chain_reputation() {
 
     let borrower = Address::generate(&env);
     give_reputation_profile(&env, &client, &admin, &borrower, 1);
+    seed_vault(&env, &contract_id, &borrower, &collateral_asset, VAULT_SEED);
     let first = client.create_loan_request(
         &borrower,
         &spoofed_request(&env, 500_0000000, &collateral_asset, 0, 4),
@@ -3266,6 +3304,7 @@ fn test_oracle_boosted_credit_limit_is_honoured() {
 
     let borrower = Address::generate(&env);
     give_reputation_profile(&env, &client, &admin, &borrower, 0);
+    seed_vault(&env, &contract_id, &borrower, &collateral_asset, VAULT_SEED);
 
     // Above the 1 000 XLM tier-None limit before any oracle data.
     let amount: i128 = 1_500_0000000;
@@ -3329,6 +3368,7 @@ fn test_spoofed_tier_cannot_inflate_loyalty_reward() {
 
     let borrower = Address::generate(&env);
     give_reputation_profile(&env, &client, &admin, &borrower, 0);
+    seed_vault(&env, &contract_id, &borrower, &collateral_asset, VAULT_SEED);
 
     let amount: i128 = 1_000_0000000;
     let loan_id = client.create_loan_request(
@@ -3558,4 +3598,68 @@ fn test_sweep_cannot_take_uncollected_fees() {
 
     client.sweep_tokens(&admin, &fee_token, &recipient, &100);
     assert_eq!(token::Client::new(&env, &fee_token).balance(&contract_id), uncollected);
+}
+
+/// A loan cannot be backed by collateral that was only declared in the request
+/// and never deposited into the vault (Issue #415).
+#[test]
+#[should_panic(expected = "Insufficient borrowing power")]
+fn test_create_loan_request_fails_with_unbacked_phantom_collateral() {
+    let (env, contract_id, _admin, borrower, collateral_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // Wipe the fixture's vault balance so nothing is actually deposited.
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .persistent()
+            .remove(&DataKey::UserCollateral(borrower.clone()));
+    });
+    assert_eq!(client.get_borrowing_power(&borrower), 0);
+
+    client.create_loan_request(
+        &borrower,
+        &LoanRequestInput {
+            amount: 1_000_0000000,
+            duration_days: 30,
+            interest_rate_bps: 1000,
+            max_loan_amount: 100_000_0000000,
+            collateral_entries: vec![
+                &env,
+                CollateralEntry {
+                    asset: collateral_asset.clone(),
+                    amount: 100_000_0000000,
+                },
+            ],
+            rate_model: InterestRateModel::Fixed,
+            reputation_tier: 0,
+        },
+    );
+}
+
+/// Declared entries larger than the deposited balance are rejected even when
+/// the vault alone would cover the loan amount.
+#[test]
+#[should_panic(expected = "Declared collateral exceeds deposited vault balance")]
+fn test_create_loan_request_rejects_declared_amount_above_vault_balance() {
+    let (env, contract_id, _admin, borrower, collateral_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    client.create_loan_request(
+        &borrower,
+        &LoanRequestInput {
+            amount: 1_000_0000000,
+            duration_days: 30,
+            interest_rate_bps: 1000,
+            max_loan_amount: 100_000_0000000,
+            collateral_entries: vec![
+                &env,
+                CollateralEntry {
+                    asset: collateral_asset.clone(),
+                    amount: VAULT_SEED + 1,
+                },
+            ],
+            rate_model: InterestRateModel::Fixed,
+            reputation_tier: 0,
+        },
+    );
 }

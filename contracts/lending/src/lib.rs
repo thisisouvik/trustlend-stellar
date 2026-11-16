@@ -1163,14 +1163,17 @@ impl LendingContract {
         }
 
         // Check borrowing power constraint: after withdrawal, borrowing power
-        // must still cover all active loans.
+        // must still cover every loan that encumbers collateral (pending,
+        // approved and active), so a borrower cannot drain the vault between
+        // creating a request and the loan being activated.
         let borrowing_power = Self::compute_borrowing_power_from_entries(&env, &new_entries);
-        let total_active_debt: i128 = Self::get_total_active_debt_of_borrower(&env, &borrower);
+        let total_encumbered_debt: i128 =
+            Self::get_total_encumbered_debt_of_borrower(&env, &borrower);
 
-        if borrowing_power < total_active_debt {
+        if borrowing_power < total_encumbered_debt {
             panic!(
-                "Withdrawal would leave loans under-collateralized: borrowing power {} < debt {}",
-                borrowing_power, total_active_debt,
+                "Withdrawal would leave pending or active loans under-collateralized: borrowing power {} < debt {}",
+                borrowing_power, total_encumbered_debt,
             );
         }
 
@@ -1859,6 +1862,28 @@ impl LendingContract {
                 total_debt = total_debt
                     .checked_add(loan.remaining_due)
                     .expect("Overflow summing active debt");
+            }
+        }
+        total_debt
+    }
+
+    /// Get the total debt that encumbers a borrower's collateral: loans in
+    /// `Pending`, `Approved` or `Active` status. Loans that are repaid,
+    /// defaulted or cancelled release their collateral lock.
+    /// Used to enforce collateralization on withdrawal.
+    fn get_total_encumbered_debt_of_borrower(env: &Env, borrower: &Address) -> i128 {
+        let loan_count = Self::get_borrower_loan_count(env.clone(), borrower.clone());
+        let mut total_debt: i128 = 0;
+        for i in 0..loan_count {
+            let loan_id = Self::get_borrower_loan_at(env.clone(), borrower.clone(), i);
+            let loan = Self::get_loan(env.clone(), loan_id);
+            if loan.status == LoanStatus::Pending
+                || loan.status == LoanStatus::Approved
+                || loan.status == LoanStatus::Active
+            {
+                total_debt = total_debt
+                    .checked_add(loan.remaining_due)
+                    .expect("Overflow summing encumbered debt");
             }
         }
         total_debt

@@ -67,8 +67,9 @@ export async function deposit(depositorAddress: string, amountStroops: bigint) {
   return { txHash: hash };
 }
 
-export async function withdraw(depositorAddress: string) {
-  const { hash } = await write("withdraw", [addressToScVal(depositorAddress)], depositorAddress);
+/** Withdraw `amountStroops` of principal plus all accrued yield; the rest stays deposited. */
+export async function withdraw(depositorAddress: string, amountStroops: bigint) {
+  const { hash } = await write("withdraw", [addressToScVal(depositorAddress), i128ToScVal(amountStroops)], depositorAddress);
   return { txHash: hash };
 }
 

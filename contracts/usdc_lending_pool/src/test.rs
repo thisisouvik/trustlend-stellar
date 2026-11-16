@@ -233,7 +233,7 @@ fn test_withdraw_returns_principal_plus_yield() {
     // 5% annual / 2 years ≈ 2.5% of 100M = ~2.5M
     assert!(expected_yield > 0, "yield should accrue over ledger time");
 
-    client.withdraw(&user);
+    client.withdraw(&user, &client.get_deposit(&user).0);
 
     let balance_after_withdraw = token_client.balance(&user);
     let received = balance_after_withdraw - balance_after_deposit;
@@ -254,7 +254,7 @@ fn test_withdraw_updates_pool_total_withdrawn() {
     env.ledger().with_mut(|li| li.sequence_number += 100_u32);
 
     let (principal, yield_amt) = client.get_deposit(&user);
-    client.withdraw(&user);
+    client.withdraw(&user, &client.get_deposit(&user).0);
 
     let state = client.get_pool_state();
     assert_eq!(state.total_withdrawn, principal + yield_amt);
@@ -266,7 +266,7 @@ fn test_withdraw_clears_deposit_record() {
     let client = UsdcLendingPoolClient::new(&env, &pool_id);
 
     client.deposit(&user, &100_000_000_i128);
-    client.withdraw(&user);
+    client.withdraw(&user, &client.get_deposit(&user).0);
 
     let (principal, accrued) = client.get_deposit(&user);
     assert_eq!(principal, 0);
@@ -278,7 +278,7 @@ fn test_withdraw_clears_deposit_record() {
 fn test_withdraw_without_deposit_panics() {
     let (env, pool_id, _admin, user, _usdc) = setup();
     let client = UsdcLendingPoolClient::new(&env, &pool_id);
-    client.withdraw(&user);
+    client.withdraw(&user, &1_000_000);
 }
 
 // ─── Yield accrual tests ──────────────────────────────────────────────────────
@@ -448,11 +448,11 @@ fn test_no_yield_without_funding() {
 
     assert_eq!(client.get_deposit(&user1), (100_000_000, 0));
     let before = token.balance(&user1);
-    client.withdraw(&user1);
+    client.withdraw(&user1, &client.get_deposit(&user1).0);
     assert_eq!(token.balance(&user1) - before, 100_000_000);
 
     // The second depositor's principal is intact.
-    client.withdraw(&user2);
+    client.withdraw(&user2, &client.get_deposit(&user2).0);
     assert_eq!(token.balance(&user2), 100_000_000);
     assert_eq!(token.balance(&pool_id), 0);
     assert_fully_backed(&env, &pool_id, &usdc);
@@ -471,7 +471,7 @@ fn test_direct_transfer_is_not_yield() {
 
     assert_eq!(client.get_deposit(&user), (100_000_000, 0));
     let before = token.balance(&user);
-    client.withdraw(&user);
+    client.withdraw(&user, &client.get_deposit(&user).0);
     assert_eq!(token.balance(&user) - before, 100_000_000);
     assert_eq!(client.get_pool_state().yield_reserve, 0);
 }
@@ -499,7 +499,7 @@ fn test_yield_capped_by_funded_reserve() {
     assert_eq!(client.get_deposit(&user), (100_000_000, 1_000_000));
 
     let before = token.balance(&user);
-    client.withdraw(&user);
+    client.withdraw(&user, &client.get_deposit(&user).0);
     assert_eq!(token.balance(&user) - before, 101_000_000);
     assert_eq!(token.balance(&pool_id), 0);
     assert_eq!(client.get_pool_state().total_yield_paid, 1_000_000);
@@ -525,14 +525,14 @@ fn test_reserve_shortfall_shared_pro_rata() {
     assert_eq!(client.get_deposit(&large).1, 3_000_000);
 
     let before = token.balance(&small);
-    client.withdraw(&small);
+    client.withdraw(&small, &client.get_deposit(&small).0);
     assert_eq!(token.balance(&small) - before, 101_000_000);
     assert_fully_backed(&env, &pool_id, &usdc);
 
     // The remaining depositor's share is untouched by the early exit.
     advance(&env, YEAR);
     assert_eq!(client.get_deposit(&large).1, 3_000_000);
-    client.withdraw(&large);
+    client.withdraw(&large, &client.get_deposit(&large).0);
     assert_eq!(token.balance(&large), 303_000_000);
     assert_eq!(token.balance(&pool_id), 0);
 }
@@ -647,16 +647,16 @@ fn test_multi_user_lifecycle_never_pays_unfunded_yield() {
     // Bob exits with his principal plus only funded yield.
     let (bob_principal, bob_yield) = client.get_deposit(&bob);
     assert!(bob_yield > 2_500_000 && bob_yield < 3_000_000);
-    client.withdraw(&bob);
+    client.withdraw(&bob, &client.get_deposit(&bob).0);
     assert_eq!(token.balance(&bob), bob_principal + bob_yield);
     assert_fully_backed(&env, &pool_id, &usdc);
 
     // More funding arrives; the remaining depositors exit.
     client.fund_yield(&funder, &20_000_000);
     advance(&env, YEAR);
-    client.withdraw(&alice);
+    client.withdraw(&alice, &client.get_deposit(&alice).0);
     assert_fully_backed(&env, &pool_id, &usdc);
-    client.withdraw(&carol);
+    client.withdraw(&carol, &client.get_deposit(&carol).0);
     assert_fully_backed(&env, &pool_id, &usdc);
 
     // Nobody lost principal.
@@ -683,4 +683,94 @@ fn test_multi_user_lifecycle_never_pays_unfunded_yield() {
         state.yield_reserve + state.yield_unclaimed
     );
     assert!(state.yield_unclaimed < 10, "only rounding dust may remain");
+}
+
+// ─── Partial withdrawals & rate-change limit ──────────────────────────────────
+
+#[test]
+fn test_partial_withdraw_keeps_remaining_principal_earning() {
+    let (env, pool_id, _admin, user, usdc) = setup();
+    let client = UsdcLendingPoolClient::new(&env, &pool_id);
+    let token = TokenClient::new(&env, &usdc);
+    client.deposit(&user, &100_000_000);
+    advance(&env, 3_153_600);
+
+    let (_, pending) = client.get_deposit(&user);
+    assert!(pending > 0);
+    let before = token.balance(&user);
+    client.withdraw(&user, &40_000_000);
+
+    // Requested principal plus all accrued yield is paid out.
+    assert_eq!(token.balance(&user) - before, 40_000_000 + pending);
+    let (principal, yield_left) = client.get_deposit(&user);
+    assert_eq!(principal, 60_000_000);
+    assert_eq!(yield_left, 0);
+
+    let pool = client.get_pool_state();
+    assert_eq!(pool.total_principal, 60_000_000);
+    assert_eq!(pool.total_withdrawn, 40_000_000 + pending);
+    assert_eq!(pool.total_yield_paid, pending);
+
+    // The remainder keeps earning.
+    advance(&env, 1_000_000);
+    let (_, later) = client.get_deposit(&user);
+    assert!(later > 0, "remaining principal should keep accruing yield");
+    assert_fully_backed(&env, &pool_id, &usdc);
+}
+
+#[test]
+fn test_partial_then_full_withdraw_closes_position() {
+    let (env, pool_id, _admin, user, usdc) = setup();
+    let client = UsdcLendingPoolClient::new(&env, &pool_id);
+    client.deposit(&user, &100_000_000);
+    client.withdraw(&user, &30_000_000);
+    client.withdraw(&user, &70_000_000);
+    assert_eq!(client.get_deposit(&user), (0, 0));
+    assert_eq!(client.get_pool_state().total_principal, 0);
+    assert_fully_backed(&env, &pool_id, &usdc);
+}
+
+#[test]
+#[should_panic(expected = "amount exceeds deposited principal")]
+fn test_withdraw_rejects_amount_above_principal() {
+    let (env, pool_id, _admin, user, _usdc) = setup();
+    let client = UsdcLendingPoolClient::new(&env, &pool_id);
+    client.deposit(&user, &100_000_000);
+    client.withdraw(&user, &100_000_001);
+}
+
+#[test]
+#[should_panic(expected = "amount must be > 0")]
+fn test_withdraw_rejects_zero_amount() {
+    let (env, pool_id, _admin, user, _usdc) = setup();
+    let client = UsdcLendingPoolClient::new(&env, &pool_id);
+    client.deposit(&user, &100_000_000);
+    client.withdraw(&user, &0);
+}
+
+#[test]
+fn test_set_yield_rate_allows_max_step() {
+    let (env, pool_id, admin, _user, _usdc) = setup();
+    let client = UsdcLendingPoolClient::new(&env, &pool_id);
+    client.set_yield_rate(&admin, &1000_u32);
+    assert_eq!(client.get_pool_state().annual_yield_bps, 1000);
+    client.set_yield_rate(&admin, &500_u32);
+    assert_eq!(client.get_pool_state().annual_yield_bps, 500);
+}
+
+#[test]
+#[should_panic(expected = "yield rate change exceeds max step")]
+fn test_set_yield_rate_rejects_increase_above_step() {
+    let (env, pool_id, admin, _user, _usdc) = setup();
+    let client = UsdcLendingPoolClient::new(&env, &pool_id);
+    client.set_yield_rate(&admin, &1001_u32);
+}
+
+#[test]
+#[should_panic(expected = "yield rate change exceeds max step")]
+fn test_set_yield_rate_rejects_decrease_above_step() {
+    let (env, pool_id, admin, _user, _usdc) = setup();
+    let client = UsdcLendingPoolClient::new(&env, &pool_id);
+    client.set_yield_rate(&admin, &1000_u32);
+    client.set_yield_rate(&admin, &499_u32);
 }

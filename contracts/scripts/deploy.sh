@@ -148,6 +148,19 @@ stellar contract invoke \
   -- initialize \
   --admin "$ADMIN_ADDRESS"
 
+# Escrow takes custody of lender funds and only accepts allowlisted tokens
+# (Issue #417). Allow the native XLM Stellar Asset Contract.
+XLM_SAC_ID=$(stellar contract id asset --asset native --network "$NETWORK")
+echo "▶ Allowing native XLM ($XLM_SAC_ID) for escrow holds…"
+stellar contract invoke \
+  --id "$ESCROW_ID" \
+  --source "$ADMIN_KEY" \
+  --network "$NETWORK" \
+  -- set_allowed_token \
+  --caller "$ADMIN_ADDRESS" \
+  --token "$XLM_SAC_ID" \
+  --allowed true
+
 echo "▶ Initialising LendingContract…"
 stellar contract invoke \
   --id "$LENDING_ID" \

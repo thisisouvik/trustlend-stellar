@@ -92,7 +92,9 @@ export interface EscrowHold {
   loanId: number;
   lender: string;
   borrower: string;
-  /** Amount in stroops */
+  /** SEP-41 token contract held in custody (e.g. native XLM or USDC). */
+  token: string;
+  /** Amount in the token's smallest unit (stroops for XLM) */
   amount: bigint;
   heldAt: bigint;
   expiresAt: bigint;

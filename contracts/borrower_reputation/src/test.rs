@@ -577,3 +577,74 @@ fn test_packed_bitmask_zk_tier_upgrade_flag() {
     assert!((flags & FLAG_ZK_UPGRADED) != 0);
     assert!((flags & FLAG_IS_ACTIVE) != 0);
 }
+
+// ─── i128 Score Arithmetic (issue #420) ──────────────────────────────────────
+// `add_reputation_event` used to compute `reputation_score as i32 + delta`,
+// which wrapped any score above i32::MAX to a negative value (then clamped to
+// 0), silently wiping out long-standing borrowers' reputation.
+
+/// Writes `score` straight into the borrower's stored profile, standing in
+/// for a long history of events that would be impractical to replay.
+fn seed_score(env: &Env, contract_id: &Address, borrower: &Address, score: i128) {
+    env.as_contract(contract_id, || {
+        let key = DataKey::BorrowerProfile(borrower.clone());
+        let mut profile: BorrowerProfile = env.storage().persistent().get(&key).unwrap();
+        profile.reputation_score = score;
+        profile.reputation_tier = ReputationTier::Platinum;
+        env.storage().persistent().set(&key, &profile);
+    });
+}
+
+#[test]
+fn test_score_above_i32_max_increases_without_truncation() {
+    let (env, contract_id, admin, borrower) = setup();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+
+    let start = i32::MAX as i128 + 1_000;
+    seed_score(&env, &contract_id, &borrower, start);
+
+    client.add_reputation_event(&admin, &borrower, &ReputationEvent::LoanRepaidOnTime);
+
+    let profile = client.get_profile(&borrower);
+    assert_eq!(profile.reputation_score, start + 20);
+    assert_eq!(profile.reputation_tier, ReputationTier::Platinum);
+    assert_eq!(profile.loan_count, 1);
+}
+
+#[test]
+fn test_score_above_i32_max_decreases_without_truncation() {
+    let (env, contract_id, admin, borrower) = setup();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+
+    // A penalty that crosses back below i32::MAX must not wrap either.
+    let start = i32::MAX as i128 + 50;
+    seed_score(&env, &contract_id, &borrower, start);
+
+    client.add_reputation_event(&admin, &borrower, &ReputationEvent::LoanDefaulted);
+
+    let profile = client.get_profile(&borrower);
+    assert_eq!(profile.reputation_score, start - 100);
+    assert_eq!(profile.reputation_tier, ReputationTier::Platinum);
+    assert_eq!(profile.default_count, 1);
+}
+
+#[test]
+fn test_score_saturates_at_i128_max() {
+    let (env, contract_id, admin, borrower) = setup();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+
+    seed_score(&env, &contract_id, &borrower, i128::MAX - 10);
+    client.add_reputation_event(&admin, &borrower, &ReputationEvent::TestLoanRepaid);
+
+    assert_eq!(client.get_reputation_score(&borrower), i128::MAX);
+}
+
+#[test]
+fn test_score_never_goes_negative() {
+    let (env, contract_id, admin, borrower) = setup();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+
+    client.add_reputation_event(&admin, &borrower, &ReputationEvent::LoanLate1Day);
+    assert_eq!(client.get_reputation_score(&borrower), 0);
+    assert_eq!(client.get_profile(&borrower).reputation_tier, ReputationTier::None);
+}

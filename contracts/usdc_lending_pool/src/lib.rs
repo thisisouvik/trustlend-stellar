@@ -1,7 +1,12 @@
 //! # USDC Lending Pool — Soroban Smart Contract
 //!
-//! Accepts USDC deposits from lenders and allows them to withdraw their
-//! principal plus accrued yield at any time.
+//! Accepts USDC deposits from lenders and allows them to withdraw all or part
+//! of their principal, plus accrued yield, at any time (Issue #421). Principal
+//! left in the pool after a partial withdrawal keeps earning yield.
+//!
+//! The admin can adjust the yield rate, but each change is bounded to
+//! `MAX_RATE_CHANGE_BPS` and changes must be `RATE_CHANGE_COOLDOWN_LEDGERS`
+//! apart, so depositors are not exposed to sudden rate shocks.
 //!
 //! ## Yield Model (Issue #337)
 //! Yield is only ever paid out of USDC that was explicitly paid into the pool
@@ -46,6 +51,16 @@ const MAX_BPS: u64 = 10_000;
 
 /// Fixed-point scale of the yield index (yield per unit of principal).
 const INDEX_PRECISION: u128 = 1_000_000_000_000_000_000;
+
+/// Largest change to `annual_yield_bps` a single `set_yield_rate` call may
+/// make (500 bps = 5.00 percentage points).
+pub const MAX_RATE_CHANGE_BPS: u32 = 500;
+
+/// Minimum ledgers between two `set_yield_rate` calls (~1 day at a 5 s close
+/// time). Together with `MAX_RATE_CHANGE_BPS` this bounds how fast the rate
+/// can move, so depositors cannot be hit with a sudden rate shock by a burst
+/// of back-to-back updates.
+pub const RATE_CHANGE_COOLDOWN_LEDGERS: u32 = 17_280;
 
 // ─── Storage types ────────────────────────────────────────────────────────────
 
@@ -105,6 +120,9 @@ pub enum DataKey {
     Deposit(Address),
     /// Whether the pool is paused for deposits/withdrawals.
     IsPaused,
+    /// Ledger of the last `set_yield_rate` call. Kept out of `PoolState` so
+    /// existing pool state still decodes after an upgrade.
+    LastRateChangeLedger,
 }
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
@@ -225,41 +243,68 @@ impl UsdcLendingPool {
         );
     }
 
-    /// Withdraw principal + earned yield from the lending pool.
+    /// Withdraw `amount` of principal plus all earned yield from the pool.
+    ///
+    /// Partial withdrawals are supported: any principal left behind keeps
+    /// earning yield. Withdrawing the full principal closes the position and
+    /// removes the deposit record. Either way, all yield earned so far is paid
+    /// out with the withdrawal, so the remaining principal restarts accrual
+    /// from the current index.
     ///
     /// Yield is limited to what has been funded via `fund_yield` and released
     /// to the depositor; it is never paid out of other depositors' principal.
     ///
     /// # Arguments
     /// * `depositor` – Address to withdraw on behalf of (must have authorised this call).
-    pub fn withdraw(env: Env, depositor: Address) {
+    /// * `amount`    – Principal to withdraw (must be > 0 and <= current principal).
+    pub fn withdraw(env: Env, depositor: Address, amount: i128) {
         depositor.require_auth();
         Self::assert_not_paused(&env);
 
+        if amount <= 0 {
+            panic!("amount must be > 0");
+        }
+
+        let key = DataKey::Deposit(depositor.clone());
         let record: DepositRecord = env
             .storage()
             .persistent()
-            .get(&DataKey::Deposit(depositor.clone()))
+            .get(&key)
             .expect("no deposit found for this address");
 
         if record.principal <= 0 {
             panic!("nothing to withdraw");
         }
+        if amount > record.principal {
+            panic!("amount exceeds deposited principal");
+        }
 
         let current_ledger = env.ledger().sequence();
         let mut pool = Self::accrued_pool(&env);
         let yield_amount = Self::take_pending_yield(&mut pool, &record);
-        let total_payout = record.principal + yield_amount;
+        let total_payout = amount + yield_amount;
 
-        pool.total_principal -= record.principal;
+        pool.total_principal -= amount;
         pool.total_withdrawn += total_payout;
         pool.total_yield_paid += yield_amount;
+        let yield_index = pool.yield_index;
         Self::save_pool(&env, &pool);
 
-        // Clear the deposit record.
-        env.storage()
-            .persistent()
-            .remove(&DataKey::Deposit(depositor.clone()));
+        let remaining_principal = record.principal - amount;
+        if remaining_principal == 0 {
+            env.storage().persistent().remove(&key);
+        } else {
+            // Yield up to now has been paid out, so the remaining principal
+            // accrues from the current index.
+            env.storage().persistent().set(
+                &key,
+                &DepositRecord {
+                    principal: remaining_principal,
+                    deposit_ledger: record.deposit_ledger,
+                    yield_index,
+                },
+            );
+        }
 
         // Transfer payout from pool → depositor.
         let usdc = Self::usdc_client(&env);
@@ -267,7 +312,7 @@ impl UsdcLendingPool {
 
         env.events().publish(
             (symbol_short!("pool"), symbol_short!("withdraw")),
-            (depositor, record.principal, yield_amount, current_ledger),
+            (depositor, amount, yield_amount, current_ledger),
         );
     }
 
@@ -358,6 +403,10 @@ impl UsdcLendingPool {
 
     /// Update the maximum annual yield rate (admin only).
     ///
+    /// Rate changes are velocity-bounded: each call may move the rate by at
+    /// most `MAX_RATE_CHANGE_BPS`, and successive calls must be at least
+    /// `RATE_CHANGE_COOLDOWN_LEDGERS` apart.
+    ///
     /// Yield is accrued at the old rate up to this ledger before the new rate
     /// takes effect.
     pub fn set_yield_rate(env: Env, admin: Address, new_annual_yield_bps: u32) {
@@ -371,9 +420,26 @@ impl UsdcLendingPool {
             panic!("annual_yield_bps must be <= 10000");
         }
 
+        let current_ledger = env.ledger().sequence();
+        if let Some(last) = env
+            .storage()
+            .instance()
+            .get::<DataKey, u32>(&DataKey::LastRateChangeLedger)
+        {
+            if current_ledger < last.saturating_add(RATE_CHANGE_COOLDOWN_LEDGERS) {
+                panic!("yield rate change cooldown active");
+            }
+        }
+
         let mut pool = Self::accrued_pool(&env);
+        if new_annual_yield_bps.abs_diff(pool.annual_yield_bps) > MAX_RATE_CHANGE_BPS {
+            panic!("yield rate change exceeds max step");
+        }
         pool.annual_yield_bps = new_annual_yield_bps;
         Self::save_pool(&env, &pool);
+        env.storage()
+            .instance()
+            .set(&DataKey::LastRateChangeLedger, &current_ledger);
 
         env.events().publish(
             (symbol_short!("pool"), symbol_short!("rate")),

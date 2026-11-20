@@ -143,13 +143,16 @@ fn test_withdraw_principal_and_compounded_interest() {
     // Alice withdraws all her shares
     let withdrawn = client.withdraw(&alice, &alice_shares);
 
-    // 1000 deposit + 198 net compounded yield = 1198 XLM
-    let expected_payout = 1_198_0000000i128;
+    // 1000 deposit + 198 net compounded yield = 1198 XLM, less the
+    // VIRTUAL_OFFSET share of the yield (1e6 / (1e10 + 1e6) of 198 XLM).
+    let expected_payout = 1_197_9802019i128;
     assert_eq!(withdrawn, expected_payout);
     assert_eq!(token::Client::new(&env, &asset_token).balance(&alice), expected_payout);
     assert_eq!(client.get_shares_of(&alice), 0);
     assert_eq!(client.get_total_shares(), 0);
-    assert_eq!(client.get_total_managed_assets(), 0);
+    // The dust attributed to the virtual shares stays in the vault, backed.
+    assert_eq!(client.get_total_managed_assets(), 1_198_0000000i128 - expected_payout);
+    assert_eq!(balance_of(&env, &asset_token, &vault_id), client.get_total_managed_assets());
 }
 
 #[test]
@@ -274,10 +277,13 @@ fn test_keeper_fee_is_bounded_by_actual_yield_at_max_fee() {
     assert_eq!(balance_of(&env, &asset_token, &keeper), fee);
     assert_eq!(client.get_total_managed_assets(), deposit + real_yield - fee);
 
-    // Alice can still redeem everything accounted to her.
+    // Alice redeems her principal plus all but the virtual shares' dust
+    // portion of the yield (1e6 / (1e10 + 1e6) of 9 XLM = 9000 stroops).
     let alice_shares = client.get_shares_of(&alice);
-    assert_eq!(client.withdraw(&alice, &alice_shares), deposit + real_yield - fee);
-    assert_eq!(balance_of(&env, &asset_token, &vault_id), 0);
+    let payout = client.withdraw(&alice, &alice_shares);
+    assert_eq!(payout, deposit + real_yield - fee - 9000);
+    assert_eq!(balance_of(&env, &asset_token, &vault_id), 9000);
+    assert_backed(&env, &asset_token, &vault_id, &client);
 }
 
 #[test]
@@ -396,4 +402,115 @@ fn test_managed_assets_always_backed_by_vault_balance() {
     client.withdraw(&alice, &alice_shares);
     assert_backed(&env, &asset_token, &vault_id, &client);
     assert_eq!(client.get_total_shares(), 0);
+}
+
+// ── Share inflation / donation attack (issue #419) ───────────────────────────
+// A first depositor minting 1 share for 1 stroop, then donating a large amount
+// and having it harvested, used to push the exchange rate so high that every
+// later deposit below the donation size minted zero shares (and panicked).
+// The virtual share/asset offset bounds the rate a donation can force.
+
+/// Runs the attack from the issue: 1-stroop first deposit, 10,000 XLM
+/// donation, then a harvest that books the donation into the vault.
+fn inflate_exchange_rate(
+    env: &Env,
+    admin: &Address,
+    asset_token: &Address,
+    vault_id: &Address,
+    client: &AutoCompoundVaultContractClient,
+) -> Address {
+    let attacker = Address::generate(env);
+    mint_tokens(env, asset_token, &attacker, 1);
+    assert_eq!(client.deposit(&attacker, &1), 1);
+
+    let donation = 10_000_0000000i128;
+    mint_tokens(env, asset_token, vault_id, donation);
+    client.harvest(admin);
+    assert_eq!(client.get_total_shares(), 1);
+    assert!(client.get_total_managed_assets() > 9_000_0000000i128);
+    attacker
+}
+
+#[test]
+fn test_donation_does_not_round_subsequent_deposits_to_zero() {
+    let (env, admin, asset_token, _lending_id, vault_id, client) = setup_test();
+    inflate_exchange_rate(&env, &admin, &asset_token, &vault_id, &client);
+
+    // Deposits far below the 10,000 XLM donation still mint shares, and each
+    // depositor can redeem what they put in minus at most one share's worth.
+    let max_share_value = client.get_exchange_rate() / PRECISION + 1;
+    for amount in [1_0000000i128, 100_0000000i128, 9_999_0000000i128] {
+        let user = Address::generate(&env);
+        mint_tokens(&env, &asset_token, &user, amount);
+
+        let shares = client.deposit(&user, &amount);
+        assert!(shares > 0, "deposit of {} minted zero shares", amount);
+
+        let redeemable = client.get_user_asset_balance(&user);
+        assert!(redeemable <= amount);
+        assert!(
+            amount - redeemable <= max_share_value,
+            "deposit of {} lost {} to rounding",
+            amount,
+            amount - redeemable
+        );
+        assert_backed(&env, &asset_token, &vault_id, &client);
+    }
+}
+
+#[test]
+fn test_inflation_attack_is_unprofitable_for_attacker() {
+    let (env, admin, asset_token, _lending_id, vault_id, client) = setup_test();
+    let attacker = inflate_exchange_rate(&env, &admin, &asset_token, &vault_id, &client);
+
+    let victim = Address::generate(&env);
+    let victim_deposit = 100_0000000i128;
+    mint_tokens(&env, &asset_token, &victim, victim_deposit);
+    client.deposit(&victim, &victim_deposit);
+
+    // The attacker's single share captures only a sliver of the donation.
+    let attacker_payout = client.withdraw(&attacker, &1);
+    assert!(attacker_payout < 1_0000000i128, "attacker recovered {}", attacker_payout);
+
+    // The victim keeps essentially all of their deposit.
+    let victim_shares = client.get_shares_of(&victim);
+    let victim_payout = client.withdraw(&victim, &victim_shares);
+    assert!(victim_deposit - victim_payout < 1_0000000i128);
+    assert_backed(&env, &asset_token, &vault_id, &client);
+}
+
+#[test]
+#[should_panic(expected = "Deposit yielded zero shares")]
+fn test_dust_deposit_below_one_share_still_panics() {
+    let (env, admin, asset_token, _lending_id, vault_id, client) = setup_test();
+    inflate_exchange_rate(&env, &admin, &asset_token, &vault_id, &client);
+
+    // Worth less than one (inflated) share: rejected rather than silently
+    // donated to existing shareholders.
+    let user = Address::generate(&env);
+    mint_tokens(&env, &asset_token, &user, 1000);
+    client.deposit(&user, &1000);
+}
+
+#[test]
+fn test_deposit_after_full_exit_with_residual_assets() {
+    let (env, admin, asset_token, _lending_id, vault_id, client) = setup_test();
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    mint_tokens(&env, &asset_token, &alice, 1_000_0000000i128);
+    let alice_shares = client.deposit(&alice, &1_000_0000000i128);
+    mint_tokens(&env, &asset_token, &vault_id, 100_0000000i128);
+    client.harvest(&admin);
+    client.withdraw(&alice, &alice_shares);
+
+    // No shares remain but dust assets do; deposits must keep working.
+    assert_eq!(client.get_total_shares(), 0);
+    assert!(client.get_total_managed_assets() > 0);
+
+    mint_tokens(&env, &asset_token, &bob, 500_0000000i128);
+    let bob_shares = client.deposit(&bob, &500_0000000i128);
+    assert!(bob_shares > 0 && bob_shares <= 500_0000000i128);
+    assert!(client.get_user_asset_balance(&bob) <= 500_0000000i128 + client.get_total_managed_assets());
+    assert_backed(&env, &asset_token, &vault_id, &client);
 }

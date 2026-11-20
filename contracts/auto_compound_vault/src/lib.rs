@@ -12,6 +12,26 @@ pub const DEFAULT_HARVEST_FEE_BPS: u32 = 100; // 1%
 pub const MAX_HARVEST_FEE_BPS: u32 = 1000; // 10%
 pub const PRECISION: i128 = 10_000_000; // 1.0000000 precision scaling factor
 
+/// Virtual shares and virtual assets added to both sides of every share/asset
+/// conversion (ERC-4626 "virtual offset" mitigation, issue #419).
+///
+/// The vault behaves as if `VIRTUAL_OFFSET` shares backed by `VIRTUAL_OFFSET`
+/// asset units always existed. Because they start at a 1:1 ratio, honest
+/// deposits still mint shares 1:1 at the initial exchange rate, but the
+/// classic first-depositor inflation attack stops working:
+///
+/// * A donation `D` can only raise the price of one share to roughly
+///   `D / VIRTUAL_OFFSET`. After a 10,000 XLM donation only deposits of about
+///   0.01 XLM or less fail to mint a share, and rounding loss per deposit is
+///   at most the value of one share.
+/// * Almost all of the donation accrues to the virtual shares rather than the
+///   attacker's own shares, so the attack costs the attacker roughly the
+///   whole donation.
+///
+/// The virtual shares are never redeemable, so they can only leave a dust
+/// amount of assets in the vault; they never make it insolvent.
+pub const VIRTUAL_OFFSET: i128 = 1_000_000; // 0.1 XLM (7 decimals)
+
 #[contracttype]
 pub enum DataKey {
     Admin,
@@ -32,6 +52,11 @@ pub enum DataKey {
 // measured arriving at the vault (`deposit` credits the observed balance delta,
 // `harvest` only recognises `balance - TotalManagedAssets`), and no caller can
 // supply an amount the vault takes on trust.
+//
+// Share/asset conversions include `VIRTUAL_OFFSET` virtual shares and assets
+// and always round down in favour of the vault, which keeps
+// `TotalManagedAssets >= TotalShares`; redemptions therefore never pay out
+// more than `TotalManagedAssets`.
 
 #[contract]
 pub struct AutoCompoundVaultContract;
@@ -84,11 +109,10 @@ impl AutoCompoundVaultContract {
         let total_shares = Self::get_total_shares(env.clone());
         let total_managed = Self::get_total_managed_assets(env.clone());
 
-        let shares = if total_shares == 0 || total_managed == 0 {
-            received
-        } else {
-            (received * total_shares) / total_managed
-        };
+        // Rounds down in favour of the vault. The virtual offset keeps this
+        // well-defined for an empty vault and bounds the exchange rate a
+        // donation can force (see `VIRTUAL_OFFSET`).
+        let shares = Self::assets_to_shares(received, total_shares, total_managed);
 
         if shares <= 0 {
             panic!("Deposit yielded zero shares");
@@ -125,7 +149,8 @@ impl AutoCompoundVaultContract {
         let total_shares = Self::get_total_shares(env.clone());
         let total_managed = Self::get_total_managed_assets(env.clone());
 
-        let amount = (shares * total_managed) / total_shares;
+        // Rounds down in favour of the vault.
+        let amount = Self::shares_to_assets(shares, total_shares, total_managed);
         if amount <= 0 {
             panic!("Shares yield zero asset payout");
         }
@@ -291,16 +316,25 @@ impl AutoCompoundVaultContract {
         }
         let user_shares = Self::get_shares_of(env.clone(), user);
         let total_managed = Self::get_total_managed_assets(env);
-        (user_shares * total_managed) / total_shares
+        Self::shares_to_assets(user_shares, total_shares, total_managed)
     }
 
+    /// Assets per share scaled by `PRECISION`, including the virtual offset,
+    /// i.e. the rate `deposit` and `withdraw` actually use.
     pub fn get_exchange_rate(env: Env) -> i128 {
         let total_shares = Self::get_total_shares(env.clone());
-        if total_shares == 0 {
-            return PRECISION;
-        }
         let total_managed = Self::get_total_managed_assets(env);
-        (total_managed * PRECISION) / total_shares
+        ((total_managed + VIRTUAL_OFFSET) * PRECISION) / (total_shares + VIRTUAL_OFFSET)
+    }
+
+    /// Shares minted for `assets`, rounded down.
+    fn assets_to_shares(assets: i128, total_shares: i128, total_managed: i128) -> i128 {
+        (assets * (total_shares + VIRTUAL_OFFSET)) / (total_managed + VIRTUAL_OFFSET)
+    }
+
+    /// Assets redeemed for `shares`, rounded down.
+    fn shares_to_assets(shares: i128, total_shares: i128, total_managed: i128) -> i128 {
+        (shares * (total_managed + VIRTUAL_OFFSET)) / (total_shares + VIRTUAL_OFFSET)
     }
 
     fn require_harvester(env: &Env, caller: &Address) {

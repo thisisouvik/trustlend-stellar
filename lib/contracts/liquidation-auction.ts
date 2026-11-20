@@ -36,6 +36,10 @@ export interface AuctionRecord {
   loanId: number;
   borrower: string;
   collateralAsset: string;
+  /** Token bids are paid in (Issue #418). */
+  paymentToken: string;
+  /** Pool / treasury that receives the winning bid or unsold collateral. */
+  proceedsRecipient: string;
   collateralAmount: bigint;
   debtAmount: bigint;
   startPrice: bigint;
@@ -55,12 +59,14 @@ export async function getAuction(loanId: number, caller: string): Promise<Auctio
     loanId: Number(r.loan_id ?? loanId),
     borrower: String(r.borrower ?? ""),
     collateralAsset: String(r.collateral_asset ?? r.collateral_token ?? ""),
+    paymentToken: String(r.payment_token ?? ""),
+    proceedsRecipient: String(r.proceeds_recipient ?? ""),
     collateralAmount: toBig(r.collateral_amount),
     debtAmount: toBig(r.debt_amount ?? r.debt),
     startPrice: toBig(r.start_price),
     floorPrice: toBig(r.floor_price ?? r.min_price),
     startedAt: toBig(r.started_at ?? r.start_time),
-    endsAt: toBig(r.ends_at ?? r.end_time),
+    endsAt: toBig(r.expires_at ?? r.ends_at ?? r.end_time),
     status: variant(r.status),
   };
 }
@@ -70,6 +76,12 @@ export async function currentPrice(loanId: number, caller: string): Promise<bigi
   return toBig(await read("current_price", [u32ToScVal(loanId)], caller));
 }
 
+/**
+ * Buy the auctioned collateral. The contract transfers `bidAmountStroops` of
+ * the auction's payment token from the bidder to the proceeds recipient and
+ * the collateral to the bidder in the same transaction (Issue #418), so the
+ * bidder must hold at least the bid amount or the call reverts.
+ */
 export async function placeBid(bidderAddress: string, loanId: number, bidAmountStroops: bigint) {
   const { returnValue, hash } = await write(
     "place_bid",

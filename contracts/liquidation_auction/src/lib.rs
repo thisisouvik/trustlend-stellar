@@ -1,6 +1,6 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env};
 
 #[contracttype]
 #[derive(Clone, Eq, PartialEq)]
@@ -11,11 +11,29 @@ pub enum AuctionStatus {
     ExpiredUnsold,
 }
 
+/// Tokens and recipient used to settle an auction (Issue #418).
+#[contracttype]
+#[derive(Clone)]
+#[cfg_attr(test, derive(Debug))]
+pub struct AuctionAssets {
+    /// SEP-41 token being liquidated. The auction holds `collateral_amount`
+    /// of it in custody from `start_auction` until settlement.
+    pub collateral_token: Address,
+    /// SEP-41 token bids are paid in (the loan's debt asset, e.g. XLM).
+    pub payment_token: Address,
+    /// Lending pool / treasury that is owed the debt: receives the winning
+    /// bid, or the unsold collateral if the auction expires.
+    pub proceeds_recipient: Address,
+}
+
 #[contracttype]
 #[derive(Clone)]
 pub struct LiquidationAuction {
     pub loan_id: u32,
     pub borrower: Address,
+    pub collateral_token: Address,
+    pub payment_token: Address,
+    pub proceeds_recipient: Address,
     pub collateral_amount: i128,
     pub debt_amount: i128,
     pub start_price: i128,
@@ -56,11 +74,19 @@ impl LiquidationAuctionContract {
         env.storage().instance().set(&DataKey::Admin, &admin);
     }
 
+    /// Start a Dutch auction for a defaulted loan's collateral.
+    ///
+    /// `collateral_amount` of `assets.collateral_token` is transferred from
+    /// `caller` (the admin / liquidation operator holding the seized
+    /// collateral) into this contract, so every auction is backed by
+    /// collateral in custody that can actually be delivered to the winner
+    /// (Issue #418).
     pub fn start_auction(
         env: Env,
         caller: Address,
         loan_id: u32,
         borrower: Address,
+        assets: AuctionAssets,
         collateral_amount: i128,
         debt_amount: i128,
         start_price: i128,
@@ -90,6 +116,13 @@ impl LiquidationAuctionContract {
             panic!("Duration must be greater than zero");
         }
 
+        // Take custody of the collateral being sold.
+        token::Client::new(&env, &assets.collateral_token).transfer(
+            &caller,
+            &env.current_contract_address(),
+            &collateral_amount,
+        );
+
         let started_at = env.ledger().timestamp();
         let expires_at = started_at
             .checked_add(duration_seconds)
@@ -97,6 +130,9 @@ impl LiquidationAuctionContract {
         let auction = LiquidationAuction {
             loan_id,
             borrower,
+            collateral_token: assets.collateral_token,
+            payment_token: assets.payment_token,
+            proceeds_recipient: assets.proceeds_recipient,
             collateral_amount,
             debt_amount,
             start_price,
@@ -140,6 +176,12 @@ impl LiquidationAuctionContract {
         )
     }
 
+    /// Buy the auctioned collateral at or above the current Dutch price.
+    ///
+    /// The bidder pays `bid_amount` of the payment token to the auction's
+    /// `proceeds_recipient` and receives the collateral from custody in the
+    /// same call (Issue #418). A bidder who cannot cover the payment cannot
+    /// win: the transfer fails and the whole bid reverts.
     pub fn place_bid(env: Env, bidder: Address, loan_id: u32, bid_amount: i128) -> AuctionSettlement {
         bidder.require_auth();
 
@@ -165,7 +207,8 @@ impl LiquidationAuctionContract {
         auction.status = AuctionStatus::Sold;
         auction.highest_bid = bid_amount;
         auction.recovered_amount = bid_amount;
-        auction.bad_debt = auction.debt_amount.saturating_sub(bid_amount);
+        // A bid above the debt leaves no bad debt (never a negative amount).
+        auction.bad_debt = auction.debt_amount.saturating_sub(bid_amount).max(0);
 
         let settlement = AuctionSettlement {
             loan_id,
@@ -177,6 +220,21 @@ impl LiquidationAuctionContract {
         env.storage()
             .persistent()
             .set(&DataKey::Auction(loan_id), &auction);
+
+        // Payment: bidder → proceeds recipient. Fails (reverting the bid) if
+        // the bidder's balance does not cover `bid_amount`.
+        token::Client::new(&env, &auction.payment_token).transfer(
+            &bidder,
+            &auction.proceeds_recipient,
+            &bid_amount,
+        );
+        // Delivery: collateral custody → bidder.
+        token::Client::new(&env, &auction.collateral_token).transfer(
+            &env.current_contract_address(),
+            &bidder,
+            &auction.collateral_amount,
+        );
+
         env.events().publish(
             (symbol_short!("auction"), symbol_short!("bid")),
             (loan_id, bidder, bid_amount, settlement.bad_debt),
@@ -185,6 +243,9 @@ impl LiquidationAuctionContract {
         settlement
     }
 
+    /// Close an auction that expired without a bid. The full debt becomes
+    /// bad debt and the unsold collateral is released from custody to the
+    /// `proceeds_recipient`, so it is never stranded in this contract.
     pub fn finalize_expired(env: Env, loan_id: u32) -> AuctionSettlement {
         let mut auction = Self::load_active_auction(&env, loan_id);
         let now = env.ledger().timestamp();
@@ -207,6 +268,13 @@ impl LiquidationAuctionContract {
         env.storage()
             .persistent()
             .set(&DataKey::Auction(loan_id), &auction);
+
+        token::Client::new(&env, &auction.collateral_token).transfer(
+            &env.current_contract_address(),
+            &auction.proceeds_recipient,
+            &auction.collateral_amount,
+        );
+
         env.events().publish(
             (symbol_short!("auction"), symbol_short!("expire")),
             (loan_id, auction.collateral_amount, settlement.bad_debt),

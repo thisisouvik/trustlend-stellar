@@ -615,7 +615,12 @@ impl BorrowerReputationContract {
         }
 
         let (delta, flag_default, flag_repaid) = Self::event_info(&event);
-        let new_score = (profile.reputation_score as i32 + delta).max(0) as i128;
+        // All arithmetic in i128 (the stored width): downcasting the score to
+        // i32 would wrap scores above i32::MAX. `delta as i128` only widens.
+        let new_score = profile
+            .reputation_score
+            .saturating_add(delta as i128)
+            .max(0);
         profile.reputation_score = new_score;
         profile.reputation_tier = Self::score_to_tier(new_score);
 

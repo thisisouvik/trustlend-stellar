@@ -310,7 +310,7 @@ impl DefaultManagementContract {
     /// fund movement this contract protects with N-of-M approval.
     pub fn add_to_insurance(env: Env, caller: Address, amount: i128) {
         caller.require_auth();
-        Self::assert_multisig_admin(&env, &caller);
+        Self::assert_insurance_authority(&env, &caller);
 
         let current = Self::get_insurance_balance(env.clone());
         env.storage()
@@ -319,9 +319,11 @@ impl DefaultManagementContract {
     }
 
     /// Trigger an insurance payout ("withdrawing protocol fees") to a lender
-    /// for a defaulted loan. Multisig-gated. Actual XLM moves via a PAYMENT
-    /// operation by the admin wallet; this function records the event and
-    /// deducts from the fund balance.
+    /// for a defaulted loan. Multisig-gated (issue #353): the single admin key
+    /// cannot call this once the MultiSigAdmin contract is linked — payouts
+    /// then require an M-of-N approved `TriggerInsurancePayout` proposal.
+    /// Actual XLM moves via a PAYMENT operation by the admin wallet; this
+    /// function records the event and deducts from the fund balance.
     pub fn trigger_insurance_payout(
         env: Env,
         caller: Address,
@@ -330,7 +332,7 @@ impl DefaultManagementContract {
         amount: i128,
     ) {
         caller.require_auth();
-        Self::assert_admin(&env, &caller);
+        Self::assert_insurance_authority(&env, &caller);
         Self::assert_not_paused(&env);
 
         let balance = Self::get_insurance_balance(env.clone());
@@ -419,6 +421,27 @@ impl DefaultManagementContract {
         }
         if !multisig_admins.iter().any(|a| a == *caller) {
             panic!("Unauthorised: caller is not a multisig admin");
+        }
+    }
+
+    /// Gate for moving the insurance fund (`add_to_insurance`,
+    /// `trigger_insurance_payout`).
+    ///
+    /// Once `set_multisig_admin` has linked the MultiSigAdmin contract, the
+    /// caller must BE that contract. `assert_multisig_admin` alone is not
+    /// enough after linking: it reads the `MultisigAdmins` list, which
+    /// `setup_multisig` (still callable by the single admin) overwrites and
+    /// always re-adds the admin to — that would let one key re-grant itself
+    /// unilateral control of the fund, or lock the linked multisig out.
+    /// Before linking, the caller must be a configured multisig admin.
+    fn assert_insurance_authority(env: &Env, caller: &Address) {
+        let linked: Option<Address> = env.storage().instance().get(&DataKey::MultiSigAdmin);
+        match linked {
+            Some(multisig) if *caller != multisig => {
+                panic!("Unauthorised: caller is not the linked multisig admin contract")
+            }
+            Some(_) => {}
+            None => Self::assert_multisig_admin(env, caller),
         }
     }
 

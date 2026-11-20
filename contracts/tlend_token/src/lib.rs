@@ -45,11 +45,13 @@ pub struct TlendTokenContract;
 
 #[contractimpl]
 impl TlendTokenContract {
-    /// One-time setup. `decimals`/`name`/`symbol` are immutable token metadata.
-    pub fn initialize(env: Env, admin: Address, decimals: u32, name: String, symbol: String) {
-        if env.storage().instance().has(&DataKey::Admin) {
-            panic!("TLEND already initialised");
-        }
+    /// Soroban constructor: runs atomically as part of `stellar contract deploy`
+    /// (`-- <constructor args>`), so the contract is never live in an
+    /// uninitialised state that a third party could front-run to claim
+    /// admin rights (issue #352). There is no public `initialize`.
+    ///
+    /// `decimals`/`name`/`symbol` are immutable token metadata.
+    pub fn __constructor(env: Env, admin: Address, decimals: u32, name: String, symbol: String) {
         if decimals > 18 {
             panic!("Decimals must be <= 18");
         }

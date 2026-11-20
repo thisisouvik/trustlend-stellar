@@ -27,10 +27,11 @@ fn setup() -> (Env, Address, Address, Address, Address) {
     let token_id = env
         .register_stellar_asset_contract_v2(admin.clone())
         .address();
-    let contract_id = env.register(BorrowerLoyaltyContract, ());
-    let client = BorrowerLoyaltyContractClient::new(&env, &contract_id);
 
-    client.initialize(&admin, &token_id, &lending, &default_config());
+    let contract_id = env.register(
+        BorrowerLoyaltyContract,
+        (&admin, &token_id, &lending, default_config()),
+    );
 
     // Fund the loyalty contract with tokens
     let token_admin_client = token::StellarAssetClient::new(&env, &token_id);
@@ -49,10 +50,12 @@ fn test_initialize() {
     let token_id = env
         .register_stellar_asset_contract_v2(admin.clone())
         .address();
-    let contract_id = env.register(BorrowerLoyaltyContract, ());
-    let client = BorrowerLoyaltyContractClient::new(&env, &contract_id);
 
-    client.initialize(&admin, &token_id, &lending, &default_config());
+    let contract_id = env.register(
+        BorrowerLoyaltyContract,
+        (&admin, &token_id, &lending, default_config()),
+    );
+    let client = BorrowerLoyaltyContractClient::new(&env, &contract_id);
 
     assert_eq!(client.get_admin(), admin);
     assert_eq!(client.get_reward_token(), token_id);
@@ -60,17 +63,36 @@ fn test_initialize() {
     assert_eq!(client.get_total_rewards_distributed(), 0);
 }
 
+/// Issue #352: initialization runs in the Soroban constructor, atomically with
+/// deployment. There is no `initialize` entrypoint left to front-run, and the
+/// constructor cannot be re-invoked on the live contract to seize admin rights.
 #[test]
-#[should_panic(expected = "already initialised")]
-fn test_double_initialize_panics() {
-    let (env, _contract_id, _admin, _lending, _borrower) = setup();
-    let client = BorrowerLoyaltyContractClient::new(&env, &_contract_id);
-    client.initialize(
-        &_admin,
-        &Address::generate(&env),
-        &_lending,
-        &default_config(),
-    );
+fn test_constructor_initializes_and_cannot_be_reinvoked() {
+    use soroban_sdk::{IntoVal, Symbol};
+    let (env, contract_id, admin, lending, _borrower) = setup();
+    let client = BorrowerLoyaltyContractClient::new(&env, &contract_id);
+    assert_eq!(client.get_admin(), admin);
+    let token = client.get_reward_token();
+    let attacker = Address::generate(&env);
+    let args: soroban_sdk::Vec<soroban_sdk::Val> = soroban_sdk::vec![
+        &env,
+        attacker.into_val(&env),
+        token.into_val(&env),
+        lending.into_val(&env),
+        default_config().into_val(&env),
+    ];
+    for name in ["initialize", "__constructor"] {
+        let res = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &contract_id,
+            &Symbol::new(&env, name),
+            args.clone(),
+        );
+        assert!(res.is_err(), "{name} must not be callable after deployment");
+    }
+    let stored: Address = env.as_contract(&contract_id, || {
+        env.storage().instance().get(&DataKey::Admin).unwrap()
+    });
+    assert_eq!(stored, admin);
 }
 
 #[test]
@@ -264,10 +286,12 @@ fn test_fund_and_drain_scenario() {
     let token_id = env
         .register_stellar_asset_contract_v2(admin.clone())
         .address();
-    let contract_id = env.register(BorrowerLoyaltyContract, ());
-    let client = BorrowerLoyaltyContractClient::new(&env, &contract_id);
 
-    client.initialize(&admin, &token_id, &lending, &default_config());
+    let contract_id = env.register(
+        BorrowerLoyaltyContract,
+        (&admin, &token_id, &lending, default_config()),
+    );
+    let client = BorrowerLoyaltyContractClient::new(&env, &contract_id);
 
     // Fund with only 1 TLEND
     let token_admin_client = token::StellarAssetClient::new(&env, &token_id);

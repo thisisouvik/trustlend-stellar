@@ -7,11 +7,8 @@ fn setup() -> (Env, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(DefaultManagementContract, ());
-    let client = DefaultManagementContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
-    client.initialize(&admin, &10_000_000);
+    let contract_id = env.register(DefaultManagementContract, (&admin, 10_000_000_i128));
 
     (env, contract_id, admin)
 }
@@ -22,14 +19,12 @@ fn setup_with_multisig() -> (Env, Address, Address, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(DefaultManagementContract, ());
-    let client = DefaultManagementContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let signer1 = Address::generate(&env);
     let borrower = Address::generate(&env);
 
-    client.initialize(&admin, &10_000_000);
+    let contract_id = env.register(DefaultManagementContract, (&admin, 10_000_000_i128));
+    let client = DefaultManagementContractClient::new(&env, &contract_id);
 
     let admins = soroban_sdk::vec![&env, admin.clone(), signer1.clone()];
     client.setup_multisig(&admin, &admins, &2);
@@ -227,4 +222,33 @@ fn test_def_pause_threshold_count_tracking() {
 
     client.pause(&signer1);
     assert_eq!(client.get_pause_signer_count(), 0); // reset after activation
+}
+
+/// Issue #352: initialization runs in the Soroban constructor, atomically with
+/// deployment. There is no `initialize` entrypoint left to front-run, and the
+/// constructor cannot be re-invoked on the live contract to seize admin rights.
+#[test]
+fn test_constructor_initializes_and_cannot_be_reinvoked() {
+    use soroban_sdk::{IntoVal, Symbol};
+    let (env, contract_id, admin) = setup();
+    let client = DefaultManagementContractClient::new(&env, &contract_id);
+    assert_eq!(client.get_admin(), admin);
+    let attacker = Address::generate(&env);
+    let args: soroban_sdk::Vec<soroban_sdk::Val> = soroban_sdk::vec![
+        &env,
+        attacker.into_val(&env),
+        0i128.into_val(&env),
+    ];
+    for name in ["initialize", "__constructor"] {
+        let res = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &contract_id,
+            &Symbol::new(&env, name),
+            args.clone(),
+        );
+        assert!(res.is_err(), "{name} must not be callable after deployment");
+    }
+    let stored: Address = env.as_contract(&contract_id, || {
+        env.storage().instance().get(&DataKey::Admin).unwrap()
+    });
+    assert_eq!(stored, admin);
 }

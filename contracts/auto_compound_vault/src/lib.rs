@@ -63,17 +63,17 @@ pub struct AutoCompoundVaultContract;
 
 #[contractimpl]
 impl AutoCompoundVaultContract {
-    /// Initialize the vault with configuration parameters.
-    pub fn initialize(
+    /// Soroban constructor: runs atomically as part of `stellar contract deploy`
+    /// (`-- <constructor args>`), so the contract is never live in an
+    /// uninitialised state that a third party could front-run to claim
+    /// admin rights (issue #352). There is no public `initialize`.
+    pub fn __constructor(
         env: Env,
         admin: Address,
         asset_token: Address,
         lending_contract: Address,
         harvest_fee_bps: u32,
     ) {
-        if env.storage().instance().has(&DataKey::Admin) {
-            panic!("Vault already initialised");
-        }
         if harvest_fee_bps > MAX_HARVEST_FEE_BPS {
             panic!("Harvest fee exceeds max limit");
         }

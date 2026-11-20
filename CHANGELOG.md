@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- Soroban contracts can no longer be taken over by front-running
+  `initialize()` (#352). Every contract's public `initialize` was callable by
+  anyone between deployment and the deployer's separate init transaction, and
+  set whatever admin it was given. Initialization now runs in a native
+  `__constructor`, atomically with `stellar contract deploy ... -- <args>`, in
+  all 17 contracts. `scripts/deploy-testnet.ts`, `contracts/scripts/deploy.sh`
+  and `deploy.ps1` pass constructor arguments at deploy time and only do
+  admin-authorised wiring afterwards; contracts whose constructor inputs are
+  missing (airdrop root, USDC token) are no longer deployed uninitialised.
+  Each crate has a test showing neither `initialize` nor `__constructor` can
+  be invoked on a deployed contract.
 - `fast-uri` [GHSA-83f7-4hh3-vchq](https://github.com/advisories/GHSA-83f7-4hh3-vchq)
   (`mailto:` header injection, Dependabot alert #117) is verified patched:
   the `overrides` pin resolves the only copy to `4.2.2` (fixed in `4.1.1`) and

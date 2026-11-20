@@ -44,10 +44,11 @@ pub struct TlendAirdropContract;
 
 #[contractimpl]
 impl TlendAirdropContract {
-    pub fn initialize(env: Env, admin: Address, token: Address, merkle_root: BytesN<32>) {
-        if env.storage().instance().has(&DataKey::Admin) {
-            panic!("Airdrop contract already initialised");
-        }
+    /// Soroban constructor: runs atomically as part of `stellar contract deploy`
+    /// (`-- <constructor args>`), so the contract is never live in an
+    /// uninitialised state that a third party could front-run to claim
+    /// admin rights (issue #352). There is no public `initialize`.
+    pub fn __constructor(env: Env, admin: Address, token: Address, merkle_root: BytesN<32>) {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Token, &token);
         env.storage().instance().set(&DataKey::MerkleRoot, &merkle_root);

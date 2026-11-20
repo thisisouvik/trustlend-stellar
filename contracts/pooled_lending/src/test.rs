@@ -19,13 +19,10 @@ fn setup() -> (Env, Address, Address, u32) {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(PooledLendingContract, ());
-    let client = PooledLendingContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let pool_id: u32 = 1;
 
-    client.initialize(&admin, &pool_id, &default_config());
+    let contract_id = env.register(PooledLendingContract, (&admin, &pool_id, default_config()));
 
     (env, contract_id, admin, pool_id)
 }
@@ -42,17 +39,32 @@ fn test_initialize_creates_pool() {
     assert_eq!(config.kink_bps, 8000);
 }
 
+/// Issue #352: initialization runs in the Soroban constructor, atomically with
+/// deployment. There is no `initialize` entrypoint left to front-run, and the
+/// constructor cannot be re-invoked on the live contract to seize admin rights.
 #[test]
-#[should_panic(expected = "already initialized")]
-fn test_initialize_rejects_duplicate() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let contract_id = env.register(PooledLendingContract, ());
-    let client = PooledLendingContractClient::new(&env, &contract_id);
-
-    let admin = Address::generate(&env);
-    client.initialize(&admin, &1, &default_config());
-    client.initialize(&admin, &1, &default_config());
+fn test_constructor_initializes_and_cannot_be_reinvoked() {
+    use soroban_sdk::{IntoVal, Symbol};
+    let (env, contract_id, admin, pool_id) = setup();
+    let attacker = Address::generate(&env);
+    let args: soroban_sdk::Vec<soroban_sdk::Val> = soroban_sdk::vec![
+        &env,
+        attacker.into_val(&env),
+        pool_id.into_val(&env),
+        default_config().into_val(&env),
+    ];
+    for name in ["initialize", "__constructor"] {
+        let res = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &contract_id,
+            &Symbol::new(&env, name),
+            args.clone(),
+        );
+        assert!(res.is_err(), "{name} must not be callable after deployment");
+    }
+    let stored: Address = env.as_contract(&contract_id, || {
+        env.storage().instance().get(&DataKey::Admin).unwrap()
+    });
+    assert_eq!(stored, admin);
 }
 
 #[test]
@@ -165,8 +177,6 @@ fn test_unauthorized_set_pool_config_rejected() {
 fn test_invalid_config_base_rate_over_max() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(PooledLendingContract, ());
-    let client = PooledLendingContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
 
     let config = PoolConfig {
@@ -176,7 +186,7 @@ fn test_invalid_config_base_rate_over_max() {
         kink_bps: 8000,
         reserve_factor_bps: 1000,
     };
-    client.initialize(&admin, &1, &config);
+    env.register(PooledLendingContract, (&admin, 1_u32, config.clone()));
 }
 
 #[test]
@@ -184,8 +194,6 @@ fn test_invalid_config_base_rate_over_max() {
 fn test_invalid_config_multiplier_over_max() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(PooledLendingContract, ());
-    let client = PooledLendingContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
 
     let config = PoolConfig {
@@ -195,7 +203,7 @@ fn test_invalid_config_multiplier_over_max() {
         kink_bps: 8000,
         reserve_factor_bps: 1000,
     };
-    client.initialize(&admin, &1, &config);
+    env.register(PooledLendingContract, (&admin, 1_u32, config.clone()));
 }
 
 #[test]
@@ -203,8 +211,6 @@ fn test_invalid_config_multiplier_over_max() {
 fn test_invalid_config_jump_multiplier_over_max() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(PooledLendingContract, ());
-    let client = PooledLendingContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
 
     let config = PoolConfig {
@@ -214,7 +220,7 @@ fn test_invalid_config_jump_multiplier_over_max() {
         kink_bps: 8000,
         reserve_factor_bps: 1000,
     };
-    client.initialize(&admin, &1, &config);
+    env.register(PooledLendingContract, (&admin, 1_u32, config.clone()));
 }
 
 #[test]
@@ -222,8 +228,6 @@ fn test_invalid_config_jump_multiplier_over_max() {
 fn test_invalid_config_kink_over_max() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(PooledLendingContract, ());
-    let client = PooledLendingContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
 
     let config = PoolConfig {
@@ -233,7 +237,7 @@ fn test_invalid_config_kink_over_max() {
         kink_bps: 10001,
         reserve_factor_bps: 1000,
     };
-    client.initialize(&admin, &1, &config);
+    env.register(PooledLendingContract, (&admin, 1_u32, config.clone()));
 }
 
 #[test]
@@ -241,8 +245,6 @@ fn test_invalid_config_kink_over_max() {
 fn test_invalid_config_kink_zero_rejected() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(PooledLendingContract, ());
-    let client = PooledLendingContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
 
     let config = PoolConfig {
@@ -252,7 +254,7 @@ fn test_invalid_config_kink_zero_rejected() {
         kink_bps: 0,
         reserve_factor_bps: 1000,
     };
-    client.initialize(&admin, &1, &config);
+    env.register(PooledLendingContract, (&admin, 1_u32, config.clone()));
 }
 
 #[test]
@@ -260,8 +262,6 @@ fn test_invalid_config_kink_zero_rejected() {
 fn test_invalid_config_kink_10000_rejected() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(PooledLendingContract, ());
-    let client = PooledLendingContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
 
     let config = PoolConfig {
@@ -271,7 +271,7 @@ fn test_invalid_config_kink_10000_rejected() {
         kink_bps: 10000,
         reserve_factor_bps: 1000,
     };
-    client.initialize(&admin, &1, &config);
+    env.register(PooledLendingContract, (&admin, 1_u32, config.clone()));
 }
 
 #[test]
@@ -279,8 +279,6 @@ fn test_invalid_config_kink_10000_rejected() {
 fn test_invalid_config_reserve_factor_over_max() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(PooledLendingContract, ());
-    let client = PooledLendingContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
 
     let config = PoolConfig {
@@ -290,7 +288,7 @@ fn test_invalid_config_reserve_factor_over_max() {
         kink_bps: 8000,
         reserve_factor_bps: 10001,
     };
-    client.initialize(&admin, &1, &config);
+    env.register(PooledLendingContract, (&admin, 1_u32, config.clone()));
 }
 
 // ─── Utilization tests ─────────────────────────────────────────────────────
@@ -499,8 +497,6 @@ fn test_supply_apy_at_100_percent() {
 fn test_supply_apy_zero_with_reserve_factor_100_percent() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(PooledLendingContract, ());
-    let client = PooledLendingContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
 
     let config = PoolConfig {
@@ -510,7 +506,8 @@ fn test_supply_apy_zero_with_reserve_factor_100_percent() {
         kink_bps: 8000,
         reserve_factor_bps: 10000,
     };
-    client.initialize(&admin, &1, &config);
+    let contract_id = env.register(PooledLendingContract, (&admin, 1_u32, config.clone()));
+    let client = PooledLendingContractClient::new(&env, &contract_id);
     client.update_pool_state(&admin, &1, &1_000_000_0000000i128, &500_000_0000000i128);
 
     let rate = client.get_supply_apy(&1);

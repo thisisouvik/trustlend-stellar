@@ -8,11 +8,9 @@ fn setup_test() -> (Env, Address, ZkCreditVerifierContractClient<'static>) {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(ZkCreditVerifierContract, ());
-    let client = ZkCreditVerifierContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
-    client.initialize(&admin);
+    let contract_id = env.register(ZkCreditVerifierContract, (&admin,));
+    let client = ZkCreditVerifierContractClient::new(&env, &contract_id);
 
     (env, admin, client)
 }
@@ -375,9 +373,8 @@ fn test_proof_cannot_be_relabelled_to_another_provider() {
 #[test]
 fn test_proof_bound_to_verifier_contract() {
     let (env, admin, client) = setup_test();
-    let other_id = env.register(ZkCreditVerifierContract, ());
+    let other_id = env.register(ZkCreditVerifierContract, (&admin,));
     let other = ZkCreditVerifierContractClient::new(&env, &other_id);
-    other.initialize(&admin);
 
     let provider_id = String::from_str(&env, "zkTLS-Bank");
     let key = signing_key(11);
@@ -446,4 +443,28 @@ fn test_proof_digest_ignores_signature_and_key_fields() {
         client.proof_digest(&borrower, &a),
         client.proof_digest(&borrower, &b)
     );
+}
+
+/// Issue #352: initialization runs in the Soroban constructor, atomically with
+/// deployment. There is no `initialize` entrypoint left to front-run, and the
+/// constructor cannot be re-invoked on the live contract to seize admin rights.
+#[test]
+fn test_constructor_initializes_and_cannot_be_reinvoked() {
+    use soroban_sdk::{IntoVal, Symbol};
+    let (env, admin, client) = setup_test();
+    assert_eq!(client.get_admin(), admin);
+    let attacker = Address::generate(&env);
+    let args: soroban_sdk::Vec<soroban_sdk::Val> = soroban_sdk::vec![
+        &env,
+        attacker.into_val(&env),
+    ];
+    for name in ["initialize", "__constructor"] {
+        let res = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &client.address,
+            &Symbol::new(&env, name),
+            args.clone(),
+        );
+        assert!(res.is_err(), "{name} must not be callable after deployment");
+    }
+    assert_eq!(client.get_admin(), admin);
 }

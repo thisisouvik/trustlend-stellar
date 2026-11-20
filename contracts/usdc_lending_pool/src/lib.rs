@@ -134,16 +134,16 @@ pub struct UsdcLendingPool;
 impl UsdcLendingPool {
     // ── Initialization ────────────────────────────────────────────────────────
 
-    /// One-time setup. Must be called before any other function.
+    /// Soroban constructor: runs atomically as part of `stellar contract deploy`
+    /// (`-- <constructor args>`), so the contract is never live in an
+    /// uninitialised state that a third party could front-run to claim
+    /// admin rights (issue #352). There is no public `initialize`.
     ///
     /// # Arguments
     /// * `admin`           – Address authorised to pause/unpause and set the rate.
     /// * `usdc_token`      – SEP-41 USDC token contract address.
     /// * `annual_yield_bps`– Maximum annual yield in basis-points (e.g. 500 = 5.00 %).
-    pub fn initialize(env: Env, admin: Address, usdc_token: Address, annual_yield_bps: u32) {
-        if env.storage().instance().has(&DataKey::Admin) {
-            panic!("already initialized");
-        }
+    pub fn __constructor(env: Env, admin: Address, usdc_token: Address, annual_yield_bps: u32) {
         if annual_yield_bps == 0 {
             panic!("annual_yield_bps must be > 0");
         }

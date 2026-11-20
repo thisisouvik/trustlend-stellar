@@ -60,6 +60,9 @@ export async function depositCollateral(
 
 /**
  * Withdraw collateral from the borrower's vault position.
+ *
+ * Collateral locked by a Pending, Approved or Active loan cannot be withdrawn
+ * (Issue #416); cancel an unfunded request with `cancelLoanRequest` first.
  */
 export async function withdrawCollateral(
   borrowerAddress: string,
@@ -74,6 +77,19 @@ export async function withdrawCollateral(
       addressToScVal(assetAddress),
       i128ToScVal(amountStroops),
     ],
+    callerAddress: borrowerAddress,
+  });
+}
+
+/**
+ * Borrower cancels their own Pending loan request, releasing the collateral
+ * locked for it (Issue #416).
+ */
+export async function cancelLoanRequest(borrowerAddress: string, loanId: number) {
+  return callContract({
+    contractId: CONTRACT_ID,
+    method: "cancel_loan_request",
+    args: [addressToScVal(borrowerAddress), u32ToScVal(loanId)],
     callerAddress: borrowerAddress,
   });
 }

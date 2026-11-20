@@ -1114,9 +1114,11 @@ impl LendingContract {
     /// `amount` must be positive and not exceed the current balance for that asset.
     ///
     /// After withdrawal, checks that the borrower's remaining collateral
-    /// still covers their active loan positions. If not, the withdrawal panics.
-    /// This prevents borrowers from withdrawing collateral that would
-    /// leave their loans under-collateralized.
+    /// still covers every loan it is locked for — Pending, Approved and
+    /// Active (Issue #416). If not, the withdrawal panics. This prevents
+    /// borrowers from withdrawing collateral that would leave their loans
+    /// under-collateralized, including requests that have not activated yet.
+    /// Collateral is released once a loan is repaid, defaulted or cancelled.
     pub fn withdraw_collateral(env: Env, borrower: Address, asset: Address, amount: i128) {
         borrower.require_auth();
         Self::assert_not_paused(&env);
@@ -1163,14 +1165,18 @@ impl LendingContract {
         }
 
         // Check borrowing power constraint: after withdrawal, borrowing power
-        // must still cover all active loans.
+        // must still cover every loan the collateral is locked for — pending
+        // requests and approved loans as well as active ones. Counting only
+        // active loans let a borrower drain the vault between requesting a
+        // loan and its activation (Issue #416).
         let borrowing_power = Self::compute_borrowing_power_from_entries(&env, &new_entries);
-        let total_active_debt: i128 = Self::get_total_active_debt_of_borrower(&env, &borrower);
+        let total_encumbered_debt: i128 =
+            Self::get_total_encumbered_debt_of_borrower(&env, &borrower);
 
-        if borrowing_power < total_active_debt {
+        if borrowing_power < total_encumbered_debt {
             panic!(
-                "Withdrawal would leave loans under-collateralized: borrowing power {} < debt {}",
-                borrowing_power, total_active_debt,
+                "Withdrawal would leave pending or active loans under-collateralized: borrowing power {} < debt {}",
+                borrowing_power, total_encumbered_debt,
             );
         }
 
@@ -1250,6 +1256,12 @@ impl LendingContract {
     /// from the collateral actually deposited into the borrower's vault via
     /// `deposit_collateral` (Issue #415); `request.collateral_entries` is only
     /// a declaration and every declared amount must be backed by that vault.
+    ///
+    /// The collateral is locked for the loan from this point (Issue #416):
+    /// only borrowing power not already encumbered by the borrower's other
+    /// Pending, Approved or Active loans counts, and `withdraw_collateral`
+    /// refuses to release it until the loan is repaid, defaulted or cancelled
+    /// via `cancel_loan_request`.
     pub fn create_loan_request(env: Env, borrower: Address, request: LoanRequestInput) -> u32 {
         borrower.require_auth();
         Self::assert_not_paused(&env);
@@ -1321,7 +1333,12 @@ impl LendingContract {
         // by `deposit_collateral` — never from the caller-supplied entries,
         // which would let a borrower declare phantom collateral (Issue #415).
         let vault_entries = Self::get_user_collateral_entries(env.clone(), borrower.clone());
-        let borrowing_power = Self::compute_borrowing_power_from_entries(&env, &vault_entries);
+        let total_power = Self::compute_borrowing_power_from_entries(&env, &vault_entries);
+
+        // Collateral already locked by the borrower's other Pending, Approved
+        // or Active loans cannot back this one too (Issue #416).
+        let encumbered = Self::get_total_encumbered_debt_of_borrower(&env, &borrower);
+        let borrowing_power = total_power.saturating_sub(encumbered).max(0);
 
         if borrowing_power < amount {
             panic!(
@@ -1439,6 +1456,34 @@ impl LendingContract {
         env.events().publish(
             (symbol_short!("loan"), symbol_short!("approved")),
             (loan_id, lender, escrow_id),
+        );
+    }
+
+    /// Borrower cancels their own loan request before it is funded, releasing
+    /// the collateral locked for it (Issue #416).
+    ///
+    /// Only Pending requests can be cancelled. An Approved loan must first be
+    /// returned to Pending by the lender (`revoke_approval`), so a lender's
+    /// escrowed commitment is never orphaned by the borrower.
+    pub fn cancel_loan_request(env: Env, borrower: Address, loan_id: u32) {
+        borrower.require_auth();
+
+        let mut loan = Self::get_loan(env.clone(), loan_id);
+        if loan.borrower != borrower {
+            panic!("Caller is not the borrower");
+        }
+        if loan.status != LoanStatus::Pending {
+            panic!("Only PENDING loan requests can be cancelled");
+        }
+
+        loan.status = LoanStatus::Cancelled;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Loan(loan_id), &loan);
+
+        env.events().publish(
+            (symbol_short!("loan"), symbol_short!("cancel")),
+            (loan_id, borrower),
         );
     }
 
@@ -1873,6 +1918,37 @@ impl LendingContract {
             }
         }
         total_debt
+    }
+
+    /// Total debt the borrower's collateral is locked for: the remaining
+    /// balance of every loan that is Pending, Approved or Active
+    /// (Issue #416). Repaid, Defaulted and Cancelled loans release their
+    /// collateral. Used to gate `withdraw_collateral` and new loan requests;
+    /// liquidation keeps using `get_total_active_debt_of_borrower`, so an
+    /// unfunded request can never make a borrower liquidatable.
+    fn get_total_encumbered_debt_of_borrower(env: &Env, borrower: &Address) -> i128 {
+        let loan_count = Self::get_borrower_loan_count(env.clone(), borrower.clone());
+        let mut total_debt: i128 = 0;
+        for i in 0..loan_count {
+            let loan_id = Self::get_borrower_loan_at(env.clone(), borrower.clone(), i);
+            let loan = Self::get_loan(env.clone(), loan_id);
+            if matches!(
+                loan.status,
+                LoanStatus::Pending | LoanStatus::Approved | LoanStatus::Active
+            ) {
+                total_debt = total_debt
+                    .checked_add(loan.remaining_due)
+                    .expect("Overflow summing encumbered debt");
+            }
+        }
+        total_debt
+    }
+
+    /// Debt currently locking the borrower's collateral (Pending, Approved
+    /// and Active loans). Collateral can only be withdrawn while the
+    /// remaining borrowing power stays at or above this amount.
+    pub fn get_encumbered_debt(env: Env, borrower: Address) -> i128 {
+        Self::get_total_encumbered_debt_of_borrower(&env, &borrower)
     }
 
     /// Calculate the health factor for a borrower.

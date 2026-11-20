@@ -37,6 +37,18 @@ fn setup_with_multisig() -> (Env, Address, Address, Address, Address) {
     (env, contract_id, admin, signer1, borrower)
 }
 
+/// `setup()` plus a linked MultiSigAdmin contract (an address standing in for
+/// the deployed `multisig_admin` contract). Returns (env, contract_id, admin, multisig).
+fn setup_with_linked_multisig() -> (Env, Address, Address, Address) {
+    let (env, contract_id, admin) = setup();
+    let client = DefaultManagementContractClient::new(&env, &contract_id);
+
+    let multisig = Address::generate(&env);
+    client.set_multisig_admin(&admin, &multisig);
+
+    (env, contract_id, admin, multisig)
+}
+
 // ─── Basic tests ─────────────────────────────────────────────────────────────
 
 #[test]
@@ -64,23 +76,97 @@ fn test_record_default() {
 
 #[test]
 fn test_insurance_payout() {
-    let (env, contract_id, admin) = setup();
+    let (env, contract_id, _admin, multisig) = setup_with_linked_multisig();
     let client = DefaultManagementContractClient::new(&env, &contract_id);
 
     let lender = Address::generate(&env);
-    client.trigger_insurance_payout(&admin, &1, &lender, &5_000_000);
+    client.trigger_insurance_payout(&multisig, &1, &lender, &5_000_000);
 
     assert_eq!(client.get_insurance_balance(), 5_000_000);
+    assert_eq!(client.get_insurance_event_count(), 1);
+    let event = client.get_insurance_event(&1);
+    assert_eq!(event.loan_id, 1);
+    assert_eq!(event.lender, lender);
+    assert_eq!(event.amount_paid, 5_000_000);
 }
 
 #[test]
 #[should_panic(expected = "Insufficient insurance funds")]
 fn test_insurance_payout_insufficient_funds() {
+    let (env, contract_id, _admin, multisig) = setup_with_linked_multisig();
+    let client = DefaultManagementContractClient::new(&env, &contract_id);
+
+    let lender = Address::generate(&env);
+    client.trigger_insurance_payout(&multisig, &1, &lender, &20_000_000);
+}
+
+// ─── Insurance payout authorization (issue #353) ─────────────────────────────
+
+#[test]
+#[should_panic(expected = "Multisig not configured")]
+fn test_single_admin_cannot_trigger_payout_without_multisig() {
     let (env, contract_id, admin) = setup();
     let client = DefaultManagementContractClient::new(&env, &contract_id);
 
     let lender = Address::generate(&env);
-    client.trigger_insurance_payout(&admin, &1, &lender, &20_000_000);
+    client.trigger_insurance_payout(&admin, &1, &lender, &5_000_000);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorised: caller is not the linked multisig admin contract")]
+fn test_single_admin_cannot_trigger_payout_after_multisig_linked() {
+    let (env, contract_id, admin, _multisig) = setup_with_linked_multisig();
+    let client = DefaultManagementContractClient::new(&env, &contract_id);
+
+    let lender = Address::generate(&env);
+    client.trigger_insurance_payout(&admin, &1, &lender, &5_000_000);
+}
+
+#[test]
+fn test_single_admin_payout_attempt_leaves_fund_untouched() {
+    let (env, contract_id, admin, _multisig) = setup_with_linked_multisig();
+    let client = DefaultManagementContractClient::new(&env, &contract_id);
+
+    let lender = Address::generate(&env);
+    let res = client.try_trigger_insurance_payout(&admin, &1, &lender, &5_000_000);
+    assert!(res.is_err());
+    assert_eq!(client.get_insurance_balance(), 10_000_000);
+    assert_eq!(client.get_insurance_event_count(), 0);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorised: caller is not the linked multisig admin contract")]
+fn test_single_admin_cannot_regain_payout_rights_via_setup_multisig() {
+    let (env, contract_id, admin, _multisig) = setup_with_linked_multisig();
+    let client = DefaultManagementContractClient::new(&env, &contract_id);
+
+    // setup_multisig always re-adds the admin to the multisig-admin list; it
+    // must not reopen the insurance fund to the single admin key.
+    client.setup_multisig(&admin, &soroban_sdk::vec![&env, admin.clone()], &1);
+
+    let lender = Address::generate(&env);
+    client.trigger_insurance_payout(&admin, &1, &lender, &5_000_000);
+}
+
+#[test]
+fn test_linked_multisig_keeps_payout_rights_after_setup_multisig() {
+    let (env, contract_id, admin, multisig) = setup_with_linked_multisig();
+    let client = DefaultManagementContractClient::new(&env, &contract_id);
+
+    client.setup_multisig(&admin, &soroban_sdk::vec![&env, admin.clone()], &1);
+
+    let lender = Address::generate(&env);
+    client.trigger_insurance_payout(&multisig, &1, &lender, &5_000_000);
+    assert_eq!(client.get_insurance_balance(), 5_000_000);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorised: caller is not the linked multisig admin contract")]
+fn test_single_admin_cannot_add_to_insurance_after_multisig_linked() {
+    let (env, contract_id, admin, _multisig) = setup_with_linked_multisig();
+    let client = DefaultManagementContractClient::new(&env, &contract_id);
+
+    client.add_to_insurance(&admin, &1_000_000);
 }
 
 // ─── Pausable / Multi-sig tests ──────────────────────────────────────────────

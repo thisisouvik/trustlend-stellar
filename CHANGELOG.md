@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- `DefaultManagementContract::trigger_insurance_payout` is multisig-gated
+  (#353). It checked only the single admin key (`assert_admin`), so after
+  governance moved to the MultiSigAdmin contract one key could still drain the
+  insurance fund unilaterally. Insurance fund movements (`trigger_insurance_payout`
+  and `add_to_insurance`) now require a multisig admin and, once
+  `set_multisig_admin` has linked the MultiSigAdmin contract, only that
+  contract — so the admin cannot re-grant itself access through
+  `setup_multisig` either.
 - `fast-uri` [GHSA-83f7-4hh3-vchq](https://github.com/advisories/GHSA-83f7-4hh3-vchq)
   (`mailto:` header injection, Dependabot alert #117) is verified patched:
   the `overrides` pin resolves the only copy to `4.2.2` (fixed in `4.1.1`) and

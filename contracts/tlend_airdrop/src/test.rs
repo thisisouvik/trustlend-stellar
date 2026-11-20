@@ -168,3 +168,175 @@ fn test_non_admin_cannot_set_root() {
     let attacker = Address::generate(&w.env);
     w.airdrop.set_merkle_root(&attacker, &w.root);
 }
+
+// ─── Unclaimed token recovery (Issue #422) ───────────────────────────────────
+
+use soroban_sdk::testutils::Ledger as _;
+
+const DEADLINE: u64 = 1_000_000;
+
+fn set_time(env: &Env, timestamp: u64) {
+    env.ledger().with_mut(|li| li.timestamp = timestamp);
+}
+
+/// Opens a claim window ending at `DEADLINE`, then lets c0 and c1 claim
+/// (300 of the 1,000 funded), leaving 700 unclaimed.
+fn setup_partially_claimed<'a>() -> World<'a> {
+    let w = setup();
+    w.airdrop.set_claim_deadline(&w.admin, &DEADLINE);
+    w.airdrop.claim(&w.c0, &AMOUNTS[0], &w.proof0);
+    w.airdrop.claim(&w.c1, &AMOUNTS[1], &w.proof1);
+    assert_eq!(w.airdrop.get_unclaimed_balance(), 700);
+    w
+}
+
+#[test]
+fn test_admin_sweeps_unclaimed_tokens_after_deadline() {
+    let w = setup_partially_claimed();
+    let treasury = Address::generate(&w.env);
+
+    set_time(&w.env, DEADLINE + 1);
+    w.airdrop.sweep_unclaimed(&w.admin, &treasury, &700);
+
+    assert_eq!(w.token.balance(&treasury), 700);
+    assert_eq!(w.airdrop.get_unclaimed_balance(), 0);
+    // Claimed balances are untouched.
+    assert_eq!(w.token.balance(&w.c0), AMOUNTS[0]);
+    assert_eq!(w.token.balance(&w.c1), AMOUNTS[1]);
+}
+
+#[test]
+fn test_multisig_admin_can_sweep() {
+    let w = setup_partially_claimed();
+    let multisig = Address::generate(&w.env);
+    let treasury = Address::generate(&w.env);
+
+    w.airdrop.set_multisig_admin(&w.admin, &multisig);
+    assert_eq!(w.airdrop.get_multisig_admin(), Some(multisig.clone()));
+
+    set_time(&w.env, DEADLINE + 1);
+    w.airdrop.sweep_unclaimed(&multisig, &treasury, &700);
+    assert_eq!(w.token.balance(&treasury), 700);
+}
+
+#[test]
+fn test_partial_sweep_leaves_remainder() {
+    let w = setup_partially_claimed();
+    let treasury = Address::generate(&w.env);
+
+    set_time(&w.env, DEADLINE + 1);
+    w.airdrop.sweep_unclaimed(&w.admin, &treasury, &250);
+    assert_eq!(w.token.balance(&treasury), 250);
+    assert_eq!(w.airdrop.get_unclaimed_balance(), 450);
+
+    w.airdrop.sweep_unclaimed(&w.admin, &treasury, &450);
+    assert_eq!(w.token.balance(&treasury), 700);
+    assert_eq!(w.airdrop.get_unclaimed_balance(), 0);
+}
+
+#[test]
+#[should_panic(expected = "not admin or multisig")]
+fn test_non_admin_cannot_sweep() {
+    let w = setup_partially_claimed();
+    let attacker = Address::generate(&w.env);
+
+    set_time(&w.env, DEADLINE + 1);
+    w.airdrop.sweep_unclaimed(&attacker, &attacker, &700);
+}
+
+#[test]
+#[should_panic(expected = "Claim period still active")]
+fn test_cannot_sweep_before_deadline() {
+    let w = setup_partially_claimed();
+    // Still inside the window: the deadline itself is the last claimable moment.
+    set_time(&w.env, DEADLINE);
+    w.airdrop.sweep_unclaimed(&w.admin, &w.admin, &700);
+}
+
+#[test]
+#[should_panic(expected = "Claim deadline not set")]
+fn test_cannot_sweep_without_deadline() {
+    let w = setup();
+    w.airdrop.sweep_unclaimed(&w.admin, &w.admin, &1_000);
+}
+
+#[test]
+#[should_panic(expected = "amount exceeds unclaimed balance")]
+fn test_cannot_sweep_more_than_balance() {
+    let w = setup_partially_claimed();
+    set_time(&w.env, DEADLINE + 1);
+    w.airdrop.sweep_unclaimed(&w.admin, &w.admin, &701);
+}
+
+#[test]
+#[should_panic(expected = "amount must be positive")]
+fn test_cannot_sweep_zero() {
+    let w = setup_partially_claimed();
+    set_time(&w.env, DEADLINE + 1);
+    w.airdrop.sweep_unclaimed(&w.admin, &w.admin, &0);
+}
+
+#[test]
+fn test_claim_allowed_up_to_deadline() {
+    let w = setup_partially_claimed();
+    set_time(&w.env, DEADLINE);
+    w.airdrop.claim(&w.c2, &AMOUNTS[2], &w.proof2);
+    assert_eq!(w.token.balance(&w.c2), AMOUNTS[2]);
+}
+
+#[test]
+#[should_panic(expected = "Claim period has ended")]
+fn test_claim_rejected_after_deadline() {
+    let w = setup_partially_claimed();
+    set_time(&w.env, DEADLINE + 1);
+    w.airdrop.claim(&w.c2, &AMOUNTS[2], &w.proof2);
+}
+
+#[test]
+fn test_claim_deadline_can_be_extended() {
+    let w = setup();
+    w.airdrop.set_claim_deadline(&w.admin, &DEADLINE);
+    w.airdrop.set_claim_deadline(&w.admin, &(DEADLINE * 2));
+    assert_eq!(w.airdrop.get_claim_deadline(), Some(DEADLINE * 2));
+}
+
+#[test]
+#[should_panic(expected = "Deadline can only be extended")]
+fn test_claim_deadline_cannot_be_shortened() {
+    let w = setup();
+    w.airdrop.set_claim_deadline(&w.admin, &DEADLINE);
+    w.airdrop.set_claim_deadline(&w.admin, &(DEADLINE - 1));
+}
+
+#[test]
+#[should_panic(expected = "Deadline must be in the future")]
+fn test_claim_deadline_must_be_in_future() {
+    let w = setup();
+    set_time(&w.env, DEADLINE);
+    w.airdrop.set_claim_deadline(&w.admin, &DEADLINE);
+}
+
+#[test]
+#[should_panic(expected = "not admin")]
+fn test_non_admin_cannot_set_claim_deadline() {
+    let w = setup();
+    let attacker = Address::generate(&w.env);
+    w.airdrop.set_claim_deadline(&attacker, &DEADLINE);
+}
+
+#[test]
+#[should_panic(expected = "not admin")]
+fn test_non_admin_cannot_set_multisig_admin() {
+    let w = setup();
+    let attacker = Address::generate(&w.env);
+    w.airdrop.set_multisig_admin(&attacker, &attacker);
+}
+
+#[test]
+#[should_panic(expected = "Multisig admin already configured")]
+fn test_multisig_admin_set_once() {
+    let w = setup();
+    let multisig = Address::generate(&w.env);
+    w.airdrop.set_multisig_admin(&w.admin, &multisig);
+    w.airdrop.set_multisig_admin(&w.admin, &multisig);
+}

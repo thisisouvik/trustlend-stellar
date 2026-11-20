@@ -309,10 +309,25 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "PauseRound"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u32": 1
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "PauseSigner"
                             },
                             {
                               "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                            },
+                            {
+                              "u32": 1
                             }
                           ]
                         },
@@ -325,6 +340,18 @@
                           "vec": [
                             {
                               "symbol": "PauseSignerCount"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u32": 1
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "UnpauseRound"
                             }
                           ]
                         },

@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- The multi-sig emergency brake works more than once (#354). `pause` /
+  `unpause` in the lending, escrow, borrower-reputation and default-management
+  contracts recorded each signer's approval under a key that was never
+  cleared, so after one pause/unpause cycle the same signers were rejected
+  with "Signer has already authorised pause" forever. Approvals are now keyed
+  by a per-cycle round (`PauseRound` / `UnpauseRound`); completing a cycle
+  deletes that round's approvals, resets the counter and opens a new round,
+  and changing the signer set (`setup_multisig`, `set_multisig_admin`) starts
+  fresh rounds so stale partial approvals neither block signers nor count
+  toward the new threshold.
 - `fast-uri` [GHSA-83f7-4hh3-vchq](https://github.com/advisories/GHSA-83f7-4hh3-vchq)
   (`mailto:` header injection, Dependabot alert #117) is verified patched:
   the `overrides` pin resolves the only copy to `4.2.2` (fixed in `4.1.1`) and

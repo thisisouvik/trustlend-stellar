@@ -33,10 +33,11 @@ pub struct PooledLendingContract;
 
 #[contractimpl]
 impl PooledLendingContract {
-    pub fn initialize(env: Env, admin: Address, pool_id: u32, config: PoolConfig) {
-        if env.storage().instance().has(&DataKey::Admin) {
-            panic!("already initialized");
-        }
+    /// Soroban constructor: runs atomically as part of `stellar contract deploy`
+    /// (`-- <constructor args>`), so the contract is never live in an
+    /// uninitialised state that a third party could front-run to claim
+    /// admin rights (issue #352). There is no public `initialize`.
+    pub fn __constructor(env: Env, admin: Address, pool_id: u32, config: PoolConfig) {
         Self::validate_config(&config);
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage()

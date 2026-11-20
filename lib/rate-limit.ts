@@ -265,8 +265,20 @@ async function enforcePolicy(
     return null;
   }
 
-  const ip = getRequestIdentifier(request);
-  const identifier = `${bucket}:${ip}`;
+  return countAgainstBucket(bucket, getRequestIdentifier(request), policy, message);
+}
+
+/**
+ * Count one hit for `subject` in `bucket` and build the 429 response when the
+ * policy is exceeded. Shared by the per-IP and per-identity limiters.
+ */
+async function countAgainstBucket(
+  bucket: string,
+  subject: string,
+  policy: RateLimitPolicy,
+  message: string
+): Promise<NextResponse | null> {
+  const identifier = `${bucket}:${subject}`;
   const result = redis
     ? await getUpstashRateLimit(identifier, bucket, policy)
     : getLocalRateLimit(identifier, policy);
@@ -323,4 +335,30 @@ export async function enforceGlobalApiRateLimit(request: NextRequest) {
     GLOBAL_API_POLICY,
     "Too many requests, please slow down."
   );
+}
+
+/**
+ * Per-identity policies for fee sponsorship (`/api/sponsor`). Every sponsored
+ * transaction is paid for from the platform treasury, so on top of the per-IP
+ * route policy each authenticated user and each source wallet gets its own
+ * budget — rotating IPs does not buy more sponsored transactions.
+ */
+export const SPONSOR_USER_POLICY: RateLimitPolicy = { limit: 10, window: "10 m" };
+export const SPONSOR_WALLET_POLICY: RateLimitPolicy = { limit: 10, window: "10 m" };
+
+/**
+ * Rate-limit by an application identity (user id, wallet address, ...) rather
+ * than by client IP. Unlike the IP limiters there is no admin-token or IP
+ * whitelist bypass: the identity is already authenticated and the budget is
+ * meant to hold regardless of where the request comes from.
+ *
+ * Returns a 429 `NextResponse` when exceeded, otherwise `null`.
+ */
+export async function enforceIdentityRateLimit(
+  bucket: string,
+  identity: string,
+  policy: RateLimitPolicy,
+  message = "Too many requests"
+): Promise<NextResponse | null> {
+  return countAgainstBucket(bucket, identity, policy, message);
 }

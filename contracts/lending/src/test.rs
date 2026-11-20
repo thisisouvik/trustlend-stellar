@@ -15,13 +15,11 @@ fn setup() -> (Env, Address, Address, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(LendingContract, ());
-    let client = LendingContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
 
-    client.initialize(&admin);
+    let contract_id = env.register(LendingContract, (&admin,));
+    let client = LendingContractClient::new(&env, &contract_id);
     // Multisig-gated functions are exercised for real in `multisig_admin`'s
     // integration tests; here `admin` stands in as its own "multisig" so the
     // rest of this suite can focus on loan-lifecycle behaviour.
@@ -76,9 +74,7 @@ fn fund_vault(
 /// and give `borrower` a Platinum profile (100 000 XLM limit), so the rest of
 /// the suite can focus on loan-lifecycle behaviour (Issue #335).
 fn link_reputation(env: &Env, client: &LendingContractClient, admin: &Address, borrower: &Address) {
-    let reputation_id = env.register(borrower_reputation::BorrowerReputationContract, ());
-    borrower_reputation::BorrowerReputationContractClient::new(env, &reputation_id)
-        .initialize(admin);
+    let reputation_id = env.register(borrower_reputation::BorrowerReputationContract, (admin,));
     client.set_reputation_contract(admin, &reputation_id);
     give_reputation_profile(env, client, admin, borrower, 4);
 }
@@ -749,15 +745,13 @@ fn setup_with_multisig() -> (Env, Address, Address, Address, Address, Address, A
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(LendingContract, ());
-    let client = LendingContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
     let signer1 = Address::generate(&env);
     let signer2 = Address::generate(&env);
 
-    client.initialize(&admin);
+    let contract_id = env.register(LendingContract, (&admin,));
+    let client = LendingContractClient::new(&env, &contract_id);
 
     let admins = soroban_sdk::vec![&env, admin.clone(), signer1.clone(), signer2.clone()];
     client.setup_multisig(&admin, &admins, &2);
@@ -1052,11 +1046,9 @@ fn test_pause_without_multisig_rejected() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(LendingContract, ());
-    let client = LendingContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
-    client.initialize(&admin);
+    let contract_id = env.register(LendingContract, (&admin,));
+    let client = LendingContractClient::new(&env, &contract_id);
 
     client.pause(&admin);
 }
@@ -1477,13 +1469,11 @@ fn setup_flash_loan() -> (Env, Address, Address, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(LendingContract, ());
-    let client = LendingContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
 
-    client.initialize(&admin);
+    let contract_id = env.register(LendingContract, (&admin,));
+    let client = LendingContractClient::new(&env, &contract_id);
     client.set_multisig_admin(&admin, &admin);
 
     let collateral_asset = Address::generate(&env);
@@ -1732,13 +1722,11 @@ fn setup_multi_collateral() -> (Env, Address, Address, Address, Address, Address
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(LendingContract, ());
-    let client = LendingContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
 
-    client.initialize(&admin);
+    let contract_id = env.register(LendingContract, (&admin,));
+    let client = LendingContractClient::new(&env, &contract_id);
     client.set_multisig_admin(&admin, &admin);
 
     let asset_a_admin = Address::generate(&env);
@@ -2783,15 +2771,13 @@ fn test_repayment_calls_loyalty_contract() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(LendingContract, ());
-    let client = LendingContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
     let lender = Address::generate(&env);
     let collateral_asset = new_collateral_token(&env);
 
-    client.initialize(&admin);
+    let contract_id = env.register(LendingContract, (&admin,));
+    let client = LendingContractClient::new(&env, &contract_id);
     client.set_multisig_admin(&admin, &admin);
     client.whitelist_asset(&admin, &collateral_asset);
     client.set_asset_collateral_config(
@@ -2809,24 +2795,26 @@ fn test_repayment_calls_loyalty_contract() {
     let token_id = env
         .register_stellar_asset_contract_v2(admin.clone())
         .address();
-    let loyalty_id = env.register(borrower_loyalty::BorrowerLoyaltyContract, ());
-    let loyalty_client = borrower_loyalty::BorrowerLoyaltyContractClient::new(&env, &loyalty_id);
 
-    loyalty_client.initialize(
-        &admin,
-        &token_id,
-        &contract_id,
-        &borrower_loyalty::RewardConfig {
-            base_amount: 1_000_0000,
-            reference_loan_amount: 10_000_0000000,
-            max_duration_multiplier_bps: 10_000,
-            tier_none_multiplier_bps: 5_000,
-            tier_beginner_multiplier_bps: 10_000,
-            tier_silver_multiplier_bps: 15_000,
-            tier_gold_multiplier_bps: 20_000,
-            tier_platinum_multiplier_bps: 30_000,
-        },
+    let loyalty_id = env.register(
+        borrower_loyalty::BorrowerLoyaltyContract,
+        (
+            &admin,
+            &token_id,
+            &contract_id,
+            borrower_loyalty::RewardConfig {
+                base_amount: 1_000_0000,
+                reference_loan_amount: 10_000_0000000,
+                max_duration_multiplier_bps: 10_000,
+                tier_none_multiplier_bps: 5_000,
+                tier_beginner_multiplier_bps: 10_000,
+                tier_silver_multiplier_bps: 15_000,
+                tier_gold_multiplier_bps: 20_000,
+                tier_platinum_multiplier_bps: 30_000,
+            },
+        ),
     );
+    let loyalty_client = borrower_loyalty::BorrowerLoyaltyContractClient::new(&env, &loyalty_id);
 
     // Fund the loyalty contract with tokens
     let token_admin_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_id);
@@ -2891,15 +2879,13 @@ fn test_late_repayment_no_reward() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(LendingContract, ());
-    let client = LendingContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
     let lender = Address::generate(&env);
     let collateral_asset = new_collateral_token(&env);
 
-    client.initialize(&admin);
+    let contract_id = env.register(LendingContract, (&admin,));
+    let client = LendingContractClient::new(&env, &contract_id);
     client.set_multisig_admin(&admin, &admin);
     client.whitelist_asset(&admin, &collateral_asset);
     client.set_asset_collateral_config(
@@ -2917,24 +2903,26 @@ fn test_late_repayment_no_reward() {
     let token_id = env
         .register_stellar_asset_contract_v2(admin.clone())
         .address();
-    let loyalty_id = env.register(borrower_loyalty::BorrowerLoyaltyContract, ());
-    let loyalty_client = borrower_loyalty::BorrowerLoyaltyContractClient::new(&env, &loyalty_id);
 
-    loyalty_client.initialize(
-        &admin,
-        &token_id,
-        &contract_id,
-        &borrower_loyalty::RewardConfig {
-            base_amount: 1_000_0000,
-            reference_loan_amount: 10_000_0000000,
-            max_duration_multiplier_bps: 10_000,
-            tier_none_multiplier_bps: 5_000,
-            tier_beginner_multiplier_bps: 10_000,
-            tier_silver_multiplier_bps: 15_000,
-            tier_gold_multiplier_bps: 20_000,
-            tier_platinum_multiplier_bps: 30_000,
-        },
+    let loyalty_id = env.register(
+        borrower_loyalty::BorrowerLoyaltyContract,
+        (
+            &admin,
+            &token_id,
+            &contract_id,
+            borrower_loyalty::RewardConfig {
+                base_amount: 1_000_0000,
+                reference_loan_amount: 10_000_0000000,
+                max_duration_multiplier_bps: 10_000,
+                tier_none_multiplier_bps: 5_000,
+                tier_beginner_multiplier_bps: 10_000,
+                tier_silver_multiplier_bps: 15_000,
+                tier_gold_multiplier_bps: 20_000,
+                tier_platinum_multiplier_bps: 30_000,
+            },
+        ),
     );
+    let loyalty_client = borrower_loyalty::BorrowerLoyaltyContractClient::new(&env, &loyalty_id);
 
     let token_admin_client = soroban_sdk::token::StellarAssetClient::new(&env, &token_id);
     token_admin_client.mint(&loyalty_id, &1_000_000_0000000);
@@ -2993,14 +2981,12 @@ fn setup_with_referral() -> (Env, Address, Address, Address, Address, Address, A
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(LendingContract, ());
-    let client = LendingContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
     let collateral_asset = new_collateral_token(&env);
 
-    client.initialize(&admin);
+    let contract_id = env.register(LendingContract, (&admin,));
+    let client = LendingContractClient::new(&env, &contract_id);
     client.set_multisig_admin(&admin, &admin);
     client.whitelist_asset(&admin, &collateral_asset);
     client.set_asset_collateral_config(
@@ -3017,21 +3003,21 @@ fn setup_with_referral() -> (Env, Address, Address, Address, Address, Address, A
     let token_id = env
         .register_stellar_asset_contract_v2(admin.clone())
         .address();
-    let referral_id = env.register(referral_rewards::ReferralRewardsContract, ());
-    let referral_client =
-        referral_rewards::ReferralRewardsContractClient::new(&env, &referral_id);
 
-    referral_client.initialize(
-        &admin,
-        &token_id,
-        &contract_id,
-        &referral_rewards::ReferralConfig {
-            base_bonus: 10_0000000,               // 10 TLND
-            reference_loan_amount: 1_000_0000000, // 1_000 XLM
-            max_size_multiplier_bps: 20_000,
-            min_qualifying_loan: 100_0000000,
-            max_referrals_per_referrer: 0,
-        },
+    let referral_id = env.register(
+        referral_rewards::ReferralRewardsContract,
+        (
+            &admin,
+            &token_id,
+            &contract_id,
+            referral_rewards::ReferralConfig {
+                base_bonus: 10_0000000,               // 10 TLND
+                reference_loan_amount: 1_000_0000000, // 1_000 XLM
+                max_size_multiplier_bps: 20_000,
+                min_qualifying_loan: 100_0000000,
+                max_referrals_per_referrer: 0,
+            },
+        ),
     );
 
     soroban_sdk::token::StellarAssetClient::new(&env, &token_id)
@@ -3213,15 +3199,14 @@ fn test_activation_succeeds_when_referral_pool_is_empty() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(LendingContract, ());
-    let client = LendingContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
     let lender = Address::generate(&env);
     let referrer = Address::generate(&env);
     let collateral_asset = new_collateral_token(&env);
 
-    client.initialize(&admin);
+    let contract_id = env.register(LendingContract, (&admin,));
+    let client = LendingContractClient::new(&env, &contract_id);
     client.set_multisig_admin(&admin, &admin);
     client.whitelist_asset(&admin, &collateral_asset);
     client.set_asset_collateral_config(
@@ -3238,21 +3223,22 @@ fn test_activation_succeeds_when_referral_pool_is_empty() {
     let token_id = env
         .register_stellar_asset_contract_v2(admin.clone())
         .address();
-    let referral_id = env.register(referral_rewards::ReferralRewardsContract, ());
-    let referral_client =
-        referral_rewards::ReferralRewardsContractClient::new(&env, &referral_id);
-    referral_client.initialize(
-        &admin,
-        &token_id,
-        &contract_id,
-        &referral_rewards::ReferralConfig {
-            base_bonus: 10_0000000,
-            reference_loan_amount: 1_000_0000000,
-            max_size_multiplier_bps: 20_000,
-            min_qualifying_loan: 100_0000000,
-            max_referrals_per_referrer: 0,
-        },
+    let referral_id = env.register(
+        referral_rewards::ReferralRewardsContract,
+        (
+            &admin,
+            &token_id,
+            &contract_id,
+            referral_rewards::ReferralConfig {
+                base_bonus: 10_0000000,
+                reference_loan_amount: 1_000_0000000,
+                max_size_multiplier_bps: 20_000,
+                min_qualifying_loan: 100_0000000,
+                max_referrals_per_referrer: 0,
+            },
+        ),
     );
+    let referral_client = referral_rewards::ReferralRewardsContractClient::new(&env, &referral_id);
     // Deliberately no mint — the pool is empty.
     client.set_referral_contract(&admin, &referral_id);
     referral_client.register_referral(&borrower, &referrer);
@@ -3446,10 +3432,9 @@ fn spoofed_request(
 fn test_set_reputation_contract() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(LendingContract, ());
-    let client = LendingContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
-    client.initialize(&admin);
+    let contract_id = env.register(LendingContract, (&admin,));
+    let client = LendingContractClient::new(&env, &contract_id);
 
     assert_eq!(client.get_reputation_contract(), None);
     let reputation = Address::generate(&env);
@@ -3476,12 +3461,11 @@ fn test_set_reputation_contract_non_admin_rejected() {
 fn test_create_loan_rejected_without_reputation_contract() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(LendingContract, ());
-    let client = LendingContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
     let collateral_asset = Address::generate(&env);
-    client.initialize(&admin);
+    let contract_id = env.register(LendingContract, (&admin,));
+    let client = LendingContractClient::new(&env, &contract_id);
     client.set_multisig_admin(&admin, &admin);
     client.whitelist_asset(&admin, &collateral_asset);
 
@@ -3672,23 +3656,25 @@ fn test_spoofed_tier_cannot_inflate_loyalty_reward() {
     let token_id = env
         .register_stellar_asset_contract_v2(admin.clone())
         .address();
-    let loyalty_id = env.register(borrower_loyalty::BorrowerLoyaltyContract, ());
-    let loyalty_client = borrower_loyalty::BorrowerLoyaltyContractClient::new(&env, &loyalty_id);
-    loyalty_client.initialize(
-        &admin,
-        &token_id,
-        &contract_id,
-        &borrower_loyalty::RewardConfig {
-            base_amount: 1_000_0000,
-            reference_loan_amount: 1_000_0000000,
-            max_duration_multiplier_bps: 10_000,
-            tier_none_multiplier_bps: 5_000,
-            tier_beginner_multiplier_bps: 10_000,
-            tier_silver_multiplier_bps: 15_000,
-            tier_gold_multiplier_bps: 20_000,
-            tier_platinum_multiplier_bps: 30_000,
-        },
+    let loyalty_id = env.register(
+        borrower_loyalty::BorrowerLoyaltyContract,
+        (
+            &admin,
+            &token_id,
+            &contract_id,
+            borrower_loyalty::RewardConfig {
+                base_amount: 1_000_0000,
+                reference_loan_amount: 1_000_0000000,
+                max_duration_multiplier_bps: 10_000,
+                tier_none_multiplier_bps: 5_000,
+                tier_beginner_multiplier_bps: 10_000,
+                tier_silver_multiplier_bps: 15_000,
+                tier_gold_multiplier_bps: 20_000,
+                tier_platinum_multiplier_bps: 30_000,
+            },
+        ),
     );
+    let loyalty_client = borrower_loyalty::BorrowerLoyaltyContractClient::new(&env, &loyalty_id);
     soroban_sdk::token::StellarAssetClient::new(&env, &token_id)
         .mint(&loyalty_id, &1_000_000_0000000);
     client.set_loyalty_contract(&admin, &loyalty_id);
@@ -3925,4 +3911,32 @@ fn test_sweep_cannot_take_uncollected_fees() {
 
     client.sweep_tokens(&admin, &fee_token, &recipient, &100);
     assert_eq!(token::Client::new(&env, &fee_token).balance(&contract_id), uncollected);
+}
+
+/// Issue #352: initialization runs in the Soroban constructor, atomically with
+/// deployment. There is no `initialize` entrypoint left to front-run, and the
+/// constructor cannot be re-invoked on the live contract to seize admin rights.
+#[test]
+fn test_constructor_initializes_and_cannot_be_reinvoked() {
+    use soroban_sdk::{IntoVal, Symbol};
+    let (env, contract_id, admin, _borrower, _collateral) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+    assert_eq!(client.get_admin(), admin);
+    let attacker = Address::generate(&env);
+    let args: soroban_sdk::Vec<soroban_sdk::Val> = soroban_sdk::vec![
+        &env,
+        attacker.into_val(&env),
+    ];
+    for name in ["initialize", "__constructor"] {
+        let res = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &contract_id,
+            &Symbol::new(&env, name),
+            args.clone(),
+        );
+        assert!(res.is_err(), "{name} must not be callable after deployment");
+    }
+    let stored: Address = env.as_contract(&contract_id, || {
+        env.storage().instance().get(&DataKey::Admin).unwrap()
+    });
+    assert_eq!(stored, admin);
 }

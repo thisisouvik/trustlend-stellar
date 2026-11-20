@@ -56,11 +56,9 @@ fn setup_unfunded() -> (Env, Address, Address, Address, Address) {
     asset_client.mint(&user, &1_000_000_000); // 1 000 USDC (7 decimals assumed)
 
     // Deploy pool contract
-    let pool_id = env.register(UsdcLendingPool, ());
 
     // Initialize pool: 5 % annual yield (500 bps)
-    let client = UsdcLendingPoolClient::new(&env, &pool_id);
-    client.initialize(&admin, &usdc_addr, &500_u32);
+    let pool_id = env.register(UsdcLendingPool, (&admin, &usdc_addr, &500_u32));
 
     (env, pool_id, admin, user, usdc_addr)
 }
@@ -120,12 +118,32 @@ fn test_initialize_stores_pool_state() {
     assert_eq!(state.total_yield_paid, 0);
 }
 
+/// Issue #352: initialization runs in the Soroban constructor, atomically with
+/// deployment. There is no `initialize` entrypoint left to front-run, and the
+/// constructor cannot be re-invoked on the live contract to seize admin rights.
 #[test]
-#[should_panic(expected = "already initialized")]
-fn test_initialize_rejects_double_init() {
+fn test_constructor_initializes_and_cannot_be_reinvoked() {
+    use soroban_sdk::{IntoVal, Symbol};
     let (env, pool_id, admin, _user, usdc) = setup();
-    let client = UsdcLendingPoolClient::new(&env, &pool_id);
-    client.initialize(&admin, &usdc, &500_u32);
+    let attacker = Address::generate(&env);
+    let args: soroban_sdk::Vec<soroban_sdk::Val> = soroban_sdk::vec![
+        &env,
+        attacker.into_val(&env),
+        usdc.into_val(&env),
+        500u32.into_val(&env),
+    ];
+    for name in ["initialize", "__constructor"] {
+        let res = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &pool_id,
+            &Symbol::new(&env, name),
+            args.clone(),
+        );
+        assert!(res.is_err(), "{name} must not be callable after deployment");
+    }
+    let stored: Address = env.as_contract(&pool_id, || {
+        env.storage().instance().get(&DataKey::Admin).unwrap()
+    });
+    assert_eq!(stored, admin);
 }
 
 #[test]
@@ -136,9 +154,7 @@ fn test_initialize_rejects_zero_yield() {
 
     let admin = Address::generate(&env);
     let (usdc_addr, _, _) = create_token(&env, &admin);
-    let pool_id = env.register(UsdcLendingPool, ());
-    let client = UsdcLendingPoolClient::new(&env, &pool_id);
-    client.initialize(&admin, &usdc_addr, &0_u32);
+    env.register(UsdcLendingPool, (&admin, &usdc_addr, &0_u32));
 }
 
 #[test]
@@ -149,9 +165,7 @@ fn test_initialize_rejects_yield_over_max() {
 
     let admin = Address::generate(&env);
     let (usdc_addr, _, _) = create_token(&env, &admin);
-    let pool_id = env.register(UsdcLendingPool, ());
-    let client = UsdcLendingPoolClient::new(&env, &pool_id);
-    client.initialize(&admin, &usdc_addr, &10_001_u32);
+    env.register(UsdcLendingPool, (&admin, &usdc_addr, &10_001_u32));
 }
 
 // ─── Deposit tests ────────────────────────────────────────────────────────────

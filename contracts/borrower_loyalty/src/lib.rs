@@ -48,17 +48,17 @@ pub trait BorrowerLoyalty {
 
 #[contractimpl]
 impl BorrowerLoyaltyContract {
-    pub fn initialize(
+    /// Soroban constructor: runs atomically as part of `stellar contract deploy`
+    /// (`-- <constructor args>`), so the contract is never live in an
+    /// uninitialised state that a third party could front-run to claim
+    /// admin rights (issue #352). There is no public `initialize`.
+    pub fn __constructor(
         env: Env,
         admin: Address,
         reward_token: Address,
         lending_contract: Address,
         config: RewardConfig,
     ) {
-        admin.require_auth();
-        if env.storage().instance().has(&DataKey::Admin) {
-            panic!("Contract already initialised");
-        }
         Self::validate_config(&config);
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage()

@@ -27,14 +27,12 @@ fn setup() -> (Env, Address, Address, Address, Address, Address) {
     env.mock_all_auths();
     env.ledger().set_timestamp(START_TIMESTAMP);
 
-    let contract_id = env.register(EscrowContract, ());
-    let client = EscrowContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let lender = Address::generate(&env);
     let borrower = Address::generate(&env);
 
-    client.initialize(&admin);
+    let contract_id = env.register(EscrowContract, (&admin,));
+    let client = EscrowContractClient::new(&env, &contract_id);
     let token = setup_token(&env, &client, &admin, &lender);
 
     (env, contract_id, admin, lender, borrower, token)
@@ -182,15 +180,13 @@ fn setup_with_multisig() -> (Env, Address, Address, Address, Address, Address, A
     env.mock_all_auths();
     env.ledger().set_timestamp(START_TIMESTAMP);
 
-    let contract_id = env.register(EscrowContract, ());
-    let client = EscrowContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let lender = Address::generate(&env);
     let borrower = Address::generate(&env);
     let signer1 = Address::generate(&env);
 
-    client.initialize(&admin);
+    let contract_id = env.register(EscrowContract, (&admin,));
+    let client = EscrowContractClient::new(&env, &contract_id);
 
     let admins = soroban_sdk::vec![&env, admin.clone(), signer1.clone()];
     client.setup_multisig(&admin, &admins, &2);
@@ -464,4 +460,32 @@ fn test_custody_balance_matches_active_commitments() {
     let token_client = token::Client::new(&env, &token);
     assert_eq!(token_client.balance(&borrower), 2_000_000);
     assert_eq!(token_client.balance(&lender), LENDER_FUNDS - 6_000_000);
+}
+
+/// Issue #352: initialization runs in the Soroban constructor, atomically with
+/// deployment. There is no `initialize` entrypoint left to front-run, and the
+/// constructor cannot be re-invoked on the live contract to seize admin rights.
+#[test]
+fn test_constructor_initializes_and_cannot_be_reinvoked() {
+    use soroban_sdk::{IntoVal, Symbol};
+    let (env, contract_id, admin, _lender, _borrower, _token) = setup();
+    let client = EscrowContractClient::new(&env, &contract_id);
+    assert_eq!(client.get_admin(), admin);
+    let attacker = Address::generate(&env);
+    let args: soroban_sdk::Vec<soroban_sdk::Val> = soroban_sdk::vec![
+        &env,
+        attacker.into_val(&env),
+    ];
+    for name in ["initialize", "__constructor"] {
+        let res = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &contract_id,
+            &Symbol::new(&env, name),
+            args.clone(),
+        );
+        assert!(res.is_err(), "{name} must not be callable after deployment");
+    }
+    let stored: Address = env.as_contract(&contract_id, || {
+        env.storage().instance().get(&DataKey::Admin).unwrap()
+    });
+    assert_eq!(stored, admin);
 }

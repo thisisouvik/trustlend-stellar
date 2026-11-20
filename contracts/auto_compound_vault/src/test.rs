@@ -14,9 +14,12 @@ fn setup_test() -> (Env, Address, Address, Address, Address, AutoCompoundVaultCo
     let asset_token_id = env.register_stellar_asset_contract_v2(token_admin.clone()).address();
     let lending_id = Address::generate(&env);
 
-    let vault_id = env.register(AutoCompoundVaultContract, ());
+    // 1% harvest fee
+    let vault_id = env.register(
+        AutoCompoundVaultContract,
+        (&admin, &asset_token_id, &lending_id, 100_u32),
+    );
     let client = AutoCompoundVaultContractClient::new(&env, &vault_id);
-    client.initialize(&admin, &asset_token_id, &lending_id, &100); // 1% harvest fee
 
     (env, admin, asset_token_id, lending_id, vault_id, client)
 }
@@ -513,4 +516,34 @@ fn test_deposit_after_full_exit_with_residual_assets() {
     assert!(bob_shares > 0 && bob_shares <= 500_0000000i128);
     assert!(client.get_user_asset_balance(&bob) <= 500_0000000i128 + client.get_total_managed_assets());
     assert_backed(&env, &asset_token, &vault_id, &client);
+}
+
+/// Issue #352: initialization runs in the Soroban constructor, atomically with
+/// deployment. There is no `initialize` entrypoint left to front-run, and the
+/// constructor cannot be re-invoked on the live contract to seize admin rights.
+#[test]
+fn test_constructor_initializes_and_cannot_be_reinvoked() {
+    use soroban_sdk::{IntoVal, Symbol};
+    let (env, admin, asset_token_id, lending_id, vault_id, client) = setup_test();
+    assert_eq!(client.get_admin(), admin);
+    let attacker = Address::generate(&env);
+    let args: soroban_sdk::Vec<soroban_sdk::Val> = soroban_sdk::vec![
+        &env,
+        attacker.into_val(&env),
+        asset_token_id.into_val(&env),
+        lending_id.into_val(&env),
+        0u32.into_val(&env),
+    ];
+    for name in ["initialize", "__constructor"] {
+        let res = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &vault_id,
+            &Symbol::new(&env, name),
+            args.clone(),
+        );
+        assert!(res.is_err(), "{name} must not be callable after deployment");
+    }
+    let stored: Address = env.as_contract(&vault_id, || {
+        env.storage().instance().get(&DataKey::Admin).unwrap()
+    });
+    assert_eq!(stored, admin);
 }

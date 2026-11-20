@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- `POST /api/sponsor` no longer fee-bumps arbitrary transactions (#330). It
+  signed a FeeBumpTransaction with `ADMIN_SECRET_KEY` for any caller and any
+  inner transaction, so unauthenticated requests could drain the treasury's
+  XLM. It now requires an authenticated borrower session, only sponsors a
+  signed, single `InvokeContract` call to an official TrustLend contract
+  sourced from the borrower's own wallet, caps the inner fee
+  (`SPONSOR_MAX_INNER_FEE_STROOPS`), and enforces per-user and per-wallet
+  sponsorship budgets on top of the per-IP limit. Rejections return 4xx with
+  a reason code and are logged.
 - `fast-uri` [GHSA-83f7-4hh3-vchq](https://github.com/advisories/GHSA-83f7-4hh3-vchq)
   (`mailto:` header injection, Dependabot alert #117) is verified patched:
   the `overrides` pin resolves the only copy to `4.2.2` (fixed in `4.1.1`) and

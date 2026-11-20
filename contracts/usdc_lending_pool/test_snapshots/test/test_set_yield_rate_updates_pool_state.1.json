@@ -402,6 +402,18 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "LastRateChangeLedger"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u32": 0
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "Pool"
                             }
                           ]

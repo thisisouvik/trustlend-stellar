@@ -1246,7 +1246,10 @@ impl LendingContract {
     /// limit and claim unearned loyalty rewards.
     ///
     /// The function also checks that the borrower has sufficient borrowing
-    /// power (from multi-asset collateral) to cover the requested loan amount.
+    /// power to cover the requested loan amount. Borrowing power is computed
+    /// from the collateral actually deposited into the borrower's vault via
+    /// `deposit_collateral` (Issue #415); `request.collateral_entries` is only
+    /// a declaration and every declared amount must be backed by that vault.
     pub fn create_loan_request(env: Env, borrower: Address, request: LoanRequestInput) -> u32 {
         borrower.require_auth();
         Self::assert_not_paused(&env);
@@ -1313,8 +1316,12 @@ impl LendingContract {
             }
         }
 
-        // Check borrowing power: total borrowing power must be >= loan amount
-        let borrowing_power = Self::compute_borrowing_power_from_entries(&env, &collateral_entries);
+        // Borrowing power comes from the borrower's on-chain vault
+        // (`DataKey::UserCollateral`), i.e. tokens actually taken into custody
+        // by `deposit_collateral` — never from the caller-supplied entries,
+        // which would let a borrower declare phantom collateral (Issue #415).
+        let vault_entries = Self::get_user_collateral_entries(env.clone(), borrower.clone());
+        let borrowing_power = Self::compute_borrowing_power_from_entries(&env, &vault_entries);
 
         if borrowing_power < amount {
             panic!(
@@ -1322,6 +1329,10 @@ impl LendingContract {
                 borrowing_power, amount
             );
         }
+
+        // The declared entries are kept for client compatibility, but each
+        // asset's declared total must be backed by the vault balance.
+        Self::assert_entries_backed_by_vault(&collateral_entries, &vault_entries);
 
         // interest = principal × rate_bps × days / (10_000 × 365)
         let interest = Self::calculate_interest(amount, interest_rate_bps, duration_days);
@@ -1973,6 +1984,48 @@ impl LendingContract {
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /// Panic unless, for every asset named in `declared`, the summed declared
+    /// amount is covered by the borrower's deposited `vault` balance for that
+    /// asset. Summing per asset stops a request from listing the same
+    /// deposit several times (Issue #415).
+    fn assert_entries_backed_by_vault(
+        declared: &Vec<CollateralEntry>,
+        vault: &Vec<CollateralEntry>,
+    ) {
+        for (i, entry) in declared.iter().enumerate() {
+            // Each asset is checked once, at its first occurrence.
+            if declared
+                .iter()
+                .take(i)
+                .any(|earlier| earlier.asset == entry.asset)
+            {
+                continue;
+            }
+
+            let mut declared_total: i128 = 0;
+            for other in declared.iter() {
+                if other.asset == entry.asset {
+                    declared_total = declared_total
+                        .checked_add(other.amount)
+                        .expect("Overflow summing declared collateral");
+                }
+            }
+
+            let deposited: i128 = vault
+                .iter()
+                .find(|v| v.asset == entry.asset)
+                .map(|v| v.amount)
+                .unwrap_or(0);
+
+            if declared_total > deposited {
+                panic!(
+                    "Declared collateral exceeds deposited vault balance: {} > {}",
+                    declared_total, deposited
+                );
+            }
+        }
+    }
 
     /// Compute borrowing power from a set of collateral entries.
     ///

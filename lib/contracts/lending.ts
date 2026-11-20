@@ -415,7 +415,12 @@ export interface CreateLoanRequestParams {
    * `LoanRequestInput` wire format is unchanged.
    */
   maxLoanAmountStroops: bigint;
-  /** At least one whitelisted asset; the contract checks borrowing power. */
+  /**
+   * At least one whitelisted asset. This is only a declaration (Issue #415):
+   * borrowing power comes from collateral already deposited with
+   * `depositCollateral`, and each declared amount must not exceed the
+   * borrower's deposited vault balance for that asset.
+   */
   collateralEntries: { asset: string; amount: bigint }[];
   rateModel?: InterestRateModel;
   /**

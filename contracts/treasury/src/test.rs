@@ -163,7 +163,9 @@ fn setup_lending_with_fees(
     lending.set_multisig_admin(admin, admin);
 
     let borrower = Address::generate(env);
-    let collateral_asset = Address::generate(env);
+    let collateral_asset = env
+        .register_stellar_asset_contract_v2(Address::generate(env))
+        .address();
     lending.whitelist_asset(admin, &collateral_asset);
     lending.set_asset_collateral_config(
         admin,
@@ -175,6 +177,12 @@ fn setup_lending_with_fees(
         },
     );
     lending.set_asset_oracle_prices(admin, &collateral_asset, &vec![env, 10_000_000]);
+
+    // Loan requests are backed only by collateral deposited into the
+    // borrower's on-chain vault (lending Issue #415).
+    let vault_deposit: i128 = 100_000_0000000;
+    mint_tokens(env, &collateral_asset, &borrower, vault_deposit);
+    lending.deposit_collateral(&borrower, &collateral_asset, &vault_deposit);
 
     // Lending reads the borrower's credit limit from the reputation contract.
     let reputation_id = env.register(borrower_reputation::BorrowerReputationContract, ());

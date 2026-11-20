@@ -2458,6 +2458,200 @@ fn test_create_loan_request_succeeds_when_declared_matches_vault() {
     assert_eq!(client.get_loan(&loan_id).status, LoanStatus::Pending);
 }
 
+// ─── Collateral locking on loan creation (Issue #416) ─────────────────────
+
+/// Deposit 10 000 units of `asset_a` (7 500 XLM of borrowing power) and open
+/// a Pending loan request for `amount`. Returns the loan id.
+fn deposit_and_request(
+    env: &Env,
+    client: &LendingContractClient,
+    borrower: &Address,
+    asset: &Address,
+    amount: i128,
+) -> u32 {
+    client.deposit_collateral(borrower, asset, &10_000_0000000);
+    client.create_loan_request(
+        borrower,
+        &create_request_struct(
+            env,
+            amount,
+            30,
+            1000,
+            0,
+            asset,
+            10_000_0000000,
+            InterestRateModel::Fixed,
+        ),
+    )
+}
+
+/// A borrower with a pending loan request cannot withdraw their collateral
+/// below what the requested loan needs — the front-running drain.
+#[test]
+#[should_panic(expected = "Withdrawal would leave pending or active loans under-collateralized")]
+fn test_pending_loan_request_blocks_collateral_withdrawal() {
+    let (env, contract_id, _admin, borrower, asset_a, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let loan_id = deposit_and_request(&env, &client, &borrower, &asset_a, 5_000_0000000);
+    assert_eq!(client.get_loan(&loan_id).status, LoanStatus::Pending);
+
+    client.withdraw_collateral(&borrower, &asset_a, &10_000_0000000);
+}
+
+/// Collateral above what the pending loan needs stays withdrawable; the
+/// lock is exactly the loan's remaining balance.
+#[test]
+fn test_pending_loan_request_allows_withdrawing_only_the_excess() {
+    let (env, contract_id, _admin, borrower, asset_a, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let loan_id = deposit_and_request(&env, &client, &borrower, &asset_a, 3_000_0000000);
+    let locked = client.get_loan(&loan_id).remaining_due;
+    assert_eq!(client.get_encumbered_debt(&borrower), locked);
+
+    // 5 000 left → 3 750 XLM of power, still above the ~3 025 XLM locked.
+    client.withdraw_collateral(&borrower, &asset_a, &5_000_0000000);
+
+    // 4 000 left → 3 000 XLM of power, below the lock.
+    assert!(client
+        .try_withdraw_collateral(&borrower, &asset_a, &1_000_0000000)
+        .is_err());
+    assert_eq!(
+        client.get_user_collateral_entries(&borrower).get(0).unwrap().amount,
+        5_000_0000000
+    );
+}
+
+/// The lock holds while the loan is Approved and after it is Active.
+#[test]
+fn test_approved_and_active_loans_keep_collateral_locked() {
+    let (env, contract_id, admin, borrower, asset_a, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+    let lender = Address::generate(&env);
+
+    let loan_id = deposit_and_request(&env, &client, &borrower, &asset_a, 5_000_0000000);
+
+    client.approve_loan(&lender, &loan_id, &1);
+    assert!(client
+        .try_withdraw_collateral(&borrower, &asset_a, &10_000_0000000)
+        .is_err());
+
+    client.activate_loan(&admin, &loan_id);
+    assert!(client
+        .try_withdraw_collateral(&borrower, &asset_a, &10_000_0000000)
+        .is_err());
+
+    // The activated loan is still fully backed by custody.
+    assert_eq!(token::Client::new(&env, &asset_a).balance(&contract_id), 10_000_0000000);
+}
+
+/// The same collateral cannot back two loan requests at once.
+#[test]
+#[should_panic(expected = "Insufficient borrowing power")]
+fn test_locked_collateral_cannot_back_a_second_request() {
+    let (env, contract_id, _admin, borrower, asset_a, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // 7 500 XLM of power: the first 5 000 XLM request fits...
+    deposit_and_request(&env, &client, &borrower, &asset_a, 5_000_0000000);
+
+    // ...but a second one only has ~2 460 XLM of unlocked power left.
+    client.create_loan_request(
+        &borrower,
+        &create_request_struct(
+            &env,
+            5_000_0000000,
+            30,
+            1000,
+            0,
+            &asset_a,
+            10_000_0000000,
+            InterestRateModel::Fixed,
+        ),
+    );
+}
+
+/// A pending request locks collateral but is not debt: it must not make the
+/// borrower's position look unhealthy or liquidatable.
+#[test]
+fn test_pending_loan_request_does_not_affect_health_factor() {
+    let (env, contract_id, _admin, borrower, asset_a, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    deposit_and_request(&env, &client, &borrower, &asset_a, 5_000_0000000);
+    assert_eq!(client.get_health_factor(&borrower), u32::MAX);
+}
+
+/// Cancelling a pending request releases its collateral in full.
+#[test]
+fn test_cancelled_loan_request_releases_collateral() {
+    let (env, contract_id, _admin, borrower, asset_a, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &asset_a);
+    let wallet_before = token_client.balance(&borrower);
+
+    let loan_id = deposit_and_request(&env, &client, &borrower, &asset_a, 5_000_0000000);
+    client.cancel_loan_request(&borrower, &loan_id);
+
+    assert_eq!(client.get_loan(&loan_id).status, LoanStatus::Cancelled);
+    assert_eq!(client.get_encumbered_debt(&borrower), 0);
+    client.withdraw_collateral(&borrower, &asset_a, &10_000_0000000);
+    assert_eq!(token_client.balance(&borrower), wallet_before);
+}
+
+/// A cancelled request cannot be approved afterwards.
+#[test]
+#[should_panic(expected = "Loan is not in PENDING state")]
+fn test_cancelled_loan_request_cannot_be_approved() {
+    let (env, contract_id, _admin, borrower, asset_a, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let loan_id = deposit_and_request(&env, &client, &borrower, &asset_a, 5_000_0000000);
+    client.cancel_loan_request(&borrower, &loan_id);
+    client.approve_loan(&Address::generate(&env), &loan_id, &1);
+}
+
+/// Only the borrower can cancel their request.
+#[test]
+#[should_panic(expected = "Caller is not the borrower")]
+fn test_cancel_loan_request_rejects_other_caller() {
+    let (env, contract_id, _admin, borrower, asset_a, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let loan_id = deposit_and_request(&env, &client, &borrower, &asset_a, 5_000_0000000);
+    client.cancel_loan_request(&Address::generate(&env), &loan_id);
+}
+
+/// An approved loan cannot be cancelled out from under the lender.
+#[test]
+#[should_panic(expected = "Only PENDING loan requests can be cancelled")]
+fn test_cancel_loan_request_rejects_approved_loan() {
+    let (env, contract_id, _admin, borrower, asset_a, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let loan_id = deposit_and_request(&env, &client, &borrower, &asset_a, 5_000_0000000);
+    client.approve_loan(&Address::generate(&env), &loan_id, &1);
+    client.cancel_loan_request(&borrower, &loan_id);
+}
+
+/// Repaying the loan releases its collateral.
+#[test]
+fn test_repaid_loan_releases_collateral() {
+    let (env, contract_id, admin, borrower, asset_a, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let loan_id = deposit_and_request(&env, &client, &borrower, &asset_a, 5_000_0000000);
+    client.approve_loan(&Address::generate(&env), &loan_id, &1);
+    client.activate_loan(&admin, &loan_id);
+    let total_due = client.get_loan(&loan_id).total_due;
+    client.record_payment(&admin, &loan_id, &total_due);
+
+    assert_eq!(client.get_encumbered_debt(&borrower), 0);
+    client.withdraw_collateral(&borrower, &asset_a, &10_000_0000000);
+    assert_eq!(client.get_user_collateral_entries(&borrower).len(), 0);
+}
+
 /// Zero interest cannot be used to bypass the protocol's minimum APR.
 #[test]
 fn test_create_loan_request_rejects_interest_below_protocol_minimum() {

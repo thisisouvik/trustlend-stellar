@@ -9,4 +9,6 @@ ignore = [
     "RUSTSEC-2024-0388",
     # paste is unmaintained; transitive dependency of Soroban SDK macros
     "RUSTSEC-2024-0436",
+    # crypto-bigint timing variability; transitive dependency of soroban-env-host via k256/p256
+    "RUSTSEC-2026-0387",
 ]

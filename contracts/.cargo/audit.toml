@@ -1,0 +1,12 @@
+# Configuration for cargo-audit
+# See: https://docs.rs/cargo-audit/latest/cargo_audit/config/index.html
+
+[advisories]
+ignore = [
+    # chrono is unmaintained; transitive dependency of Soroban testing environment
+    "RUSTSEC-2026-0543",
+    # derivative is unmaintained; transitive dependency of Soroban SDK
+    "RUSTSEC-2024-0388",
+    # paste is unmaintained; transitive dependency of Soroban SDK macros
+    "RUSTSEC-2024-0436",
+]

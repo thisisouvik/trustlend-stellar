@@ -255,7 +255,7 @@ impl TlendAirdropContract {
         if *caller == Self::get_admin(env.clone()) {
             return;
         }
-        if Self::get_multisig_admin(env.clone()).map_or(false, |m| m == *caller) {
+        if Self::get_multisig_admin(env.clone()).is_some_and(|m| m == *caller) {
             return;
         }
         panic!("Unauthorised caller: not admin or multisig");

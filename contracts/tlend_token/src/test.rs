@@ -2,15 +2,18 @@
 
 use super::*;
 use soroban_sdk::testutils::{Address as _, Ledger as _};
+use soroban_sdk::{vec, IntoVal, Symbol};
 
 fn setup<'a>() -> (Env, Address, TlendTokenContractClient<'a>) {
     let env = Env::default();
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
-    let id = env.register(TlendTokenContract, ());
+    let id = env.register(
+        TlendTokenContract,
+        (&admin, 7_u32, String::from_str(&env, "TrustLend"), String::from_str(&env, "TLEND")),
+    );
     let token = TlendTokenContractClient::new(&env, &id);
-    token.initialize(&admin, &7, &String::from_str(&env, "TrustLend"), &String::from_str(&env, "TLEND"));
 
     (env, admin, token)
 }
@@ -22,11 +25,32 @@ fn test_metadata() {
     assert_eq!(token.total_supply(), 0);
 }
 
+/// Issue #352: initialization happens in the constructor at deploy time, so
+/// there is no `initialize` entrypoint to front-run, and the constructor
+/// cannot be re-invoked on a live contract.
 #[test]
-#[should_panic(expected = "already initialised")]
-fn test_double_initialize_panics() {
+fn test_constructor_initializes_and_cannot_be_reinvoked() {
     let (env, admin, token) = setup();
-    token.initialize(&admin, &7, &String::from_str(&env, "X"), &String::from_str(&env, "X"));
+    assert_eq!(token.admin(), admin);
+    assert_eq!(token.decimals(), 7);
+
+    let attacker = Address::generate(&env);
+    let args = vec![
+        &env,
+        attacker.into_val(&env),
+        7u32.into_val(&env),
+        String::from_str(&env, "X").into_val(&env),
+        String::from_str(&env, "X").into_val(&env),
+    ];
+    for name in ["initialize", "__constructor"] {
+        let res = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &token.address,
+            &Symbol::new(&env, name),
+            args.clone(),
+        );
+        assert!(res.is_err(), "{name} must not be callable after deployment");
+    }
+    assert_eq!(token.admin(), admin);
 }
 
 #[test]

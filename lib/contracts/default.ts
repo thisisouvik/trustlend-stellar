@@ -152,6 +152,11 @@ export async function addToInsurance(
  * Trigger an insurance payout for a defaulted loan.
  * Records the event on-chain and deducts from the fund.
  * Admin must separately send the XLM PAYMENT to the lender.
+ *
+ * Multisig-gated on-chain (issue #353): once the MultiSigAdmin contract is
+ * linked, only that contract may call this, so a direct call with the admin
+ * key is rejected. Propose a `TriggerInsurancePayout` action on the
+ * MultiSigAdmin contract instead (see lib/scheduler/default-management.ts).
  */
 export async function triggerInsurancePayout(
   adminAddress: string,

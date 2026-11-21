@@ -61,8 +61,11 @@ pub struct TreasuryContract;
 
 #[contractimpl]
 impl TreasuryContract {
-    /// Initialize the Treasury with admin and destination configuration.
-    pub fn initialize(
+    /// Soroban constructor: runs atomically as part of `stellar contract deploy`
+    /// (`-- <constructor args>`), so the contract is never live in an
+    /// uninitialised state that a third party could front-run to claim
+    /// admin rights (issue #352). There is no public `initialize`.
+    pub fn __constructor(
         env: Env,
         admin: Address,
         insurance_fund: Address,
@@ -70,9 +73,6 @@ impl TreasuryContract {
         insurance_share_bps: u32,
         dao_share_bps: u32,
     ) {
-        if env.storage().instance().has(&DataKey::Admin) {
-            panic!("Treasury already initialised");
-        }
         if insurance_share_bps + dao_share_bps != BPS_TOTAL {
             panic!("Distribution share BPS must equal 10,000 (100%)");
         }

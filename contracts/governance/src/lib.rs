@@ -95,7 +95,11 @@ impl GovernanceContract {
     // ── Init / config ──────────────────────────────────────────────────────────
 
     #[allow(clippy::too_many_arguments)]
-    pub fn initialize(
+    /// Soroban constructor: runs atomically as part of `stellar contract deploy`
+    /// (`-- <constructor args>`), so the contract is never live in an
+    /// uninitialised state that a third party could front-run to claim
+    /// admin rights (issue #352). There is no public `initialize`.
+    pub fn __constructor(
         env: Env,
         admin: Address,
         lending: Address,
@@ -105,9 +109,6 @@ impl GovernanceContract {
         min_proposer_power: i128,
         max_fee_bps: u32,
     ) {
-        if env.storage().instance().has(&DataKey::Config) {
-            panic!("Contract already initialised");
-        }
         if voting_period_secs == 0 {
             panic!("voting_period_secs must be positive");
         }

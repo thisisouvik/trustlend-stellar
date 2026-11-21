@@ -39,29 +39,24 @@ fn setup<'a>() -> World<'a> {
 
     let admin = Address::generate(&env);
 
-    let token_id = env.register(TlendTokenContract, ());
-    let token = TlendTokenContractClient::new(&env, &token_id);
-    token.initialize(
-        &admin,
-        &7,
-        &String::from_str(&env, "TrustLend"),
-        &String::from_str(&env, "TLEND"),
+    let token_id = env.register(
+        TlendTokenContract,
+        (&admin, 7_u32, String::from_str(&env, "TrustLend"), String::from_str(&env, "TLEND")),
     );
+    let token = TlendTokenContractClient::new(&env, &token_id);
     token.mint(&admin, &1_000_000);
-
-    let airdrop_id = env.register(TlendAirdropContract, ());
-    let airdrop = TlendAirdropContractClient::new(&env, &airdrop_id);
 
     let c0 = Address::generate(&env);
     let c1 = Address::generate(&env);
     let c2 = Address::generate(&env);
     let c3 = Address::generate(&env);
 
-    // leaf_hash_for is a pure view — callable before initialize.
-    let leaf0 = airdrop.leaf_hash_for(&c0, &AMOUNTS[0]);
-    let leaf1 = airdrop.leaf_hash_for(&c1, &AMOUNTS[1]);
-    let leaf2 = airdrop.leaf_hash_for(&c2, &AMOUNTS[2]);
-    let leaf3 = airdrop.leaf_hash_for(&c3, &AMOUNTS[3]);
+    // The Merkle root is a constructor argument, so the tree is built before
+    // the airdrop is deployed, using the same leaf hashing the contract uses.
+    let leaf0 = TlendAirdropContract::leaf_hash(&env, &c0, AMOUNTS[0]);
+    let leaf1 = TlendAirdropContract::leaf_hash(&env, &c1, AMOUNTS[1]);
+    let leaf2 = TlendAirdropContract::leaf_hash(&env, &c2, AMOUNTS[2]);
+    let leaf3 = TlendAirdropContract::leaf_hash(&env, &c3, AMOUNTS[3]);
 
     let node01 = hash_pair(&env, &leaf0, &leaf1);
     let node23 = hash_pair(&env, &leaf2, &leaf3);
@@ -72,7 +67,10 @@ fn setup<'a>() -> World<'a> {
     let proof2 = vec![&env, leaf3.clone(), node01.clone()];
     let proof3 = vec![&env, leaf2.clone(), node01.clone()];
 
-    airdrop.initialize(&admin, &token_id, &root);
+    let airdrop_id = env.register(TlendAirdropContract, (&admin, &token_id, &root));
+    let airdrop = TlendAirdropContractClient::new(&env, &airdrop_id);
+    assert_eq!(airdrop.leaf_hash_for(&c0, &AMOUNTS[0]), leaf0);
+
     airdrop.fund(&admin, &1_000);
 
     World {
@@ -339,4 +337,32 @@ fn test_multisig_admin_set_once() {
     let multisig = Address::generate(&w.env);
     w.airdrop.set_multisig_admin(&w.admin, &multisig);
     w.airdrop.set_multisig_admin(&w.admin, &multisig);
+}
+
+/// Issue #352: initialization runs in the Soroban constructor, atomically with
+/// deployment. There is no `initialize` entrypoint left to front-run, and the
+/// constructor cannot be re-invoked on the live contract to seize admin rights.
+#[test]
+fn test_constructor_initializes_and_cannot_be_reinvoked() {
+    use soroban_sdk::{IntoVal, Symbol};
+    let w = setup();
+    let env = w.env.clone();
+    let admin = w.admin.clone();
+    assert_eq!(w.airdrop.get_admin(), admin);
+    let attacker = Address::generate(&env);
+    let args: soroban_sdk::Vec<soroban_sdk::Val> = soroban_sdk::vec![
+        &env,
+        attacker.into_val(&env),
+        w.token.address.into_val(&env),
+        w.root.into_val(&env),
+    ];
+    for name in ["initialize", "__constructor"] {
+        let res = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &w.airdrop.address,
+            &Symbol::new(&env, name),
+            args.clone(),
+        );
+        assert!(res.is_err(), "{name} must not be callable after deployment");
+    }
+    assert_eq!(w.airdrop.get_admin(), admin);
 }

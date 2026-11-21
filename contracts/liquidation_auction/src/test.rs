@@ -71,15 +71,12 @@ fn setup() -> Fixture {
     env.mock_all_auths();
     env.ledger().set_timestamp(START_TIMESTAMP);
 
-    let contract_id = env.register(LiquidationAuctionContract, ());
-    let client = LiquidationAuctionContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
     let bidder = Address::generate(&env);
     let pool = Address::generate(&env);
 
-    client.initialize(&admin);
+    let contract_id = env.register(LiquidationAuctionContract, (&admin,));
 
     let collateral_token = env
         .register_stellar_asset_contract_v2(Address::generate(&env))
@@ -331,4 +328,32 @@ fn test_custody_matches_open_auctions() {
     client.finalize_expired(&32);
     assert_eq!(f.collateral().balance(&f.contract_id), 4_000_000);
     assert_eq!(client.get_auction(&33).status, AuctionStatus::Active);
+}
+
+/// Issue #352: initialization runs in the Soroban constructor, atomically with
+/// deployment. There is no `initialize` entrypoint left to front-run, and the
+/// constructor cannot be re-invoked on the live contract to seize admin rights.
+#[test]
+fn test_constructor_initializes_and_cannot_be_reinvoked() {
+    use soroban_sdk::{IntoVal, Symbol};
+    let f = setup();
+    let env = f.env.clone();
+    let admin = f.admin.clone();
+    let attacker = Address::generate(&env);
+    let args: soroban_sdk::Vec<soroban_sdk::Val> = soroban_sdk::vec![
+        &env,
+        attacker.into_val(&env),
+    ];
+    for name in ["initialize", "__constructor"] {
+        let res = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &f.contract_id,
+            &Symbol::new(&env, name),
+            args.clone(),
+        );
+        assert!(res.is_err(), "{name} must not be callable after deployment");
+    }
+    let stored: Address = env.as_contract(&f.contract_id, || {
+        env.storage().instance().get(&DataKey::Admin).unwrap()
+    });
+    assert_eq!(stored, admin);
 }

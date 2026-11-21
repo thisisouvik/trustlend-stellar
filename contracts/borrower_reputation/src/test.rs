@@ -7,13 +7,11 @@ fn setup() -> (Env, Address, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(BorrowerReputationContract, ());
-    let client = BorrowerReputationContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
 
-    client.initialize(&admin);
+    let contract_id = env.register(BorrowerReputationContract, (&admin,));
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
     client.init_borrower(&borrower);
 
     (env, contract_id, admin, borrower)
@@ -22,11 +20,10 @@ fn setup() -> (Env, Address, Address, Address) {
 #[test]
 fn test_initialization() {
     let env = Env::default();
-    let contract_id = env.register(BorrowerReputationContract, ());
-    let client = BorrowerReputationContractClient::new(&env, &contract_id);
     
     let admin = Address::generate(&env);
-    client.initialize(&admin);
+    let contract_id = env.register(BorrowerReputationContract, (&admin,));
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
 
     assert_eq!(client.get_admin(), admin);
 }
@@ -35,11 +32,10 @@ fn test_initialization() {
 fn test_default_tier() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(BorrowerReputationContract, ());
-    let client = BorrowerReputationContractClient::new(&env, &contract_id);
     
     let admin = Address::generate(&env);
-    client.initialize(&admin);
+    let contract_id = env.register(BorrowerReputationContract, (&admin,));
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
 
     let borrower = Address::generate(&env);
     client.init_borrower(&borrower);
@@ -165,14 +161,12 @@ fn setup_with_oracle() -> (Env, Address, Address, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(BorrowerReputationContract, ());
-    let client = BorrowerReputationContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let oracle = Address::generate(&env);
     let borrower = Address::generate(&env);
 
-    client.initialize(&admin);
+    let contract_id = env.register(BorrowerReputationContract, (&admin,));
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
     // `set_oracle` is multisig-gated via `assert_multisig_admin`, which checks
     // the `MultisigAdmins` Vec. We configure a single-admin multisig so the
     // guard passes; this suite focuses on oracle ingestion, not multisig flow.
@@ -328,14 +322,12 @@ fn setup_with_multisig() -> (Env, Address, Address, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(BorrowerReputationContract, ());
-    let client = BorrowerReputationContractClient::new(&env, &contract_id);
-
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
     let signer1 = Address::generate(&env);
 
-    client.initialize(&admin);
+    let contract_id = env.register(BorrowerReputationContract, (&admin,));
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
     client.init_borrower(&borrower);
 
     let admins = soroban_sdk::vec![&env, admin.clone(), signer1.clone()];
@@ -727,4 +719,32 @@ fn test_pause_cycles_setup_multisig_clears_partial_approvals() {
     assert!(!client.is_paused());
     client.pause(&signer1);
     assert!(client.is_paused());
+}
+
+/// Issue #352: initialization runs in the Soroban constructor, atomically with
+/// deployment. There is no `initialize` entrypoint left to front-run, and the
+/// constructor cannot be re-invoked on the live contract to seize admin rights.
+#[test]
+fn test_constructor_initializes_and_cannot_be_reinvoked() {
+    use soroban_sdk::{IntoVal, Symbol};
+    let (env, contract_id, admin, _borrower) = setup();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+    assert_eq!(client.get_admin(), admin);
+    let attacker = Address::generate(&env);
+    let args: soroban_sdk::Vec<soroban_sdk::Val> = soroban_sdk::vec![
+        &env,
+        attacker.into_val(&env),
+    ];
+    for name in ["initialize", "__constructor"] {
+        let res = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &contract_id,
+            &Symbol::new(&env, name),
+            args.clone(),
+        );
+        assert!(res.is_err(), "{name} must not be callable after deployment");
+    }
+    let stored: Address = env.as_contract(&contract_id, || {
+        env.storage().instance().get(&DataKey::Admin).unwrap()
+    });
+    assert_eq!(stored, admin);
 }

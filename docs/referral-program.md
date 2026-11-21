@@ -141,16 +141,21 @@ outlive the browsing session and silently attribute an unrelated later signup.
 
 ## Deployment
 
-`stellar contract build` picks up the new crate automatically. After deploying,
-wire the three links:
+`stellar contract build` picks up the new crate automatically. The contract is
+initialised by its constructor, so its configuration is passed to the deploy
+itself — there is no separate `initialize` call that could be front-run
+(issue #352). Deploy it, then wire the remaining links:
 
 ```bash
-# 1. Initialise the referral contract
-stellar contract invoke --id "$REFERRAL_ID" -- initialize \
+# 1. Deploy + initialise the referral contract in one transaction
+REFERRAL_ID=$(stellar contract deploy \
+  --wasm target/wasm32v1-none/release/referral_rewards.wasm \
+  --source "$ADMIN_KEY" --network testnet \
+  -- \
   --admin "$ADMIN" \
   --reward_token "$TLND_TOKEN_ID" \
   --lending_contract "$LENDING_ID" \
-  --config '{"base_bonus":"100000000","reference_loan_amount":"10000000000","max_size_multiplier_bps":20000,"min_qualifying_loan":"1000000000","max_referrals_per_referrer":0}'
+  --config '{"base_bonus":"100000000","reference_loan_amount":"10000000000","max_size_multiplier_bps":20000,"min_qualifying_loan":"1000000000","max_referrals_per_referrer":0}')
 
 # 2. Point the lending contract at it (enables automatic payouts)
 stellar contract invoke --id "$LENDING_ID" -- set_referral_contract \

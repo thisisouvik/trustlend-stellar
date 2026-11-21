@@ -34,10 +34,8 @@ fn setup_with(config: ReferralConfig, funding: i128) -> Ctx {
     let token_id = env
         .register_stellar_asset_contract_v2(admin.clone())
         .address();
-    let contract_id = env.register(ReferralRewardsContract, ());
-    let client = ReferralRewardsContractClient::new(&env, &contract_id);
 
-    client.initialize(&admin, &token_id, &lending, &config);
+    let contract_id = env.register(ReferralRewardsContract, (&admin, &token_id, &lending, config));
 
     if funding > 0 {
         token::StellarAssetClient::new(&env, &token_id).mint(&contract_id, &funding);
@@ -77,16 +75,36 @@ fn test_initialize_sets_state() {
     assert_eq!(c.get_total_referrals_registered(), 0);
 }
 
+/// Issue #352: initialization runs in the Soroban constructor, atomically with
+/// deployment. There is no `initialize` entrypoint left to front-run, and the
+/// constructor cannot be re-invoked on the live contract to seize admin rights.
 #[test]
-#[should_panic(expected = "already initialised")]
-fn test_double_initialize_panics() {
+fn test_constructor_initializes_and_cannot_be_reinvoked() {
+    use soroban_sdk::{IntoVal, Symbol};
     let ctx = setup();
-    client(&ctx).initialize(
-        &ctx.admin,
-        &ctx.token_id,
-        &ctx.lending,
-        &default_config(),
-    );
+    let env = ctx.env.clone();
+    let admin = ctx.admin.clone();
+    assert_eq!(client(&ctx).get_admin(), admin);
+    let attacker = Address::generate(&env);
+    let args: soroban_sdk::Vec<soroban_sdk::Val> = soroban_sdk::vec![
+        &env,
+        attacker.into_val(&env),
+        ctx.token_id.into_val(&env),
+        ctx.lending.into_val(&env),
+        default_config().into_val(&env),
+    ];
+    for name in ["initialize", "__constructor"] {
+        let res = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &ctx.contract_id,
+            &Symbol::new(&env, name),
+            args.clone(),
+        );
+        assert!(res.is_err(), "{name} must not be callable after deployment");
+    }
+    let stored: Address = env.as_contract(&ctx.contract_id, || {
+        env.storage().instance().get(&DataKey::Admin).unwrap()
+    });
+    assert_eq!(stored, admin);
 }
 
 #[test]

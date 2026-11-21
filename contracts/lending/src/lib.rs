@@ -238,14 +238,18 @@ pub enum DataKey {
     MultisigThreshold,
     /// Whether the contract is paused
     IsPaused,
-    /// Whether a given signer has already called pause (dedup)
-    PauseSigner(Address),
+    /// Whether a signer has authorised pause in a given round (dedup)
+    PauseSigner(Address, u32),
     /// Number of unique signers who have called pause
     PauseSignerCount,
-    /// Whether a given signer has already called unpause (dedup)
-    UnpauseSigner(Address),
+    /// Whether a signer has authorised unpause in a given round (dedup)
+    UnpauseSigner(Address, u32),
     /// Number of unique signers who have called unpause
     UnpauseSignerCount,
+    /// Current pause approval round; advances each time a pause completes
+    PauseRound,
+    /// Current unpause approval round; advances each time an unpause completes
+    UnpauseRound,
     /// Flash loan fee bps
     FlashLoanFeeBps,
     /// Cooldown timestamp for rate switches
@@ -380,6 +384,7 @@ impl LendingContract {
         env.storage()
             .instance()
             .set(&DataKey::MultisigThreshold, &threshold);
+        Self::reset_signer_rounds(&env);
         env.storage()
             .instance()
             .set(&DataKey::MultisigAdmins, &final_admins);
@@ -408,7 +413,8 @@ impl LendingContract {
         }
 
         // Dedup: only count each signer once
-        let signer_key = DataKey::PauseSigner(caller.clone());
+        let round = Self::signer_round(&env, &DataKey::PauseRound);
+        let signer_key = DataKey::PauseSigner(caller.clone(), round);
         if env.storage().instance().has(&signer_key) {
             panic!("Signer has already authorised pause");
         }
@@ -427,10 +433,9 @@ impl LendingContract {
         let threshold: u32 = Self::get_multisig_threshold(env.clone());
         if new_count >= threshold {
             env.storage().instance().set(&DataKey::IsPaused, &true);
-            // Reset signer tracking for next pause cycle
-            env.storage()
-                .instance()
-                .set(&DataKey::PauseSignerCount, &0u32);
+            // Clear this round's approvals so the same signers can act again
+            // in the next cycle (issue #354).
+            Self::close_signer_round(&env, true);
             env.events()
                 .publish((symbol_short!("lending"), symbol_short!("paused")), ());
         }
@@ -450,7 +455,8 @@ impl LendingContract {
             panic!("Contract is not paused");
         }
 
-        let signer_key = DataKey::UnpauseSigner(caller.clone());
+        let round = Self::signer_round(&env, &DataKey::UnpauseRound);
+        let signer_key = DataKey::UnpauseSigner(caller.clone(), round);
         if env.storage().instance().has(&signer_key) {
             panic!("Signer has already authorised unpause");
         }
@@ -469,9 +475,9 @@ impl LendingContract {
         let threshold: u32 = Self::get_multisig_threshold(env.clone());
         if new_count >= threshold {
             env.storage().instance().set(&DataKey::IsPaused, &false);
-            env.storage()
-                .instance()
-                .set(&DataKey::UnpauseSignerCount, &0u32);
+            // Clear this round's approvals so the same signers can act again
+            // in the next cycle (issue #354).
+            Self::close_signer_round(&env, false);
             env.events()
                 .publish((symbol_short!("lending"), symbol_short!("unpaused")), ());
         }
@@ -517,6 +523,7 @@ impl LendingContract {
             .set(&DataKey::MultiSigAdmin, &multisig);
         let mut msig_admins = Vec::new(&env);
         msig_admins.push_back(multisig);
+        Self::reset_signer_rounds(&env);
         env.storage()
             .instance()
             .set(&DataKey::MultisigAdmins, &msig_admins);
@@ -2277,6 +2284,52 @@ impl LendingContract {
         if *caller != admin {
             panic!("Unauthorised: caller is not admin");
         }
+    }
+
+    // ── Pause / unpause signer rounds (issue #354) ───────────────────────────
+
+    /// Current approval round for pause (`PauseRound`) or unpause
+    /// (`UnpauseRound`). Signer approvals are keyed by round, so approvals
+    /// from a completed cycle can never block the same signers in a later one.
+    fn signer_round(env: &Env, round_key: &DataKey) -> u32 {
+        env.storage().instance().get(round_key).unwrap_or(0)
+    }
+
+    /// Close the current pause (`pause == true`) or unpause round: delete its
+    /// per-signer approvals for the current signer set, reset the counter and
+    /// advance to a fresh round. Deleting the entries keeps instance storage
+    /// from growing with every cycle; advancing the round guarantees a clean
+    /// slate even for approvals of signers no longer in the set.
+    fn close_signer_round(env: &Env, pause: bool) {
+        let (round_key, count_key) = if pause {
+            (DataKey::PauseRound, DataKey::PauseSignerCount)
+        } else {
+            (DataKey::UnpauseRound, DataKey::UnpauseSignerCount)
+        };
+        let round = Self::signer_round(env, &round_key);
+        let admins: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigAdmins)
+            .unwrap_or(Vec::new(env));
+        for admin in admins.iter() {
+            let signer_key = if pause {
+                DataKey::PauseSigner(admin, round)
+            } else {
+                DataKey::UnpauseSigner(admin, round)
+            };
+            env.storage().instance().remove(&signer_key);
+        }
+        env.storage().instance().set(&count_key, &0u32);
+        env.storage().instance().set(&round_key, &(round + 1));
+    }
+
+    /// Start fresh pause and unpause rounds. Called whenever the signer set
+    /// changes, so partial approvals from the old set neither linger as
+    /// "already authorised" nor count toward the new set's threshold.
+    fn reset_signer_rounds(env: &Env) {
+        Self::close_signer_round(env, true);
+        Self::close_signer_round(env, false);
     }
 
     fn assert_multisig_admin(env: &Env, caller: &Address) {

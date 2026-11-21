@@ -3913,6 +3913,87 @@ fn test_sweep_cannot_take_uncollected_fees() {
     assert_eq!(token::Client::new(&env, &fee_token).balance(&contract_id), uncollected);
 }
 
+// ─── Repeated pause / unpause cycles (issue #354) ────────────────────────────
+
+fn pause_cycle_unpause_count(env: &Env, contract_id: &Address) -> u32 {
+    env.as_contract(contract_id, || {
+        env.storage()
+            .instance()
+            .get(&DataKey::UnpauseSignerCount)
+            .unwrap_or(0)
+    })
+}
+
+fn pause_cycle_has_entry(env: &Env, contract_id: &Address, key: DataKey) -> bool {
+    env.as_contract(contract_id, || env.storage().instance().has(&key))
+}
+
+#[test]
+fn test_pause_cycles_repeat_with_same_signers() {
+    let (env, contract_id, admin, _borrower, _collateral, signer1, signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    for cycle in 0..3u32 {
+        client.pause(&admin);
+        assert!(!client.is_paused(), "cycle {cycle}: one approval must not pause");
+        client.pause(&signer1);
+        assert!(client.is_paused(), "cycle {cycle}: threshold reached");
+        assert_eq!(client.get_pause_signer_count(), 0);
+
+        client.unpause(&signer1);
+        assert!(client.is_paused(), "cycle {cycle}: one approval must not unpause");
+        client.unpause(&admin);
+        assert!(!client.is_paused(), "cycle {cycle}: threshold reached");
+        assert_eq!(pause_cycle_unpause_count(&env, &contract_id), 0);
+    }
+
+    // Completed rounds leave no per-signer approvals behind in storage.
+    for round in 0..3u32 {
+        for signer in [&admin, &signer1] {
+            let pause_key = DataKey::PauseSigner(signer.clone(), round);
+            let unpause_key = DataKey::UnpauseSigner(signer.clone(), round);
+            assert!(!pause_cycle_has_entry(&env, &contract_id, pause_key));
+            assert!(!pause_cycle_has_entry(&env, &contract_id, unpause_key));
+        }
+    }
+}
+
+#[test]
+#[should_panic(expected = "Signer has already authorised pause")]
+fn test_pause_cycles_dedup_still_enforced_within_a_round() {
+    let (env, contract_id, admin, _borrower, _collateral, signer1, signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    // One full cycle, then a signer tries to approve the next pause twice.
+    client.pause(&admin);
+    client.pause(&signer1);
+    client.unpause(&admin);
+    client.unpause(&signer1);
+
+    client.pause(&admin);
+    client.pause(&admin);
+}
+
+#[test]
+fn test_pause_cycles_setup_multisig_clears_partial_approvals() {
+    let (env, contract_id, admin, _borrower, _collateral, signer1, signer2) = setup_with_multisig();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    client.pause(&admin);
+    assert_eq!(client.get_pause_signer_count(), 1);
+
+    // Reconfiguring the signer set starts a fresh round: the stale approval
+    // neither blocks `admin` nor counts toward the new threshold.
+    let admins = soroban_sdk::vec![&env, admin.clone(), signer1.clone(), signer2.clone()];
+    client.setup_multisig(&admin, &admins, &2);
+    assert_eq!(client.get_pause_signer_count(), 0);
+
+    client.pause(&admin);
+    assert!(!client.is_paused());
+    client.pause(&signer1);
+    assert!(client.is_paused());
+}
+
 /// Issue #352: initialization runs in the Soroban constructor, atomically with
 /// deployment. There is no `initialize` entrypoint left to front-run, and the
 /// constructor cannot be re-invoked on the live contract to seize admin rights.

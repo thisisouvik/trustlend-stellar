@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- The multi-sig emergency brake works more than once (#354). `pause` /
+  `unpause` in the lending, escrow, borrower-reputation and default-management
+  contracts recorded each signer's approval under a key that was never
+  cleared, so after one pause/unpause cycle the same signers were rejected
+  with "Signer has already authorised pause" forever. Approvals are now keyed
+  by a per-cycle round (`PauseRound` / `UnpauseRound`); completing a cycle
+  deletes that round's approvals, resets the counter and opens a new round,
+  and changing the signer set (`setup_multisig`, `set_multisig_admin`) starts
+  fresh rounds so stale partial approvals neither block signers nor count
+  toward the new threshold.
 - `DefaultManagementContract::trigger_insurance_payout` is multisig-gated
   (#353). It checked only the single admin key (`assert_admin`), so after
   governance moved to the MultiSigAdmin contract one key could still drain the

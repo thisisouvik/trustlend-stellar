@@ -1,4 +1,5 @@
 import { and, eq, gt, inArray, isNotNull, lt, lte, sql } from "drizzle-orm";
+import { getActiveCronSignal } from "@/lib/auth/cron";
 import { getDb } from "@/lib/db/client";
 import { loans } from "@/lib/db/schema";
 import {
@@ -158,12 +159,16 @@ export interface RunResult {
   succeeded: number;
   failed: number;
   errors: string[];
+  timedOut?: boolean;
 }
 
 /**
  * Main scheduler entrypoint. Queries due loans and delivers webhook notifications.
  */
-export async function runPaymentDueScheduler(): Promise<RunResult> {
+export async function runPaymentDueScheduler(options?: {
+  signal?: AbortSignal;
+}): Promise<RunResult> {
+  const signal = options?.signal ?? getActiveCronSignal();
   const webhookUrl = process.env.WEBHOOK_NOTIFICATION_URL;
   const emailEnabled = isResendConfigured();
   if (!webhookUrl && !emailEnabled) {
@@ -180,6 +185,11 @@ export async function runPaymentDueScheduler(): Promise<RunResult> {
   };
 
   for (const loan of dueLoans) {
+    if (signal?.aborted) {
+      result.timedOut = true;
+      console.warn(`[payment-due] Execution deadline reached before loan ${loan.id}; halting batch.`);
+      return result;
+    }
     try {
       await sendWebhookNotification(loan, webhookUrl!);
       await markLoanNotified(loan.id);
@@ -195,6 +205,11 @@ export async function runPaymentDueScheduler(): Promise<RunResult> {
   }
 
   for (const loan of overdueLoans) {
+    if (signal?.aborted) {
+      result.timedOut = true;
+      console.warn(`[payment-due] Execution deadline reached before overdue email for loan ${loan.id}; halting batch.`);
+      return result;
+    }
     try {
       const outstandingAmount = loan.principal_amount - loan.repaid_amount;
       await sendPaymentOverdueEmail({

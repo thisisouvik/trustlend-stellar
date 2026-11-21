@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireCronAuth } from "@/lib/auth/cron";
+import { CronTimeoutError, requireCronAuth, withCronTimeout } from "@/lib/auth/cron";
 import {
   loadOracleConfig,
   runOracleCycle,
@@ -30,7 +30,6 @@ export async function POST(request: NextRequest) {
   const denied = requireCronAuth(request, "price-oracle");
   if (denied) return denied;
 
-  const start = Date.now();
   try {
     const cfg = loadOracleConfig(["--once"]);
     const sources = createDefaultSources();
@@ -46,29 +45,36 @@ export async function POST(request: NextRequest) {
     // a real invoke this reports what it *would* publish rather than pretending
     // to have written it.
     const publisher = createDryRunPublisher();
-    const summary = await runOracleCycle(
-      cfg,
-      sources,
-      publisher,
-      createInitialState(),
+    const { result: summary, durationMs: duration, timedOut } = await withCronTimeout(
+      "price-oracle",
+      () =>
+        runOracleCycle(
+          cfg,
+          sources,
+          publisher,
+          createInitialState(),
+        ),
+      { timeoutMs: 50_000 },
     );
 
-    const duration = Date.now() - start;
     console.log(
-      `[price-oracle] Cron cycle in ${duration}ms: ` +
+      `[price-oracle] Cron cycle in ${duration}ms (timedOut=${timedOut}): ` +
         `polled=${summary.polled} published=${summary.published} ` +
         `skipped=${summary.skipped} unavailable=${summary.unavailable} failed=${summary.failed}`,
     );
 
+    const results = Array.isArray(summary.results) ? summary.results : [];
+
     return NextResponse.json({
       ok: true,
+      timedOut,
       duration,
       polled: summary.polled,
       published: summary.published,
       skipped: summary.skipped,
       unavailable: summary.unavailable,
       failed: summary.failed,
-      prices: summary.results.map((r) => ({
+      prices: results.map((r) => ({
         symbol: r.symbol,
         priceUsd: r.priceUsd,
         origin: r.origin,
@@ -77,6 +83,13 @@ export async function POST(request: NextRequest) {
       })),
     });
   } catch (err) {
+    if (err instanceof CronTimeoutError) {
+      console.error("[price-oracle] Cron cycle timed out:", err.message);
+      return NextResponse.json(
+        { ok: false, timedOut: true, error: err.message },
+        { status: 504 },
+      );
+    }
     const msg = err instanceof Error ? err.message : "Unexpected error";
     console.error("[price-oracle] Cron cycle failed:", msg);
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });

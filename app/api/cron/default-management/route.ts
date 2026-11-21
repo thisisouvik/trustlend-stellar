@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireCronAuth } from "@/lib/auth/cron";
+import { CronTimeoutError, requireCronAuth, withCronTimeout } from "@/lib/auth/cron";
 import { runDefaultManagement } from "@/lib/scheduler/default-management";
 
 /**
@@ -17,17 +17,25 @@ export async function POST(request: NextRequest) {
   const denied = requireCronAuth(request, "default-management");
   if (denied) return denied;
 
-  const start = Date.now();
   try {
-    const result = await runDefaultManagement();
-    const duration = Date.now() - start;
-    console.log(
-      `[default-management] Run complete in ${duration}ms: ` +
-        `scanned=${result.scanned} defaulted=${result.defaulted} ` +
-        `payoutsProposed=${result.payoutsProposed} failed=${result.failed}`
+    const { result, durationMs: duration, timedOut } = await withCronTimeout(
+      "default-management",
+      () => runDefaultManagement(),
     );
-    return NextResponse.json({ ok: true, ...result, duration });
+    console.log(
+      `[default-management] Run complete in ${duration}ms (timedOut=${timedOut}): ` +
+        `scanned=${result.scanned} defaulted=${result.defaulted} ` +
+        `payoutsProposed=${result.payoutsProposed} failed=${result.failed}`,
+    );
+    return NextResponse.json({ ok: true, timedOut, ...result, duration });
   } catch (err) {
+    if (err instanceof CronTimeoutError) {
+      console.error("[default-management] Scheduler run timed out:", err.message);
+      return NextResponse.json(
+        { ok: false, timedOut: true, error: err.message },
+        { status: 504 },
+      );
+    }
     const msg = err instanceof Error ? err.message : "Unexpected error";
     console.error("[default-management] Scheduler run failed:", msg);
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });

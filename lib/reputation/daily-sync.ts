@@ -7,6 +7,7 @@
  */
 
 import { eq, inArray } from "drizzle-orm";
+import { getActiveCronSignal } from "@/lib/auth/cron";
 import { getDb } from "@/lib/db/client";
 import { loanRepayments, loans, profiles, reputationEvents, reputationSnapshots } from "@/lib/db/schema";
 import {
@@ -20,6 +21,7 @@ export interface DailyCalculationSummary {
   updated: number;
   tierUpgrades: number;
   errors: number;
+  timedOut?: boolean;
   details: Array<{
     userId: string;
     walletAddress?: string;
@@ -33,7 +35,10 @@ export interface DailyCalculationSummary {
 /**
  * Runs the daily reputation recalculation for all active borrowers.
  */
-export async function runDailyReputationRecalculation(): Promise<DailyCalculationSummary> {
+export async function runDailyReputationRecalculation(options?: {
+  signal?: AbortSignal;
+}): Promise<DailyCalculationSummary> {
+  const signal = options?.signal ?? getActiveCronSignal();
   const db = getDb();
   if (!db) {
     throw new Error("Database unavailable");
@@ -102,6 +107,14 @@ export async function runDailyReputationRecalculation(): Promise<DailyCalculatio
   const snapshotByUser = new Map(allSnapshots.map((s) => [s.userId, s]));
 
   for (const borrower of borrowers) {
+    if (signal?.aborted) {
+      summary.timedOut = true;
+      console.warn(
+        `[Reputation Cron] Execution deadline reached before borrower ${borrower.id}; halting batch.`,
+      );
+      return summary;
+    }
+
     try {
       const userLoans = loansByBorrower.get(borrower.id) ?? [];
       const userRepayments = repaymentsByPayer.get(borrower.id) ?? [];

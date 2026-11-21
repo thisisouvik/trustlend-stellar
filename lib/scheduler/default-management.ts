@@ -22,6 +22,7 @@
  */
 
 import { and, desc, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
+import { getActiveCronSignal } from "@/lib/auth/cron";
 import { getDb, type Db } from "@/lib/db/client";
 import { ledgerTransactions, loans, profiles } from "@/lib/db/schema";
 import {
@@ -78,6 +79,7 @@ export interface DefaultRunResult {
   payoutsProposed: number;
   failed: number;
   outcomes: LoanOutcome[];
+  timedOut?: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -202,7 +204,10 @@ async function queryOverdueLoans(db: Db, nowIso: string): Promise<LoanRow[]> {
   }));
 }
 
-export async function runDefaultManagement(): Promise<DefaultRunResult> {
+export async function runDefaultManagement(options?: {
+  signal?: AbortSignal;
+}): Promise<DefaultRunResult> {
+  const signal = options?.signal ?? getActiveCronSignal();
   const db = getDb();
   if (!db) throw new Error("Database unavailable (check DATABASE_URL)");
 
@@ -230,6 +235,12 @@ export async function runDefaultManagement(): Promise<DefaultRunResult> {
   };
 
   for (const loan of loans) {
+    if (signal?.aborted) {
+      result.timedOut = true;
+      console.warn(`[default-mgmt] Execution deadline reached before loan ${loan.id}; halting batch.`);
+      return result;
+    }
+
     const outcome: LoanOutcome = {
       loanId: loan.id,
       onchainLoanId: null,

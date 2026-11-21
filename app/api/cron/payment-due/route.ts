@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireCronAuth } from "@/lib/auth/cron";
+import { CronTimeoutError, requireCronAuth, withCronTimeout } from "@/lib/auth/cron";
 import { runPaymentDueScheduler } from "@/lib/scheduler/payment-due";
 
 /**
@@ -13,13 +13,21 @@ export async function POST(request: NextRequest) {
   const denied = requireCronAuth(request, "payment-due");
   if (denied) return denied;
 
-  const start = Date.now();
   try {
-    const result = await runPaymentDueScheduler();
-    const duration = Date.now() - start;
-    console.log(`[payment-due] Run complete in ${duration}ms:`, result);
-    return NextResponse.json({ ok: true, ...result, duration });
+    const { result, durationMs: duration, timedOut } = await withCronTimeout(
+      "payment-due",
+      () => runPaymentDueScheduler(),
+    );
+    console.log(`[payment-due] Run complete in ${duration}ms (timedOut=${timedOut}):`, result);
+    return NextResponse.json({ ok: true, timedOut, ...result, duration });
   } catch (err) {
+    if (err instanceof CronTimeoutError) {
+      console.error("[payment-due] Scheduler run timed out:", err.message);
+      return NextResponse.json(
+        { ok: false, timedOut: true, error: err.message },
+        { status: 504 },
+      );
+    }
     const msg = err instanceof Error ? err.message : "Unexpected error";
     console.error("[payment-due] Scheduler run failed:", msg);
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
@@ -28,3 +36,6 @@ export async function POST(request: NextRequest) {
 
 // Allow Vercel's cron invocations (GET-based) as well
 export const GET = POST;
+
+// Payment-due webhook and email notifications can span multiple loans.
+export const maxDuration = 300;

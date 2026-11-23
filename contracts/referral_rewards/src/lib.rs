@@ -22,7 +22,8 @@
 //!   drained reward pool can never block a borrower's loan from activating.
 
 use soroban_sdk::{
-    contract, contractclient, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env,
+    contract, contractclient, contractimpl, contracttype, symbol_short, token, Address, BytesN,
+    Env, Vec,
 };
 
 #[cfg(test)]
@@ -64,6 +65,20 @@ pub enum DataKey {
     ReferrerEarnings(Address),
     TotalBonusesPaid,
     TotalReferralsRegistered,
+    MultiSigAdmin,
+    MultisigAdmins,
+    MultisigThreshold,
+    IsPaused,
+    /// Whether a signer has authorised pause in a given round (dedup)
+    PauseSigner(Address, u32),
+    PauseSignerCount,
+    /// Whether a signer has authorised unpause in a given round (dedup)
+    UnpauseSigner(Address, u32),
+    UnpauseSignerCount,
+    /// Current pause approval round; advances each time a pause completes
+    PauseRound,
+    /// Current unpause approval round; advances each time an unpause completes
+    UnpauseRound,
 }
 
 const ONE_HUNDRED_PERCENT_BPS: u32 = 10_000;
@@ -100,7 +115,9 @@ impl ReferralRewardsContract {
             .instance()
             .set(&DataKey::LendingContract, &lending_contract);
         env.storage().instance().set(&DataKey::Config, &config);
-        env.storage().instance().set(&DataKey::TotalBonusesPaid, &0i128);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalBonusesPaid, &0i128);
         env.storage()
             .instance()
             .set(&DataKey::TotalReferralsRegistered, &0u32);
@@ -110,6 +127,170 @@ impl ReferralRewardsContract {
         caller.require_auth();
         Self::assert_admin(&env, &caller);
         env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+
+    /// Configure multi-sig admin set for pause/unpause.
+    pub fn setup_multisig(env: Env, admin: Address, admins: Vec<Address>, threshold: u32) {
+        admin.require_auth();
+        Self::assert_admin(&env, &admin);
+
+        if threshold == 0 {
+            panic!("Threshold must be at least 1");
+        }
+        if threshold > admins.len() {
+            panic!("Threshold exceeds number of admins");
+        }
+
+        let mut final_admins = admins;
+        if !final_admins.iter().any(|a| a == admin) {
+            final_admins.push_back(admin);
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigThreshold, &threshold);
+        Self::reset_signer_rounds(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigAdmins, &final_admins);
+        env.storage().instance().set(&DataKey::IsPaused, &false);
+        env.storage()
+            .instance()
+            .set(&DataKey::PauseSignerCount, &0u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::UnpauseSignerCount, &0u32);
+    }
+
+    /// One-time bootstrap linking the MultiSigAdmin contract (admin only).
+    pub fn set_multisig_admin(env: Env, admin: Address, multisig: Address) {
+        admin.require_auth();
+        Self::assert_admin(&env, &admin);
+        if env.storage().instance().has(&DataKey::MultiSigAdmin) {
+            panic!("Multisig admin already configured");
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::MultiSigAdmin, &multisig);
+        let mut msig_admins = Vec::new(&env);
+        msig_admins.push_back(multisig);
+        Self::reset_signer_rounds(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigAdmins, &msig_admins);
+    }
+
+    pub fn get_multisig_admin(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::MultiSigAdmin)
+            .expect("Multisig admin not configured")
+    }
+
+    pub fn pause(env: Env, caller: Address) {
+        caller.require_auth();
+        Self::assert_multisig_admin(&env, &caller);
+
+        let is_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false);
+        if is_paused {
+            panic!("Contract is already paused");
+        }
+
+        let round = Self::signer_round(&env, &DataKey::PauseRound);
+        let signer_key = DataKey::PauseSigner(caller.clone(), round);
+        if env.storage().instance().has(&signer_key) {
+            panic!("Signer has already authorised pause");
+        }
+        env.storage().instance().set(&signer_key, &true);
+
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PauseSignerCount)
+            .unwrap_or(0);
+        let new_count = count + 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::PauseSignerCount, &new_count);
+
+        let threshold: u32 = Self::get_multisig_threshold(env.clone());
+        if new_count >= threshold {
+            env.storage().instance().set(&DataKey::IsPaused, &true);
+            Self::close_signer_round(&env, true);
+            env.events()
+                .publish((symbol_short!("referral"), symbol_short!("paused")), ());
+        }
+    }
+
+    pub fn unpause(env: Env, caller: Address) {
+        caller.require_auth();
+        Self::assert_multisig_admin(&env, &caller);
+
+        let is_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false);
+        if !is_paused {
+            panic!("Contract is not paused");
+        }
+
+        let round = Self::signer_round(&env, &DataKey::UnpauseRound);
+        let signer_key = DataKey::UnpauseSigner(caller.clone(), round);
+        if env.storage().instance().has(&signer_key) {
+            panic!("Signer has already authorised unpause");
+        }
+        env.storage().instance().set(&signer_key, &true);
+
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::UnpauseSignerCount)
+            .unwrap_or(0);
+        let new_count = count + 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::UnpauseSignerCount, &new_count);
+
+        let threshold: u32 = Self::get_multisig_threshold(env.clone());
+        if new_count >= threshold {
+            env.storage().instance().set(&DataKey::IsPaused, &false);
+            Self::close_signer_round(&env, false);
+            env.events()
+                .publish((symbol_short!("referral"), symbol_short!("unpaused")), ());
+        }
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false)
+    }
+
+    pub fn get_multisig_admins(env: Env) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::MultisigAdmins)
+            .unwrap_or(Vec::new(&env))
+    }
+
+    pub fn get_multisig_threshold(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::MultisigThreshold)
+            .unwrap_or(1)
+    }
+
+    pub fn get_pause_signer_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::PauseSignerCount)
+            .unwrap_or(0)
     }
 
     // ── Views ───────────────────────────────────────────────────────────────
@@ -192,6 +373,7 @@ impl ReferralRewardsContract {
     pub fn set_config(env: Env, admin: Address, config: ReferralConfig) {
         admin.require_auth();
         Self::assert_admin(&env, &admin);
+        Self::assert_not_paused(&env);
         Self::validate_config(&config);
         env.storage().instance().set(&DataKey::Config, &config);
         env.events()
@@ -201,6 +383,7 @@ impl ReferralRewardsContract {
     pub fn set_reward_token(env: Env, admin: Address, reward_token: Address) {
         admin.require_auth();
         Self::assert_admin(&env, &admin);
+        Self::assert_not_paused(&env);
         env.storage()
             .instance()
             .set(&DataKey::RewardToken, &reward_token);
@@ -213,6 +396,7 @@ impl ReferralRewardsContract {
     pub fn set_lending_contract(env: Env, admin: Address, lending_contract: Address) {
         admin.require_auth();
         Self::assert_admin(&env, &admin);
+        Self::assert_not_paused(&env);
         env.storage()
             .instance()
             .set(&DataKey::LendingContract, &lending_contract);
@@ -223,9 +407,11 @@ impl ReferralRewardsContract {
     }
 
     /// Withdraw unspent reward tokens (e.g. when winding the programme down).
+    /// Multisig-gated — requires multisig admin authorization and contract not paused.
     pub fn withdraw_unspent(env: Env, admin: Address, to: Address, amount: i128) {
         admin.require_auth();
-        Self::assert_admin(&env, &admin);
+        Self::assert_multisig_admin(&env, &admin);
+        Self::assert_not_paused(&env);
         if amount <= 0 {
             panic!("Withdrawal amount must be positive");
         }
@@ -255,6 +441,7 @@ impl ReferralRewardsContract {
     /// their referees. The pair is immutable once written.
     pub fn register_referral(env: Env, referee: Address, referrer: Address) {
         referee.require_auth();
+        Self::assert_not_paused(&env);
 
         if referee == referrer {
             panic!("Cannot refer yourself");
@@ -307,6 +494,10 @@ impl ReferralRewardsContract {
     ) -> i128 {
         caller.require_auth();
 
+        if Self::is_paused(env.clone()) {
+            return 0;
+        }
+
         let lending: Address = env
             .storage()
             .instance()
@@ -348,8 +539,7 @@ impl ReferralRewardsContract {
 
         // Enforce the per-referrer cap.
         let paid_count: u32 = Self::get_paid_referral_count(env.clone(), referrer.clone());
-        if config.max_referrals_per_referrer > 0
-            && paid_count >= config.max_referrals_per_referrer
+        if config.max_referrals_per_referrer > 0 && paid_count >= config.max_referrals_per_referrer
         {
             return 0;
         }
@@ -466,6 +656,14 @@ impl ReferralRewardsContract {
     }
 
     fn assert_admin(env: &Env, caller: &Address) {
+        let multisig_admins: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigAdmins)
+            .unwrap_or(Vec::new(env));
+        if !multisig_admins.is_empty() && multisig_admins.iter().any(|a| a == *caller) {
+            return;
+        }
         let admin: Address = env
             .storage()
             .instance()
@@ -474,5 +672,76 @@ impl ReferralRewardsContract {
         if *caller != admin {
             panic!("Unauthorised: caller is not admin");
         }
+    }
+
+    fn assert_multisig_admin(env: &Env, caller: &Address) {
+        let multisig_admins: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigAdmins)
+            .unwrap_or(Vec::new(env));
+        if multisig_admins.is_empty() {
+            panic!("Multisig not configured");
+        }
+        if !multisig_admins.iter().any(|a| a == *caller) {
+            panic!("Unauthorised: caller is not a multisig admin");
+        }
+    }
+
+    fn assert_not_paused(env: &Env) {
+        let is_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false);
+        if is_paused {
+            panic!("Contract is paused");
+        }
+    }
+
+    // ── Pause / unpause signer rounds (issue #354) ───────────────────────────
+
+    /// Current approval round for pause (`PauseRound`) or unpause
+    /// (`UnpauseRound`). Signer approvals are keyed by round, so approvals
+    /// from a completed cycle can never block the same signers in a later one.
+    fn signer_round(env: &Env, round_key: &DataKey) -> u32 {
+        env.storage().instance().get(round_key).unwrap_or(0)
+    }
+
+    /// Close the current pause (`pause == true`) or unpause round: delete its
+    /// per-signer approvals for the current signer set, reset the counter and
+    /// advance to a fresh round. Deleting the entries keeps instance storage
+    /// from growing with every cycle; advancing the round guarantees a clean
+    /// slate even for approvals of signers no longer in the set.
+    fn close_signer_round(env: &Env, pause: bool) {
+        let (round_key, count_key) = if pause {
+            (DataKey::PauseRound, DataKey::PauseSignerCount)
+        } else {
+            (DataKey::UnpauseRound, DataKey::UnpauseSignerCount)
+        };
+        let round = Self::signer_round(env, &round_key);
+        let admins: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigAdmins)
+            .unwrap_or(Vec::new(env));
+        for admin in admins.iter() {
+            let signer_key = if pause {
+                DataKey::PauseSigner(admin, round)
+            } else {
+                DataKey::UnpauseSigner(admin, round)
+            };
+            env.storage().instance().remove(&signer_key);
+        }
+        env.storage().instance().set(&count_key, &0u32);
+        env.storage().instance().set(&round_key, &(round + 1));
+    }
+
+    /// Start fresh pause and unpause rounds. Called whenever the signer set
+    /// changes, so partial approvals from the old set neither linger as
+    /// "already authorised" nor count toward the new set's threshold.
+    fn reset_signer_rounds(env: &Env) {
+        Self::close_signer_round(env, true);
+        Self::close_signer_round(env, false);
     }
 }

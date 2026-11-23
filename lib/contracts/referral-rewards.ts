@@ -10,6 +10,8 @@ import {
   simulateContractCall,
   addressToScVal,
   i128ToScVal,
+  u32ToScVal,
+  vecToScVal,
 } from "@/lib/stellar/soroban";
 
 export const CONTRACT_ID = process.env.NEXT_PUBLIC_REFERRAL_REWARDS_CONTRACT_ID ?? "";
@@ -82,4 +84,74 @@ export async function calculateBonusView(loanAmountStroops: bigint, caller: stri
 /** The referee signs this once to attribute themselves to a referrer. */
 export async function registerReferral(refereeAddress: string, referrerAddress: string) {
   return write("register_referral", [addressToScVal(refereeAddress), addressToScVal(referrerAddress)], refereeAddress);
+}
+
+// ─── Multi-Sig Governance and Pause Controls ────────────────────────────────
+
+export async function isPaused(caller: string): Promise<boolean> {
+  return Boolean(await read("is_paused", [], caller));
+}
+
+export async function getMultisigAdmins(caller: string): Promise<string[]> {
+  const r = (await read("get_multisig_admins", [], caller)) as string[];
+  return Array.isArray(r) ? r.map(String) : [];
+}
+
+export async function getMultisigThreshold(caller: string): Promise<number> {
+  return Number(await read("get_multisig_threshold", [], caller));
+}
+
+export async function getPauseSignerCount(caller: string): Promise<number> {
+  return Number(await read("get_pause_signer_count", [], caller));
+}
+
+export async function setupMultisig(
+  adminAddress: string,
+  admins: string[],
+  threshold: number
+) {
+  return write(
+    "setup_multisig",
+    [
+      addressToScVal(adminAddress),
+      vecToScVal(admins.map(addressToScVal)),
+      u32ToScVal(threshold),
+    ],
+    adminAddress
+  );
+}
+
+export async function setMultisigAdmin(
+  adminAddress: string,
+  multisigAddress: string
+) {
+  return write(
+    "set_multisig_admin",
+    [addressToScVal(adminAddress), addressToScVal(multisigAddress)],
+    adminAddress
+  );
+}
+
+export async function pause(callerAddress: string) {
+  return write("pause", [addressToScVal(callerAddress)], callerAddress);
+}
+
+export async function unpause(callerAddress: string) {
+  return write("unpause", [addressToScVal(callerAddress)], callerAddress);
+}
+
+export async function withdrawUnspent(
+  adminAddress: string,
+  toAddress: string,
+  amountStroops: bigint
+) {
+  return write(
+    "withdraw_unspent",
+    [
+      addressToScVal(adminAddress),
+      addressToScVal(toAddress),
+      i128ToScVal(amountStroops),
+    ],
+    adminAddress
+  );
 }

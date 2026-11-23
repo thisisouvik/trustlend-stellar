@@ -180,9 +180,12 @@ fn test_bid_above_debt_records_no_bad_debt() {
 
     let settlement = f.client().place_bid(&f.bidder, &14, &1_500_000);
 
-    assert_eq!(settlement.recovered_amount, 1_500_000);
+    assert_eq!(settlement.recovered_amount, DEBT);
+    assert_eq!(settlement.surplus_amount, 500_000);
     assert_eq!(settlement.bad_debt, 0);
     assert_eq!(f.client().get_auction(&14).bad_debt, 0);
+    assert_eq!(f.payment().balance(&f.assets.proceeds_recipient), DEBT);
+    assert_eq!(f.payment().balance(&f.borrower), 500_000);
 }
 
 // ─── Token settlement (Issue #418) ────────────────────────────────────────────
@@ -237,6 +240,7 @@ fn test_winning_bid_pays_recipient_and_delivers_collateral() {
     // Payment: bidder → pool.
     assert_eq!(f.payment().balance(&f.bidder), BIDDER_FUNDS - 500_000);
     assert_eq!(f.payment().balance(&f.assets.proceeds_recipient), 500_000);
+    assert_eq!(f.payment().balance(&f.borrower), 0);
     assert_eq!(f.payment().balance(&f.contract_id), 0);
     // Delivery: custody → bidder.
     assert_eq!(f.collateral().balance(&f.bidder), COLLATERAL);

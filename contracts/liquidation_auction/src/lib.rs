@@ -52,6 +52,7 @@ pub struct LiquidationAuction {
 pub struct AuctionSettlement {
     pub loan_id: u32,
     pub recovered_amount: i128,
+    pub surplus_amount: i128,
     pub bad_debt: i128,
     pub status: AuctionStatus,
 }
@@ -207,13 +208,15 @@ impl LiquidationAuctionContract {
 
         auction.status = AuctionStatus::Sold;
         auction.highest_bid = bid_amount;
-        auction.recovered_amount = bid_amount;
+        auction.recovered_amount = bid_amount.min(auction.debt_amount);
+        let surplus_amount = bid_amount.saturating_sub(auction.debt_amount).max(0);
         // A bid above the debt leaves no bad debt (never a negative amount).
         auction.bad_debt = auction.debt_amount.saturating_sub(bid_amount).max(0);
 
         let settlement = AuctionSettlement {
             loan_id,
             recovered_amount: auction.recovered_amount,
+            surplus_amount,
             bad_debt: auction.bad_debt,
             status: auction.status.clone(),
         };
@@ -222,13 +225,20 @@ impl LiquidationAuctionContract {
             .persistent()
             .set(&DataKey::Auction(loan_id), &auction);
 
-        // Payment: bidder → proceeds recipient. Fails (reverting the bid) if
-        // the bidder's balance does not cover `bid_amount`.
+        // Recover at most the outstanding debt for the pool; return any
+        // excess to the borrower.
         token::Client::new(&env, &auction.payment_token).transfer(
             &bidder,
             &auction.proceeds_recipient,
-            &bid_amount,
+            &settlement.recovered_amount,
         );
+        if settlement.surplus_amount > 0 {
+            token::Client::new(&env, &auction.payment_token).transfer(
+                &bidder,
+                &auction.borrower,
+                &settlement.surplus_amount,
+            );
+        }
         // Delivery: collateral custody → bidder.
         token::Client::new(&env, &auction.collateral_token).transfer(
             &env.current_contract_address(),
@@ -238,7 +248,7 @@ impl LiquidationAuctionContract {
 
         env.events().publish(
             (symbol_short!("auction"), symbol_short!("bid")),
-            (loan_id, bidder, bid_amount, settlement.bad_debt),
+            (loan_id, bidder, settlement.recovered_amount, settlement.surplus_amount, settlement.bad_debt),
         );
 
         settlement
@@ -262,6 +272,7 @@ impl LiquidationAuctionContract {
         let settlement = AuctionSettlement {
             loan_id,
             recovered_amount: 0,
+            surplus_amount: 0,
             bad_debt: auction.bad_debt,
             status: auction.status.clone(),
         };

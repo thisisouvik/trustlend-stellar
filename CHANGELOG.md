@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Fixed target method mismatch for `AdminAction::SetOracle` against `LendingContract` (#423).
+  `MultisigAdminContract` dispatches oracle configuration via the `set_oracle` symbol, whereas
+  `LendingContract` exposed `set_price_oracle`. Added `set_oracle` and `get_oracle` as aliases
+  for `set_price_oracle` and `get_price_oracle` on `LendingContract`, aligning function symbols
+  and enabling multi-sig proposals to update the price oracle on-chain without panicking.
+
 ### Security
 - The multi-sig emergency brake works more than once (#354). `pause` /
   `unpause` in the lending, escrow, borrower-reputation and default-management

@@ -51,7 +51,8 @@ pub enum AdminAction {
     /// Link the DAO Governance contract on the Lending contract.
     /// Fields: `(target, governance)`.
     SetGovernance(Address, Address),
-    /// Register the authorised Credit Oracle on the Reputation contract.
+    /// Register the authorised Credit Oracle on the Reputation contract or
+    /// Price Oracle on the Lending contract.
     /// Fields: `(target, oracle)`.
     SetOracle(Address, Address),
     /// Add funds to the insurance pool on the Default-Management contract.

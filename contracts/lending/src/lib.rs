@@ -891,12 +891,24 @@ impl LendingContract {
             .publish((symbol_short!("oracle"), symbol_short!("set")), oracle);
     }
 
+    /// Expose `set_oracle` as an alias for `set_price_oracle` so that multisig
+    /// proposals executing `AdminAction::SetOracle` against `LendingContract`
+    /// dispatch without symbol mismatch errors.
+    pub fn set_oracle(env: Env, caller: Address, oracle: Address) {
+        Self::set_price_oracle(env, caller, oracle);
+    }
+
     /// Get the authorized price oracle address.
     pub fn get_price_oracle(env: Env) -> Address {
         env.storage()
             .instance()
             .get(&DataKey::PriceOracle)
             .expect("Price oracle not configured")
+    }
+
+    /// Alias for `get_price_oracle` to align with the oracle getter pattern.
+    pub fn get_oracle(env: Env) -> Address {
+        Self::get_price_oracle(env)
     }
 
     /// Store multiple oracle price samples for an asset.

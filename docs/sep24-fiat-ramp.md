@@ -3,6 +3,8 @@
 > Implements issue **#21 — [Feature] Add cross-border fiat on/off ramp integrations via Stellar Anchors**
 > and the README "Vision" item *Global Fiat On/Off Ramps*.
 
+> SEP-24 anchor operations remain separate from Soroban calls; contract calls use the centralized Stellar SDK RPC transport.
+
 Borrowers in emerging markets receive loans on-chain but need **local fiat**. This
 integration lets them **cash out directly to a bank account or mobile-money wallet**
 through a Stellar Anchor using the standard **SEP-24 interactive** flow — no leaving

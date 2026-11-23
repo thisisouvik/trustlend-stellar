@@ -216,6 +216,23 @@ fn test_setting_oracle_via_multisig() {
 }
 
 #[test]
+fn test_setting_oracle_via_multisig_on_lending() {
+    let w = setup();
+    let alice = w.signers[0].clone();
+    let bob = w.signers[1].clone();
+
+    let oracle_addr = Address::generate(&w.env);
+    let id = w
+        .msig
+        .propose(&alice, &AdminAction::SetOracle(w.lending_id.clone(), oracle_addr.clone()));
+    w.msig.approve(&bob, &id);
+    w.msig.execute(&id);
+
+    assert_eq!(w.lending.get_price_oracle(), oracle_addr);
+    assert_eq!(w.lending.get_oracle(), oracle_addr);
+}
+
+#[test]
 fn test_insurance_fund_add_and_payout_via_multisig() {
     let w = setup();
     let alice = w.signers[0].clone();

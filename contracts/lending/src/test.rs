@@ -2156,6 +2156,32 @@ fn test_set_price_oracle() {
     assert_eq!(retrieved, oracle);
 }
 
+/// Price oracle can be set and retrieved via set_oracle/get_oracle aliases.
+#[test]
+fn test_set_oracle_alias() {
+    let (env, contract_id, admin, _borrower, _asset_a, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let oracle = Address::generate(&env);
+    client.set_oracle(&admin, &oracle);
+
+    let retrieved = client.get_oracle();
+    assert_eq!(retrieved, oracle);
+    assert_eq!(client.get_price_oracle(), oracle);
+}
+
+/// Non-admin cannot set oracle via alias.
+#[test]
+#[should_panic(expected = "Unauthorised")]
+fn test_set_oracle_alias_non_admin_rejected() {
+    let (env, contract_id, _admin, _borrower, _asset_a, _asset_b) = setup_multi_collateral();
+    let client = LendingContractClient::new(&env, &contract_id);
+
+    let random = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    client.set_oracle(&random, &oracle);
+}
+
 /// Median aggregation ignores a manipulated outlier price sample.
 #[test]
 fn test_price_oracle_median_resists_manipulation() {

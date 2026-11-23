@@ -3,6 +3,7 @@
  *
  * TypeScript client for the GovernanceContract — the DAO module that controls
  * the lending platform fee via reputation-weighted proposals & votes.
+ * Contract calls use the shared Stellar SDK RPC executor.
  */
 
 import {

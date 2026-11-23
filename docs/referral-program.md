@@ -1,5 +1,7 @@
 # Referral Program
 
+> Referral contract reads and writes use the centralized Stellar SDK RPC transport.
+
 > Implements issue **#266 — referral program for new users**: users get a
 > unique referral link, and the bonus is paid out automatically by a smart
 > contract when an invited friend takes out a loan.

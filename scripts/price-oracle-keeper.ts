@@ -184,6 +184,13 @@ export interface CycleSummary {
   failed: number;
   /** Aggregated result per symbol, for logging. */
   results: AggregatedPrice[];
+  aborted?: boolean;
+  abortReason?: string;
+}
+
+export interface OracleCycleOptions {
+  signal?: AbortSignal;
+  onProgress?: (progress: CycleSummary) => Promise<void> | void;
 }
 
 /** In-memory cache of the last good price and the last published price. */
@@ -208,6 +215,7 @@ export async function runOracleCycle(
   publisher: PricePublisher,
   state: KeeperState,
   now: number = Date.now(),
+  options?: OracleCycleOptions,
 ): Promise<CycleSummary> {
   const summary: CycleSummary = {
     polled: 0,
@@ -217,6 +225,12 @@ export async function runOracleCycle(
     failed: 0,
     results: [],
   };
+
+  if (options?.signal?.aborted) {
+    summary.aborted = true;
+    summary.abortReason = "Execution deadline reached; safely aborted price-oracle cycle";
+    return summary;
+  }
 
   const { quotes, failedSources } = await collectQuotes(sources, TRACKED_SYMBOLS);
   summary.polled = quotes.length;
@@ -228,6 +242,12 @@ export async function runOracleCycle(
   }
 
   for (const symbol of TRACKED_SYMBOLS) {
+    if (options?.signal?.aborted) {
+      summary.aborted = true;
+      summary.abortReason = "Execution deadline reached; safely aborted price-oracle cycle";
+      break;
+    }
+
     try {
       const assetAddress = cfg.assetAddresses[symbol];
 
@@ -290,6 +310,10 @@ export async function runOracleCycle(
       summary.failed++;
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[price-oracle] ${symbol} failed:`, msg);
+    }
+
+    if (options?.onProgress) {
+      await options.onProgress(summary);
     }
   }
 

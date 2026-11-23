@@ -78,6 +78,14 @@ export interface DefaultRunResult {
   payoutsProposed: number;
   failed: number;
   outcomes: LoanOutcome[];
+  aborted?: boolean;
+  abortReason?: string;
+  remaining?: number;
+}
+
+export interface DefaultManagementOptions {
+  signal?: AbortSignal;
+  onProgress?: (progress: DefaultRunResult) => Promise<void> | void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -202,7 +210,9 @@ async function queryOverdueLoans(db: Db, nowIso: string): Promise<LoanRow[]> {
   }));
 }
 
-export async function runDefaultManagement(): Promise<DefaultRunResult> {
+export async function runDefaultManagement(
+  options?: DefaultManagementOptions,
+): Promise<DefaultRunResult> {
   const db = getDb();
   if (!db) throw new Error("Database unavailable (check DATABASE_URL)");
 
@@ -229,7 +239,18 @@ export async function runDefaultManagement(): Promise<DefaultRunResult> {
     outcomes: [],
   };
 
-  for (const loan of loans) {
+  for (let i = 0; i < loans.length; i++) {
+    if (options?.signal?.aborted) {
+      result.aborted = true;
+      result.abortReason = "Execution deadline reached; safely aborted default-management batch";
+      result.remaining = loans.length - i;
+      console.warn(
+        `[default-mgmt] Aborted before loan ${loans[i].id}. Remaining overdue: ${result.remaining}`,
+      );
+      break;
+    }
+
+    const loan = loans[i];
     const outcome: LoanOutcome = {
       loanId: loan.id,
       onchainLoanId: null,
@@ -323,6 +344,10 @@ export async function runDefaultManagement(): Promise<DefaultRunResult> {
       outcome.error = err instanceof Error ? err.message : String(err);
       result.outcomes.push(outcome);
       console.error(`[default-mgmt] loan ${loan.id} failed:`, outcome.error);
+    }
+
+    if (options?.onProgress) {
+      await options.onProgress(result);
     }
   }
 

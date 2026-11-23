@@ -1,5 +1,7 @@
 # On-Chain Loan Lifecycle & Payment Verification
 
+> Soroban lifecycle calls use Stellar RPC for account lookup, simulation, SDK transaction assembly, submission, and finality polling. Horizon remains only where this document explicitly describes classic-payment verification.
+
 TrustLend moves XLM with classic Stellar payment operations that the user's
 wallet signs, and records loan *state* on the Soroban `LendingContract`. This
 document describes how the two are tied together and verified server-side.

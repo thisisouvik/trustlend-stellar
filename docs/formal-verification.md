@@ -1,5 +1,7 @@
 # Formal Verification for TrustLend Lending Protocol
 
+> Runtime contract invocations are assembled through the centralized Stellar SDK RPC transport, independently of this contract-level verification work.
+
 ## Why Formal Verification
 
 Unit tests demonstrate the *absence* of bugs for specific inputs. A lending

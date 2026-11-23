@@ -3,7 +3,7 @@
 extern crate std;
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, Address, Env};
+use soroban_sdk::{testutils::Address as _, token, Address, Env};
 
 use borrower_reputation::{BorrowerReputationContract, BorrowerReputationContractClient};
 use default_management::DefaultManagementContract;
@@ -239,9 +239,11 @@ fn test_insurance_fund_add_and_payout_via_multisig() {
     let bob = w.signers[1].clone();
 
     let dm_admin = Address::generate(&w.env);
-    let dm_id = w.env.register(DefaultManagementContract, (&dm_admin, 0_i128));
+    let insurance_token = w.env.register_stellar_asset_contract_v2(Address::generate(&w.env)).address();
+    let dm_id = w.env.register(DefaultManagementContract, (&dm_admin, &insurance_token));
     let dm = default_management::DefaultManagementContractClient::new(&w.env, &dm_id);
     dm.set_multisig_admin(&dm_admin, &w.msig.address);
+    token::StellarAssetClient::new(&w.env, &insurance_token).mint(&w.msig.address, &1_000_0000000);
 
     // Fund the pool.
     let add_id = w
@@ -253,6 +255,8 @@ fn test_insurance_fund_add_and_payout_via_multisig() {
 
     // Pay a lender out of the pool ("withdrawing protocol fees").
     let lender = Address::generate(&w.env);
+    let token_client = token::Client::new(&w.env, &insurance_token);
+    assert_eq!(token_client.balance(&dm_id), 1_000_0000000);
     let payout_id = w.msig.propose(
         &alice,
         &AdminAction::TriggerInsurancePayout(dm_id.clone(), 42, lender.clone(), 300_0000000),
@@ -261,6 +265,8 @@ fn test_insurance_fund_add_and_payout_via_multisig() {
     w.msig.execute(&payout_id);
 
     assert_eq!(dm.get_insurance_balance(), 700_0000000);
+    assert_eq!(token_client.balance(&lender), 300_0000000);
+    assert_eq!(token_client.balance(&dm_id), 700_0000000);
     assert_eq!(dm.get_insurance_event_count(), 1);
     let event = dm.get_insurance_event(&1);
     assert_eq!(event.loan_id, 42);

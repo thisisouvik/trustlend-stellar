@@ -292,6 +292,10 @@ export interface Proposal {
   /** Ledger timestamp when voting closes. */
   endAt: bigint;
   status: ProposalStatus;
+  /** Ledger sequence snapshot at proposal creation for voting power checkpointing. */
+  snapshotLedger: number;
+  /** Earliest timestamp at which this proposal may be executed (timelock). */
+  eta: bigint;
 }
 
 export interface GovConfig {
@@ -302,6 +306,8 @@ export interface GovConfig {
   quorumVotes: bigint;
   minProposerPower: bigint;
   maxFeeBps: number;
+  /** Minimum delay in seconds between proposal passage and execution. */
+  timelockDelaySecs: bigint;
 }
 
 /** Default lending platform fee in bps of interest (mirrors the contract). */

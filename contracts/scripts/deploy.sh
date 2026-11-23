@@ -93,7 +93,7 @@ DEFAULT_ID=$(deploy_contract default_management \
 echo "  ✔ DEFAULT_CONTRACT_ID = $DEFAULT_ID"
 
 # Governance: 3-day voting window, quorum 500, min proposer power 150 (Silver),
-# fee cap 1000 bps (10 %). Voting power = reputation score.
+# fee cap 1000 bps (10 %), 24h timelock delay (86400s). Voting power = reputation score.
 echo ""
 echo "▶ Deploying GovernanceContract…"
 GOVERNANCE_ID=$(deploy_contract governance \
@@ -103,7 +103,8 @@ GOVERNANCE_ID=$(deploy_contract governance \
   --voting_period_secs 259200 \
   --quorum_votes 500 \
   --min_proposer_power 150 \
-  --max_fee_bps 1000)
+  --max_fee_bps 1000 \
+  --timelock_delay_secs 86400)
 echo "  ✔ GOVERNANCE_CONTRACT_ID = $GOVERNANCE_ID"
 
 # ── Multi-Sig Admin (issue #73) ────────────────────────────────────────────────

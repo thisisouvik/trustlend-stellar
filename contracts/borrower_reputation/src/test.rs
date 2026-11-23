@@ -20,7 +20,7 @@ fn setup() -> (Env, Address, Address, Address) {
 #[test]
 fn test_initialization() {
     let env = Env::default();
-    
+
     let admin = Address::generate(&env);
     let contract_id = env.register(BorrowerReputationContract, (&admin,));
     let client = BorrowerReputationContractClient::new(&env, &contract_id);
@@ -32,7 +32,7 @@ fn test_initialization() {
 fn test_default_tier() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let admin = Address::generate(&env);
     let contract_id = env.register(BorrowerReputationContract, (&admin,));
     let client = BorrowerReputationContractClient::new(&env, &contract_id);
@@ -46,7 +46,7 @@ fn test_default_tier() {
 
     let max_loan = client.calculate_max_loan(&borrower);
     // Based on our None tier logic (score < 50 => max_loan = 10_000_000_000 stroops = 1000 XLM)
-    assert_eq!(max_loan, 10_000_000_000); 
+    assert_eq!(max_loan, 10_000_000_000);
 
     let interest = client.calculate_interest_rate(&borrower);
     // Based on NO history logic => 1500 bps (15%)
@@ -638,7 +638,10 @@ fn test_score_never_goes_negative() {
 
     client.add_reputation_event(&admin, &borrower, &ReputationEvent::LoanLate1Day);
     assert_eq!(client.get_reputation_score(&borrower), 0);
-    assert_eq!(client.get_profile(&borrower).reputation_tier, ReputationTier::None);
+    assert_eq!(
+        client.get_profile(&borrower).reputation_tier,
+        ReputationTier::None
+    );
 }
 
 // ─── Repeated pause / unpause cycles (issue #354) ────────────────────────────
@@ -663,13 +666,19 @@ fn test_pause_cycles_repeat_with_same_signers() {
 
     for cycle in 0..3u32 {
         client.pause(&admin);
-        assert!(!client.is_paused(), "cycle {cycle}: one approval must not pause");
+        assert!(
+            !client.is_paused(),
+            "cycle {cycle}: one approval must not pause"
+        );
         client.pause(&signer1);
         assert!(client.is_paused(), "cycle {cycle}: threshold reached");
         assert_eq!(client.get_pause_signer_count(), 0);
 
         client.unpause(&signer1);
-        assert!(client.is_paused(), "cycle {cycle}: one approval must not unpause");
+        assert!(
+            client.is_paused(),
+            "cycle {cycle}: one approval must not unpause"
+        );
         client.unpause(&admin);
         assert!(!client.is_paused(), "cycle {cycle}: threshold reached");
         assert_eq!(pause_cycle_unpause_count(&env, &contract_id), 0);
@@ -712,7 +721,11 @@ fn test_pause_cycles_setup_multisig_clears_partial_approvals() {
 
     // Reconfiguring the signer set starts a fresh round: the stale approval
     // neither blocks `admin` nor counts toward the new threshold.
-    client.setup_multisig(&admin, &soroban_sdk::vec![&env, admin.clone(), signer1.clone()], &2);
+    client.setup_multisig(
+        &admin,
+        &soroban_sdk::vec![&env, admin.clone(), signer1.clone()],
+        &2,
+    );
     assert_eq!(client.get_pause_signer_count(), 0);
 
     client.pause(&admin);
@@ -731,10 +744,8 @@ fn test_constructor_initializes_and_cannot_be_reinvoked() {
     let client = BorrowerReputationContractClient::new(&env, &contract_id);
     assert_eq!(client.get_admin(), admin);
     let attacker = Address::generate(&env);
-    let args: soroban_sdk::Vec<soroban_sdk::Val> = soroban_sdk::vec![
-        &env,
-        attacker.into_val(&env),
-    ];
+    let args: soroban_sdk::Vec<soroban_sdk::Val> =
+        soroban_sdk::vec![&env, attacker.into_val(&env),];
     for name in ["initialize", "__constructor"] {
         let res = env.try_invoke_contract::<(), soroban_sdk::Error>(
             &contract_id,
@@ -747,4 +758,82 @@ fn test_constructor_initializes_and_cannot_be_reinvoked() {
         env.storage().instance().get(&DataKey::Admin).unwrap()
     });
     assert_eq!(stored, admin);
+}
+
+#[test]
+fn test_reputation_checkpointing_records_and_queries_history() {
+    let (env, contract_id, admin, _) = setup();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+    let borrower = Address::generate(&env);
+
+    // Initial state before borrower creation
+    env.ledger().with_mut(|l| l.sequence_number = 5);
+    assert_eq!(client.get_past_reputation_score(&borrower, &5), 0);
+
+    // Init borrower at ledger 10
+    env.ledger().with_mut(|l| l.sequence_number = 10);
+    client.init_borrower(&borrower);
+    assert_eq!(client.get_reputation_score(&borrower), 0);
+    assert_eq!(client.get_past_reputation_score(&borrower, &10), 0);
+    // Query before init ledger
+    assert_eq!(client.get_past_reputation_score(&borrower, &9), 0);
+
+    // Add reputation event at ledger 20 (+50 score)
+    env.ledger().with_mut(|l| l.sequence_number = 20);
+    client.add_reputation_event(&admin, &borrower, &ReputationEvent::TestLoanRepaid);
+    assert_eq!(client.get_reputation_score(&borrower), 50);
+
+    // Add reputation event at ledger 30 (+50 score -> 100)
+    env.ledger().with_mut(|l| l.sequence_number = 30);
+    client.add_reputation_event(&admin, &borrower, &ReputationEvent::TestLoanRepaid);
+    assert_eq!(client.get_reputation_score(&borrower), 100);
+
+    // Check past queries at various historical ledgers
+    assert_eq!(client.get_past_reputation_score(&borrower, &9), 0);
+    assert_eq!(client.get_past_reputation_score(&borrower, &10), 0);
+    assert_eq!(client.get_past_reputation_score(&borrower, &15), 0);
+    assert_eq!(client.get_past_reputation_score(&borrower, &20), 50);
+    assert_eq!(client.get_past_reputation_score(&borrower, &25), 50);
+    assert_eq!(client.get_past_reputation_score(&borrower, &29), 50);
+    assert_eq!(client.get_past_reputation_score(&borrower, &30), 100);
+
+    // Advance to ledger 40 and query ledger 35 (which still has score 100)
+    env.ledger().with_mut(|l| l.sequence_number = 40);
+    assert_eq!(client.get_past_reputation_score(&borrower, &35), 100);
+
+    let checkpoints = client.get_checkpoints(&borrower);
+    assert_eq!(checkpoints.len(), 3);
+}
+
+#[test]
+fn test_checkpointing_dedup_same_ledger() {
+    let (env, contract_id, admin, _) = setup();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+    let borrower = Address::generate(&env);
+
+    env.ledger().with_mut(|l| l.sequence_number = 10);
+    client.init_borrower(&borrower);
+
+    // Two events in the exact same ledger 15
+    env.ledger().with_mut(|l| l.sequence_number = 15);
+    client.add_reputation_event(&admin, &borrower, &ReputationEvent::TestLoanRepaid);
+    client.add_reputation_event(&admin, &borrower, &ReputationEvent::TestLoanRepaid);
+    assert_eq!(client.get_reputation_score(&borrower), 100);
+
+    let checkpoints = client.get_checkpoints(&borrower);
+    // Should have 2 checkpoints (ledger 10 with 0, ledger 15 with 100)
+    assert_eq!(checkpoints.len(), 2);
+    assert_eq!(checkpoints.get(1).unwrap().ledger, 15);
+    assert_eq!(checkpoints.get(1).unwrap().score, 100);
+}
+
+#[test]
+#[should_panic(expected = "Cannot query future ledger")]
+fn test_query_future_ledger_panics() {
+    let (env, contract_id, _admin, _) = setup();
+    let client = BorrowerReputationContractClient::new(&env, &contract_id);
+    let borrower = Address::generate(&env);
+    env.ledger().with_mut(|l| l.sequence_number = 10);
+    client.init_borrower(&borrower);
+    client.get_past_reputation_score(&borrower, &15);
 }

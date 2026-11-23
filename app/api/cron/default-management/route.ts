@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireCronAuth } from "@/lib/auth/cron";
+import { withCronTimeoutGuard } from "@/lib/cron/with-timeout-guard";
 import { runDefaultManagement } from "@/lib/scheduler/default-management";
 
 /**
@@ -10,29 +10,18 @@ import { runDefaultManagement } from "@/lib/scheduler/default-management";
  * and, past the grace period, triggers the on-chain `mark_defaulted` /
  * `record_default` / `trigger_insurance_payout` contract methods.
  *
- * Secured via CRON_SECRET in the Authorization header (`Bearer <secret>`).
+ * Protected with execution deadline dead-man switch and database execution logging.
  */
-export async function POST(request: NextRequest) {
-  // Verify the caller is the trusted scheduler (fails closed, see lib/auth/cron.ts).
-  const denied = requireCronAuth(request, "default-management");
-  if (denied) return denied;
-
-  const start = Date.now();
-  try {
-    const result = await runDefaultManagement();
-    const duration = Date.now() - start;
-    console.log(
-      `[default-management] Run complete in ${duration}ms: ` +
-        `scanned=${result.scanned} defaulted=${result.defaulted} ` +
-        `payoutsProposed=${result.payoutsProposed} failed=${result.failed}`
-    );
-    return NextResponse.json({ ok: true, ...result, duration });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unexpected error";
-    console.error("[default-management] Scheduler run failed:", msg);
-    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
-  }
-}
+export const POST = withCronTimeoutGuard(
+  "default-management",
+  async (ctx) => {
+    return await runDefaultManagement({
+      signal: ctx.signal,
+      onProgress: ctx.reportProgress,
+    });
+  },
+  { timeoutMs: 270_000, safetyBufferMs: 10_000 },
+);
 
 // Allow Vercel's cron invocations (GET-based) as well.
 export const GET = POST;

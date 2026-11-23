@@ -1,5 +1,7 @@
 # Automated Default-Management & Insurance Payouts
 
+> Soroban contract actions use the application's centralized Stellar SDK RPC transport; automation does not depend on Horizon account lookups.
+
 > Implements issue **#23 — [Backend] Automate the Default Management insurance payouts**
 
 Default handling no longer needs a human admin. A secure, authenticated serverless

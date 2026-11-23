@@ -14,6 +14,8 @@ before they have an on-chain track record.
 
 ## 1. The pattern (push oracle, single authorized signer)
 
+> Oracle update transactions use the centralized Stellar SDK RPC transport for account lookup, simulation, and assembly.
+
 Soroban contracts cannot make outbound HTTP calls, so off-chain data must be
 **pushed in** by a transaction. We use the simplest trustworthy pattern:
 

@@ -1,5 +1,7 @@
 # Getting Started with TrustLend
 
+> The app uses Stellar RPC for account sequence lookups, simulation, transaction assembly, submission, and polling. Configure `NEXT_PUBLIC_SOROBAN_RPC_URL` for the target network.
+
 Welcome, contributor! This guide walks you through setting up your local development environment for TrustLend — from installing the Soroban CLI and Node dependencies to running the full test suite.
 
 ---

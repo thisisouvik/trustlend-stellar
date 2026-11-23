@@ -28,12 +28,23 @@ export interface DailyCalculationSummary {
     tier: string;
     discountPct: number;
   }>;
+  aborted?: boolean;
+  abortReason?: string;
+  remaining?: number;
+}
+
+export interface ReputationRecalculationOptions {
+  signal?: AbortSignal;
+  onProgress?: (progress: DailyCalculationSummary) => Promise<void> | void;
 }
 
 /**
  * Runs the daily reputation recalculation for all active borrowers.
+ * Gracefully aborts on timeout signal while keeping already computed borrower snapshots.
  */
-export async function runDailyReputationRecalculation(): Promise<DailyCalculationSummary> {
+export async function runDailyReputationRecalculation(
+  options?: ReputationRecalculationOptions,
+): Promise<DailyCalculationSummary> {
   const db = getDb();
   if (!db) {
     throw new Error("Database unavailable");
@@ -101,7 +112,19 @@ export async function runDailyReputationRecalculation(): Promise<DailyCalculatio
   const repaymentsByPayer = groupBy(allRepayments, (r) => r.payerId);
   const snapshotByUser = new Map(allSnapshots.map((s) => [s.userId, s]));
 
-  for (const borrower of borrowers) {
+  for (let i = 0; i < borrowers.length; i++) {
+    if (options?.signal?.aborted) {
+      summary.aborted = true;
+      summary.abortReason =
+        "Execution deadline reached; safely aborted reputation scoring batch";
+      summary.remaining = borrowers.length - i;
+      console.warn(
+        `[Reputation Cron] Aborted before borrower ${borrowers[i].id}. Remaining borrowers: ${summary.remaining}`,
+      );
+      break;
+    }
+
+    const borrower = borrowers[i];
     try {
       const userLoans = loansByBorrower.get(borrower.id) ?? [];
       const userRepayments = repaymentsByPayer.get(borrower.id) ?? [];
@@ -205,6 +228,10 @@ export async function runDailyReputationRecalculation(): Promise<DailyCalculatio
     } catch (err) {
       console.error(`[Reputation Cron] Error processing borrower ${borrower.id}:`, err);
       summary.errors++;
+    }
+
+    if (options?.onProgress) {
+      await options.onProgress(summary);
     }
   }
 

@@ -1,5 +1,7 @@
 # TrustLend Roadmap
 
+> The current Soroban client architecture uses Stellar RPC rather than Horizon for account lookup and contract-transaction assembly.
+
 This page tracks where the project is and what comes next. It is a living
 document — priorities shift with community feedback, and every item is open for
 contribution. Comment on or open an issue if you want to pick something up.

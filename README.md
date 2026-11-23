@@ -4,6 +4,8 @@
 
 <h1 align="center">TrustLend</h1>
 
+> Soroban contract calls use Stellar RPC for account lookup, simulation, SDK transaction assembly, submission, and finality polling.
+
 <p align="center">
   Reputation-based micro-lending on Stellar.<br />
   Borrowers build an on-chain trust score instead of posting collateral; lenders earn transparent yield.

@@ -1,5 +1,7 @@
 # Timeout and Execution Dead-Man Switches on Scheduled Cron Handlers
 
+> Soroban contract actions use the application's centralized Stellar SDK RPC transport; scheduled handlers do not depend on Horizon account lookups.
+
 ## Overview
 Serverless runtime execution ceilings (e.g. 10s, 60s, or 300s) pose a critical reliability challenge for sequential batch processing in automated keeper and cron handlers. When Horizon RPC, Soroban RPC, or external third-party endpoints experience high latency or transient hangs, unshielded handlers can be terminated mid-batch by the serverless platform.
 

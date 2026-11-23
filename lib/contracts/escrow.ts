@@ -2,6 +2,7 @@
  * lib/contracts/escrow.ts
  *
  * TypeScript client for the EscrowContract.
+ * Contract reads and writes are routed through the shared Stellar SDK RPC executor.
  */
 
 import {

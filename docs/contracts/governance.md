@@ -12,6 +12,8 @@ fee can be changed **only** through a passed vote — there is no admin override
 
 ## 1. Architecture
 
+> Governance contract reads and writes use the centralized Stellar SDK RPC transport.
+
 ```
                       reputation-weighted voting power
    ┌────────────────────────┐  get_reputation_score(addr)  ┌────────────────────────┐

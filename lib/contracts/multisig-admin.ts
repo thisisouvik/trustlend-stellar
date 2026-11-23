@@ -6,6 +6,7 @@
  * high-impact protocol configuration changes that used to be a single-admin
  * bypass (whitelisting collateral assets, changing fee tables, linking
  * governance/oracle, moving insurance-fund balances).
+ * Contract calls use the shared Stellar SDK RPC executor.
  */
 
 import {

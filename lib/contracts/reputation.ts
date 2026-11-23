@@ -2,6 +2,7 @@
  * lib/contracts/reputation.ts
  *
  * TypeScript client for the BorrowerReputationContract.
+ * Contract reads and writes are routed through the shared Stellar SDK RPC executor.
  * Wraps every public contract function with proper arg encoding/decoding.
  */
 

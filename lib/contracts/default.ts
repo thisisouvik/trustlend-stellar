@@ -2,6 +2,7 @@
  * lib/contracts/default.ts
  *
  * TypeScript client for the DefaultManagementContract.
+ * Contract reads and writes are routed through the shared Stellar SDK RPC executor.
  */
 
 import {

@@ -808,7 +808,7 @@ function wireMultisig(
 
   // Hand the gated admin operations over to the multisig.
   const linked: string[] = [];
-  for (const key of ["lending", "default_management", "reputation"]) {
+  for (const key of ["lending", "default_management", "reputation", "referral_rewards"]) {
     if (!ids[key] || !isFresh("multisig_admin", key)) continue;
 
     invoke(
@@ -824,7 +824,7 @@ function wireMultisig(
     log.ok(`Linked MultiSigAdmin → ${linked.join(", ")}`);
     log.info(
       "whitelist_asset / set_flash_loan_fee_bps / set_governance / set_oracle / " +
-        "add_to_insurance / trigger_insurance_payout are now multisig-gated"
+        "add_to_insurance / trigger_insurance_payout / withdraw_unspent are now multisig-gated"
     );
   }
 

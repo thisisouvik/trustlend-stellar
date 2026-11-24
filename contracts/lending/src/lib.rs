@@ -222,6 +222,8 @@ pub enum DataKey {
     LoanCount,
     BorrowerLoanCount(Address),
     BorrowerLoanAt(Address, u32),
+    /// Loan IDs whose status still encumbers the borrower's collateral.
+    ActiveLoans(Address),
     LenderLoanCount(Address),
     LenderLoanAt(Address, u32),
     Payment(u32, u32),
@@ -1437,6 +1439,7 @@ impl LendingContract {
 
         // Track per-borrower list
         Self::store_borrower_loan_id(&env, &borrower, loan_id);
+        Self::add_active_loan_id(&env, &borrower, loan_id);
 
         env.events().publish(
             (symbol_short!("loan"), symbol_short!("request")),
@@ -1500,6 +1503,9 @@ impl LendingContract {
         env.storage()
             .persistent()
             .set(&DataKey::Loan(loan_id), &loan);
+        if loan.status == LoanStatus::Cancelled {
+            Self::remove_active_loan_id(&env, &loan.borrower, loan_id);
+        }
 
         env.events().publish(
             (symbol_short!("loan"), symbol_short!("cancel")),
@@ -1642,6 +1648,9 @@ impl LendingContract {
         env.storage()
             .persistent()
             .set(&DataKey::Loan(loan_id), &loan);
+        if loan.status == LoanStatus::Repaid {
+            Self::remove_active_loan_id(&env, &loan.borrower, loan_id);
+        }
         env.events().publish(
             (symbol_short!("loan"), symbol_short!("payment")),
             (loan_id, amount, loan.remaining_due, loan.status.clone()),
@@ -1671,6 +1680,7 @@ impl LendingContract {
         env.storage()
             .persistent()
             .set(&DataKey::Loan(loan_id), &loan);
+        Self::remove_active_loan_id(&env, &loan.borrower, loan_id);
 
         // Clean up grace period tracking since loan is now defaulted
         env.storage().persistent().remove(&DataKey::GracePeriodStart(loan_id));
@@ -1926,10 +1936,9 @@ impl LendingContract {
     /// Get the total active debt for a borrower across all their active loans.
     /// Used to enforce collateralization on withdrawal.
     fn get_total_active_debt_of_borrower(env: &Env, borrower: &Address) -> i128 {
-        let loan_count = Self::get_borrower_loan_count(env.clone(), borrower.clone());
+        let loans: Vec<u32> = env.storage().persistent().get(&DataKey::ActiveLoans(borrower.clone())).unwrap_or(Vec::new(env));
         let mut total_debt: i128 = 0;
-        for i in 0..loan_count {
-            let loan_id = Self::get_borrower_loan_at(env.clone(), borrower.clone(), i);
+        for loan_id in loans.iter() {
             let loan = Self::get_loan(env.clone(), loan_id);
             if loan.status == LoanStatus::Active || loan.status == LoanStatus::Approved {
                 total_debt = total_debt
@@ -1947,10 +1956,9 @@ impl LendingContract {
     /// liquidation keeps using `get_total_active_debt_of_borrower`, so an
     /// unfunded request can never make a borrower liquidatable.
     fn get_total_encumbered_debt_of_borrower(env: &Env, borrower: &Address) -> i128 {
-        let loan_count = Self::get_borrower_loan_count(env.clone(), borrower.clone());
+        let loans: Vec<u32> = env.storage().persistent().get(&DataKey::ActiveLoans(borrower.clone())).unwrap_or(Vec::new(env));
         let mut total_debt: i128 = 0;
-        for i in 0..loan_count {
-            let loan_id = Self::get_borrower_loan_at(env.clone(), borrower.clone(), i);
+        for loan_id in loans.iter() {
             let loan = Self::get_loan(env.clone(), loan_id);
             if matches!(
                 loan.status,
@@ -2267,6 +2275,27 @@ impl LendingContract {
             .persistent()
             .set(&DataKey::BorrowerLoanAt(borrower.clone(), count), &loan_id);
         env.storage().persistent().set(&count_key, &(count + 1));
+    }
+
+    fn add_active_loan_id(env: &Env, borrower: &Address, loan_id: u32) {
+        let key = DataKey::ActiveLoans(borrower.clone());
+        let mut loans: Vec<u32> = env.storage().persistent().get(&key).unwrap_or(Vec::new(env));
+        loans.push_back(loan_id);
+        env.storage().persistent().set(&key, &loans);
+    }
+
+    fn remove_active_loan_id(env: &Env, borrower: &Address, loan_id: u32) {
+        let key = DataKey::ActiveLoans(borrower.clone());
+        let mut loans: Vec<u32> = env.storage().persistent().get(&key).unwrap_or(Vec::new(env));
+        let mut index = 0;
+        while index < loans.len() {
+            if loans.get(index) == Some(loan_id) {
+                loans.remove(index);
+                break;
+            }
+            index += 1;
+        }
+        env.storage().persistent().set(&key, &loans);
     }
 
     fn push_loan_id_for_lender(env: &Env, lender: &Address, loan_id: u32) {

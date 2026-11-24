@@ -155,6 +155,40 @@ fn test_create_loan_request_basic() {
 }
 
 #[test]
+fn test_many_repaid_borrower_loans_do_not_block_new_requests_or_withdrawals() {
+    let (env, contract_id, admin, borrower, collateral_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+    let lender = Address::generate(&env);
+    let request = LoanRequestInput {
+        amount: 1_000_0000000,
+        duration_days: 30,
+        interest_rate_bps: 1000,
+        max_loan_amount: 100_000_0000000,
+        collateral_entries: vec![&env, CollateralEntry {
+            asset: collateral_asset.clone(),
+            amount: 100_000_0000000,
+        }],
+        rate_model: InterestRateModel::Fixed,
+        reputation_tier: 0,
+    };
+
+    for _ in 0..50 {
+        let loan_id = client.create_loan_request(&borrower, &request);
+        client.approve_loan(&lender, &loan_id, &loan_id);
+        client.activate_loan(&admin, &loan_id);
+        let total_due = client.get_loan(&loan_id).total_due;
+        client.record_payment(&admin, &loan_id, &total_due);
+    }
+
+    assert_eq!(client.get_borrower_loan_count(&borrower), 50);
+    assert_eq!(client.get_encumbered_debt(&borrower), 0);
+    let new_loan_id = client.create_loan_request(&borrower, &request);
+    assert_eq!(client.get_loan(&new_loan_id).status, LoanStatus::Pending);
+    client.cancel_loan_request(&borrower, &new_loan_id);
+    client.withdraw_collateral(&borrower, &collateral_asset, &1_000_0000000);
+}
+
+#[test]
 #[should_panic(expected = "Interest rate is below the protocol minimum")]
 fn test_create_loan_request_rejects_rate_below_protocol_minimum() {
     let (env, contract_id, _admin, borrower, collateral_asset) = setup();

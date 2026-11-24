@@ -157,6 +157,9 @@ export function ReferralWidget() {
         Share your link. When someone you invite takes out their first loan, your
         bonus is paid automatically by the referral smart contract.
       </p>
+      <p className="referral-widget__muted">
+        A new member&apos;s first valid invite is locked in and cannot be changed later.
+      </p>
 
       {/* ── The unique link ── */}
       <div className="referral-widget__link-row">

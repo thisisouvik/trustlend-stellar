@@ -7,8 +7,8 @@
  *   alive: the right choice for Vercel serverless / edge handlers and for the
  *   vast majority of reads and single-statement writes.
  * - `getPooledDb()` — WebSocket pool driver. Required for interactive
- *   transactions (`db.transaction(...)`) and for long-running scripts (keepers,
- *   backfills) that issue many statements.
+ *   transactions (`db.transaction(...)`), including referral attribution, and
+ *   for long-running scripts (keepers, backfills) that issue many statements.
  *
  * Both return `null` when DATABASE_URL is not configured so callers can degrade
  * gracefully (the app renders an empty dashboard instead of crashing at build

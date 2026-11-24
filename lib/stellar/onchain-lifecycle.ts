@@ -255,6 +255,49 @@ export async function readOnchainLoan(onchainLoanId: number): Promise<OnchainLoa
   return decodeOnchainLoan(raw);
 }
 
+export interface OnchainCollateralEntry {
+  asset: string;
+  amountStroops: bigint;
+}
+
+/** Read the collateral that is currently recorded in the lending contract's vault. */
+export async function readUserCollateral(borrower: string): Promise<OnchainCollateralEntry[]> {
+  const raw = await invokeReadOnly({
+    contractId: lendingContractId(),
+    method: "get_user_collateral_entries",
+    args: [addr(borrower)],
+    sourceAddress: adminAddress(),
+  });
+  if (!Array.isArray(raw)) throw new Error("LendingContract returned invalid collateral entries");
+  return raw.map((item) => {
+    const entry = item as Record<string, unknown>;
+    return { asset: String(entry.asset), amountStroops: BigInt(String(entry.amount ?? 0)) };
+  });
+}
+
+/** Health factor and collateral borrowing power are returned in contract units (bps, stroops). */
+export async function readUserHealthFactor(borrower: string): Promise<number> {
+  const raw = await invokeReadOnly({
+    contractId: lendingContractId(),
+    method: "get_health_factor",
+    args: [addr(borrower)],
+    sourceAddress: adminAddress(),
+  });
+  const healthFactor = Number(raw);
+  if (!Number.isInteger(healthFactor) || healthFactor < 0) throw new Error("LendingContract returned invalid health factor");
+  return healthFactor;
+}
+
+export async function readUserBorrowingPower(borrower: string): Promise<bigint> {
+  const raw = await invokeReadOnly({
+    contractId: lendingContractId(),
+    method: "get_borrowing_power",
+    args: [addr(borrower)],
+    sourceAddress: adminAddress(),
+  });
+  return BigInt(String(raw ?? 0));
+}
+
 // ─── Admin-signed writes ─────────────────────────────────────────────────────
 
 export async function activateLoanOnchain(onchainLoanId: number): Promise<{ hash: string }> {

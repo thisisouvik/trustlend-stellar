@@ -324,7 +324,8 @@ export async function POST(request: NextRequest) {
 
       // ── Referral bonus (Issue #266) ──
       // The loan is now Active, which is what qualifies the borrower's
-      // referrer. The XLM payout itself is made on-chain by the lending
+      // referrer. That association was immutably claimed before qualification.
+      // The XLM payout itself is made on-chain by the lending
       // contract during activate_loan; this mirrors it for the dashboard.
       const referral = await qualifyReferralForLoan({
         db,

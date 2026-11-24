@@ -140,7 +140,8 @@ talks to it through [Drizzle ORM](https://orm.drizzle.team). The schema lives in
 
    This creates every table, trigger and SQL function the app needs (the
    `drizzle/0001_functions_and_triggers.sql` migration holds the row-locked
-   loan-funding and referral functions).
+   loan-funding and referral functions). Later migrations preserve the unique
+   referee association required for atomic referral claims.
 3. Optional: `npm run db:studio` opens a browser UI over the database.
 
 When you change `lib/db/schema.ts`, run `npm run db:generate` to produce the

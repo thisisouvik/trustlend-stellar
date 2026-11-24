@@ -22,7 +22,8 @@ contribution. Comment on or open an issue if you want to pick something up.
 - Automated default management with multisig-gated insurance payouts.
 - Liquidation keeper backed by a median-of-sources collateral price oracle.
 - SEP-24 fiat on/off ramp integration with Stellar anchors.
-- Referral programme paid on-chain on the first funded loan.
+- Referral programme paid on-chain on the first funded loan, with immutable
+  database attribution under concurrent claims.
 - Neon Postgres + Drizzle ORM data layer with versioned migrations, nightly
   encrypted backups and a documented restore procedure.
 - CI: contract tests + WASM build, type check, lint, unit tests, production

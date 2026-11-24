@@ -67,7 +67,7 @@ a `commit-msg` hook runs commitlint and rejects anything that doesn't match.
   `default-management`, `multisig-admin`, `borrower-reputation`,
   `auto-compound-vault`, `treasury`, `contracts`, `frontend`, `dashboard`,
   `auth`, `kyc`, `api`, `ci`, `db`, `neon`, `drizzle`, `stellar`, `soroban`,
-  `docs`, `deps`, `config`, `landing`, `hooks`.
+  `docs`, `deps`, `config`, `landing`, `hooks`, `referrals`.
 
 Examples: `feat(lending): add early-repayment discount`,
 `fix(auth): reject expired SEP-10 challenges`, `docs(contracts): document escrow revocation window`.

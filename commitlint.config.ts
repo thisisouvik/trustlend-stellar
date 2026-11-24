@@ -73,6 +73,7 @@ const Configuration: UserConfig = {
         "config",
         "landing",
         "hooks",
+        "referrals",
       ],
     ],
 
@@ -81,6 +82,10 @@ const Configuration: UserConfig = {
 
     // Subject must not end with a period
     "subject-full-stop": [2, "never", "."],
+
+    // Existing commits use both lower-case and capitalized imperative
+    // subjects, so do not reject either convention.
+    "subject-case": [0],
 
     // Header max length
     "header-max-length": [2, "always", 100],

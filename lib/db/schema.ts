@@ -585,6 +585,7 @@ export const referrals = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [
+    // The permanent, database-level guard against duplicate attribution.
     uniqueIndex("referrals_referee_id_key").on(t.refereeId),
     index("idx_referrals_referrer_id").on(t.referrerId),
     index("idx_referrals_status").on(t.status),

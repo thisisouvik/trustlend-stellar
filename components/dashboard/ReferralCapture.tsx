@@ -21,9 +21,7 @@
  */
 
 import { useEffect } from "react";
-import { normalizeReferralCode } from "@/lib/referrals/codes";
-
-const STORAGE_KEY = "trustlend.referralCode";
+import { normalizeReferralCode, REFERRAL_CLAIM_STORAGE_KEY } from "@/lib/referrals/codes";
 
 /** Read `?ref=` from the current URL and remember it for after sign-in. */
 export function stashReferralCodeFromUrl(): void {
@@ -33,7 +31,7 @@ export function stashReferralCodeFromUrl(): void {
       new URLSearchParams(window.location.search).get("ref"),
     );
     if (code) {
-      window.sessionStorage.setItem(STORAGE_KEY, code);
+      window.sessionStorage.setItem(REFERRAL_CLAIM_STORAGE_KEY, code);
     }
   } catch {
     // Private-mode browsers can throw on storage access; a lost referral is
@@ -61,7 +59,7 @@ export function ReferralCapture({ alreadyReferred = false }: ReferralCaptureProp
     const claim = async () => {
       let code: string | null = null;
       try {
-        code = window.sessionStorage.getItem(STORAGE_KEY);
+        code = window.sessionStorage.getItem(REFERRAL_CLAIM_STORAGE_KEY);
       } catch {
         return;
       }
@@ -80,7 +78,7 @@ export function ReferralCapture({ alreadyReferred = false }: ReferralCaptureProp
         if (res.ok || res.status === 404 || res.status === 409 || res.status === 400) {
           if (!cancelled) {
             try {
-              window.sessionStorage.removeItem(STORAGE_KEY);
+              window.sessionStorage.removeItem(REFERRAL_CLAIM_STORAGE_KEY);
             } catch {
               /* ignore */
             }

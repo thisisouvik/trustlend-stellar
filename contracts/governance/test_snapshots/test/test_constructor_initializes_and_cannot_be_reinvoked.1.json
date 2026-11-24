@@ -425,6 +425,14 @@
                             },
                             {
                               "key": {
+                                "symbol": "timelock_delay_secs"
+                              },
+                              "val": {
+                                "u64": 86400
+                              }
+                            },
+                            {
+                              "key": {
                                 "symbol": "voting_period_secs"
                               },
                               "val": {

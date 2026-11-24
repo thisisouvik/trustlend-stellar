@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(clippy::too_many_arguments)]
 //! TrustLend DAO Governance
 //!
 //! Decentralizes changes to platform parameters — starting with the lending
@@ -55,6 +56,10 @@ pub struct Proposal {
     /// Ledger timestamp when voting closes.
     pub end_at: u64,
     pub status: ProposalStatus,
+    /// Ledger sequence snapshot at proposal creation for voting power checkpointing.
+    pub snapshot_ledger: u32,
+    /// Earliest timestamp at which this proposal may be executed (0 until passed).
+    pub eta: u64,
 }
 
 /// Immutable-ish governance configuration (admin can re-init only once).
@@ -74,6 +79,8 @@ pub struct GovConfig {
     pub min_proposer_power: i128,
     /// Hard cap on a proposable fee (bps). Mirrors the lending safety cap.
     pub max_fee_bps: u32,
+    /// Minimum timelock delay in seconds between proposal passage and execution.
+    pub timelock_delay_secs: u64,
 }
 
 #[contracttype]
@@ -108,9 +115,13 @@ impl GovernanceContract {
         quorum_votes: i128,
         min_proposer_power: i128,
         max_fee_bps: u32,
+        timelock_delay_secs: u64,
     ) {
         if voting_period_secs == 0 {
             panic!("voting_period_secs must be positive");
+        }
+        if timelock_delay_secs == 0 {
+            panic!("timelock_delay_secs must be positive");
         }
         let config = GovConfig {
             admin,
@@ -120,6 +131,7 @@ impl GovernanceContract {
             quorum_votes,
             min_proposer_power,
             max_fee_bps,
+            timelock_delay_secs,
         };
         env.storage().instance().set(&DataKey::Config, &config);
         env.storage().instance().set(&DataKey::ProposalCount, &0u32);
@@ -142,6 +154,20 @@ impl GovernanceContract {
     /// Reputation-weighted voting power of an account (0 if no profile).
     pub fn get_voting_power(env: Env, account: Address) -> i128 {
         Self::voting_power(&env, &account)
+    }
+
+    /// Reputation-weighted voting power of an account at a specific ledger sequence.
+    pub fn get_voting_power_at(env: Env, account: Address, ledger: u32) -> i128 {
+        Self::voting_power_at(&env, &account, ledger)
+    }
+
+    /// Whether the execution timelock has elapsed for a passed proposal.
+    pub fn is_timelock_expired(env: Env, proposal_id: u32) -> bool {
+        let proposal = Self::get_proposal(env.clone(), proposal_id);
+        if proposal.status != ProposalStatus::Passed {
+            return false;
+        }
+        env.ledger().timestamp() >= proposal.eta
     }
 
     // ── Proposing ────────────────────────────────────────────────────────────────
@@ -168,6 +194,7 @@ impl GovernanceContract {
         let id = count + 1;
 
         let now = env.ledger().timestamp();
+        let current_ledger = env.ledger().sequence();
         let proposal = Proposal {
             id,
             proposer,
@@ -178,9 +205,13 @@ impl GovernanceContract {
             created_at: now,
             end_at: now + config.voting_period_secs,
             status: ProposalStatus::Active,
+            snapshot_ledger: current_ledger,
+            eta: 0,
         };
 
-        env.storage().persistent().set(&DataKey::Proposal(id), &proposal);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Proposal(id), &proposal);
         env.storage().instance().set(&DataKey::ProposalCount, &id);
 
         env.events().publish(
@@ -210,7 +241,7 @@ impl GovernanceContract {
             panic!("Account has already voted");
         }
 
-        let power = Self::voting_power(&env, &voter);
+        let power = Self::voting_power_at(&env, &voter, proposal.snapshot_ledger);
         if power <= 0 {
             panic!("No voting power (need reputation)");
         }
@@ -222,7 +253,9 @@ impl GovernanceContract {
         }
 
         env.storage().persistent().set(&vote_key, &true);
-        env.storage().persistent().set(&DataKey::Proposal(proposal_id), &proposal);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
 
         env.events().publish(
             (symbol_short!("gov"), symbol_short!("vote")),
@@ -247,12 +280,16 @@ impl GovernanceContract {
         let quorum_met = total >= config.quorum_votes;
         let approved = proposal.votes_for > proposal.votes_against;
 
-        proposal.status = if quorum_met && approved {
-            ProposalStatus::Passed
+        if quorum_met && approved {
+            proposal.status = ProposalStatus::Passed;
+            proposal.eta = env.ledger().timestamp() + config.timelock_delay_secs;
         } else {
-            ProposalStatus::Rejected
+            proposal.status = ProposalStatus::Rejected;
+            proposal.eta = 0;
         };
-        env.storage().persistent().set(&DataKey::Proposal(proposal_id), &proposal);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
 
         env.events().publish(
             (symbol_short!("gov"), symbol_short!("final")),
@@ -267,6 +304,11 @@ impl GovernanceContract {
         let mut proposal = Self::get_proposal(env.clone(), proposal_id);
         if proposal.status != ProposalStatus::Passed {
             panic!("Only PASSED proposals can be executed");
+        }
+
+        let now = env.ledger().timestamp();
+        if now < proposal.eta {
+            panic!("Proposal timelock has not expired");
         }
 
         let config = Self::config(&env);
@@ -286,7 +328,9 @@ impl GovernanceContract {
         );
 
         proposal.status = ProposalStatus::Executed;
-        env.storage().persistent().set(&DataKey::Proposal(proposal_id), &proposal);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
 
         env.events().publish(
             (symbol_short!("gov"), symbol_short!("execute")),
@@ -334,6 +378,23 @@ impl GovernanceContract {
             &Symbol::new(env, "get_reputation_score"),
             args,
         )
+    }
+
+    /// Reputation-weighted voting power at a historical ledger sequence via cross-contract read.
+    fn voting_power_at(env: &Env, account: &Address, ledger: u32) -> i128 {
+        let config = Self::config(env);
+        let args: Vec<Val> = vec![env, account.into_val(env), ledger.into_val(env)];
+        match env.try_invoke_contract::<i128, soroban_sdk::Error>(
+            &config.reputation,
+            &Symbol::new(env, "get_past_reputation_score"),
+            args,
+        ) {
+            Ok(Ok(score)) => score,
+            _ => {
+                // Fall back to real-time score if contract does not support historical queries
+                Self::voting_power(env, account)
+            }
+        }
     }
 }
 

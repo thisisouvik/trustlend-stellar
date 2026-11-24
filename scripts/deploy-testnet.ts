@@ -572,7 +572,7 @@ function constructorArgsFor(
         );
       }
       // 3-day voting window, quorum 500, min proposer power 150 (Silver tier),
-      // fee cap 1000 bps (10%). Voting power = reputation score.
+      // fee cap 1000 bps (10%), 24h timelock delay (86400s). Voting power = reputation score.
       return [
         "--admin", adminAddress,
         "--lending", ids.lending,
@@ -581,6 +581,7 @@ function constructorArgsFor(
         "--quorum_votes", "500",
         "--min_proposer_power", "150",
         "--max_fee_bps", "1000",
+        "--timelock_delay_secs", "86400",
       ];
 
     case "multisig_admin": {

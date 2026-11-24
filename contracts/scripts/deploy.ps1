@@ -67,7 +67,8 @@ $GOVERNANCE_ID = Deploy-Contract "Governance" "target/wasm32v1-none/release/gove
     "--voting_period_secs", "259200",
     "--quorum_votes", "500",
     "--min_proposer_power", "150",
-    "--max_fee_bps", "1000"
+    "--max_fee_bps", "1000",
+    "--timelock_delay_secs", "86400"
 )
 Write-Host "MultiSigAdmin: $MultisigThreshold-of-$($SignerArr.Count)"
 $MULTISIG_ID = Deploy-Contract "MultiSigAdmin" "target/wasm32v1-none/release/multisig_admin.wasm" @("--signers", $SignersJson, "--threshold", $MultisigThreshold)

@@ -204,7 +204,7 @@ Every client-submitted transaction hash is verified against Horizon / Soroban RP
 | Collateral price feeds | [docs/oracle-price-feeds.md](docs/oracle-price-feeds.md) |
 | APR / yield formulas | [docs/apr-formulas.md](docs/apr-formulas.md) |
 | Fiat on/off ramp (SEP-24) | [docs/sep24-fiat-ramp.md](docs/sep24-fiat-ramp.md) |
-| Referral program | [docs/referral-program.md](docs/referral-program.md) |
+| Referral program & one-time attribution guarantees | [docs/referral-program.md](docs/referral-program.md) |
 | Backups & disaster recovery | [docs/disaster-recovery.md](docs/disaster-recovery.md) |
 | Formal verification | [docs/formal-verification.md](docs/formal-verification.md) |
 | Contract design notes | [docs/contracts/](docs/contracts/) — flash loans, governance, multisig, credit oracle |

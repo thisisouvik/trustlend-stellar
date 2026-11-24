@@ -14,7 +14,8 @@ import { isRedirectError } from "next/dist/client/components/redirect-error";
  * Returns the signed-in user's referral link plus their programme stats
  * (Issue #266). The code is created on demand via ensure_referral_code(), so a
  * user who predates the referral migration gets one on first visit rather than
- * seeing an empty state.
+ * seeing an empty state. Claims are intentionally handled by the transactional
+ * POST endpoint, not by this read-oriented endpoint.
  */
 export async function GET(request: NextRequest) {
   try {

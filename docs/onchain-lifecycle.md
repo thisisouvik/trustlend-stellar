@@ -135,6 +135,10 @@ current source (their `is_asset_whitelisted`, `get_multisig_admin` and
 created), so a fresh deployment is required before switching the lifecycle on
 in production.
 
+Referral attribution is finalized in Postgres before the on-chain reward path:
+the application transaction and unique `referee_id` index ensure a borrower
+cannot be rebound by concurrent invite-link requests.
+
 ## Testing
 
 - `__tests__/lib/verify-payment.test.ts` — Horizon verification with a mocked `fetch`

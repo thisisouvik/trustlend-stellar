@@ -3371,3 +3371,41 @@ fn test_sweep_cannot_take_uncollected_fees() {
     client.sweep_tokens(&admin, &fee_token, &recipient, &100);
     assert_eq!(token::Client::new(&env, &fee_token).balance(&contract_id), uncollected);
 }
+
+#[test]
+fn test_settle_defaulted_loan_seizes_vault_collateral() {
+    let (env, contract_id, admin, borrower, collateral_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+    let lender = Address::generate(&env);
+    let collateral_amount = 25_000_000;
+    mint_tokens(&env, &collateral_asset, &borrower, collateral_amount);
+    client.deposit_collateral(&borrower, &collateral_asset, &collateral_amount);
+
+    let loan = LoanRecord {
+        id: 77,
+        borrower: borrower.clone(),
+        lender: lender.clone(),
+        amount: 10_000_000,
+        duration_days: 30,
+        interest_rate_bps: 1000,
+        total_due: 10_100_000,
+        remaining_due: 10_100_000,
+        created_at: 0,
+        due_at: 0,
+        status: LoanStatus::Defaulted,
+        escrow_id: 0,
+        platform_fee: 0,
+        rate_model: InterestRateModel::Fixed,
+        base_rate_bps: 1000,
+        last_rate_update: 0,
+    };
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().set(&DataKey::Loan(77), &loan);
+    });
+
+    client.settle_defaulted_loan(&admin, &77);
+
+    assert_eq!(token::Client::new(&env, &collateral_asset).balance(&lender), collateral_amount);
+    assert_eq!(token::Client::new(&env, &collateral_asset).balance(&contract_id), 0);
+    assert!(client.get_user_collateral_entries(&borrower).is_empty());
+}

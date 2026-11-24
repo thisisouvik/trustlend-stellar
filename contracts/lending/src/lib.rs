@@ -1580,6 +1580,42 @@ impl LendingContract {
         );
     }
 
+    /// Settle a defaulted loan by transferring the borrower's vault collateral
+    /// to the recorded lender. This is an explicit admin action so default
+    /// management can coordinate recovery after marking the loan defaulted.
+    pub fn settle_defaulted_loan(env: Env, caller: Address, loan_id: u32) {
+        caller.require_auth();
+        Self::assert_admin(&env, &caller);
+        let loan = Self::get_loan(env.clone(), loan_id);
+        if loan.status != LoanStatus::Defaulted {
+            panic!("Only DEFAULTED loans can be settled");
+        }
+        if loan.lender == env.current_contract_address() {
+            panic!("Defaulted loan has no recorded lender");
+        }
+
+        let key = DataKey::UserCollateral(loan.borrower.clone());
+        let entries: Vec<CollateralEntry> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(Vec::new(&env));
+        if entries.is_empty() {
+            panic!("No collateral available to settle defaulted loan");
+        }
+
+        let pool = env.current_contract_address();
+        for entry in entries.iter() {
+            let token_client = token::Client::new(&env, &entry.asset);
+            token_client.transfer(&pool, &loan.lender, &entry.amount);
+            env.events().publish(
+                (symbol_short!("loan"), symbol_short!("seized")),
+                (loan_id, loan.borrower.clone(), loan.lender.clone(), entry.asset, entry.amount),
+            );
+        }
+        env.storage().persistent().remove(&key);
+    }
+
     // ── Rate model switching ─────────────────────────────────────────────────
 
     /// Borrower switches their loan between Fixed and Floating rate models.

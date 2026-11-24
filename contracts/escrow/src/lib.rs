@@ -3,6 +3,8 @@ use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, Vec,
 };
 
+const MAX_HOLD_TIMEOUT_SECS: u64 = 86_400;
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /// Escrow hold status.
@@ -420,6 +422,39 @@ impl EscrowContract {
         env.events().publish(
             (symbol_short!("escrow"), symbol_short!("transfer")),
             (escrow_id, hold.loan_id, hold.borrower, hold.amount),
+        );
+    }
+
+    /// Refund a lender's still-held escrow after the maximum hold timeout.
+    /// This permissionless fallback for the lender does not depend on admin
+    /// availability; the status transition and token transfer are atomic.
+    pub fn expire_and_refund_hold(env: Env, lender: Address, escrow_id: u32) {
+        lender.require_auth();
+        let mut hold = Self::load_hold(&env, escrow_id);
+        if hold.lender != lender {
+            panic!("Caller is not the lender");
+        }
+        if hold.status != EscrowStatus::Held {
+            panic!("Hold is not in HELD state");
+        }
+        let refund_at = hold.held_at
+            .checked_add(MAX_HOLD_TIMEOUT_SECS)
+            .expect("Hold timeout overflow");
+        if env.ledger().timestamp() <= refund_at {
+            panic!("Maximum hold timeout has not elapsed");
+        }
+
+        hold.status = EscrowStatus::Revoked;
+        env.storage().persistent().set(&DataKey::Hold(escrow_id), &hold);
+        Self::sub_total_held(&env, &hold.token, hold.amount);
+        token::Client::new(&env, &hold.token).transfer(
+            &env.current_contract_address(),
+            &lender,
+            &hold.amount,
+        );
+        env.events().publish(
+            (symbol_short!("escrow"), symbol_short!("withdraw")),
+            (lender, hold.loan_id, hold.amount),
         );
     }
 

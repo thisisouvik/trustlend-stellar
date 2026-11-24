@@ -342,6 +342,33 @@ fn test_revoke_hold_returns_tokens_to_lender() {
 }
 
 #[test]
+fn test_expired_hold_refund_returns_tokens_without_admin() {
+    let (env, contract_id, _admin, lender, borrower, token) = setup();
+    let client = EscrowContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &token);
+    let amount = 5_000_000;
+    let escrow_id = client.create_hold(&lender, &borrower, &1, &token, &amount);
+    let hold = client.get_hold(&escrow_id);
+
+    env.ledger().set_timestamp(hold.held_at + MAX_HOLD_TIMEOUT_SECS + 1);
+    client.expire_and_refund_hold(&lender, &escrow_id);
+
+    assert_eq!(client.get_hold(&escrow_id).status, EscrowStatus::Revoked);
+    assert_eq!(token_client.balance(&lender), LENDER_FUNDS);
+    assert_eq!(token_client.balance(&borrower), 0);
+    assert_custody_matches(&env, &client, &contract_id, &token, 0);
+}
+
+#[test]
+#[should_panic(expected = "Maximum hold timeout has not elapsed")]
+fn test_expired_hold_refund_rejects_early_call() {
+    let (env, contract_id, _admin, lender, borrower, token) = setup();
+    let client = EscrowContractClient::new(&env, &contract_id);
+    let escrow_id = client.create_hold(&lender, &borrower, &1, &token, &5_000_000);
+    client.expire_and_refund_hold(&lender, &escrow_id);
+}
+
+#[test]
 fn test_confirm_disbursement_transfers_tokens_to_borrower() {
     let (env, contract_id, admin, lender, borrower, token) = setup();
     let client = EscrowContractClient::new(&env, &contract_id);

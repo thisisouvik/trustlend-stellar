@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Vec, BytesN};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, Vec, BytesN};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -47,6 +47,7 @@ pub struct InsuranceEvent {
 pub enum DataKey {
     DefaultRecord(u32),
     InsuranceBalance,
+    InsuranceToken,
     InsuranceEvent(u32),
     InsuranceEventCount,
     Admin,
@@ -79,11 +80,12 @@ impl DefaultManagementContract {
     /// (`-- <constructor args>`), so the contract is never live in an
     /// uninitialised state that a third party could front-run to claim
     /// admin rights (issue #352). There is no public `initialize`.
-    pub fn __constructor(env: Env, admin: Address, initial_insurance_balance: i128) {
+    pub fn __constructor(env: Env, admin: Address, insurance_token: Address) {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage()
             .persistent()
-            .set(&DataKey::InsuranceBalance, &initial_insurance_balance);
+            .set(&DataKey::InsuranceBalance, &0_i128);
+        env.storage().instance().set(&DataKey::InsuranceToken, &insurance_token);
         env.storage()
             .instance()
             .set(&DataKey::InsuranceEventCount, &0u32);
@@ -319,17 +321,35 @@ impl DefaultManagementContract {
             .unwrap_or(0)
     }
 
+    pub fn get_insurance_token(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::InsuranceToken)
+            .expect("Insurance token not configured")
+    }
+
     /// Increase the insurance fund (from platform fee income). Multisig-gated
     /// — "handling protocol fees" is exactly the kind of rare, high-impact
     /// fund movement this contract protects with N-of-M approval.
     pub fn add_to_insurance(env: Env, caller: Address, amount: i128) {
         caller.require_auth();
         Self::assert_insurance_authority(&env, &caller);
+        if amount <= 0 {
+            panic!("Insurance deposit must be positive");
+        }
 
         let current = Self::get_insurance_balance(env.clone());
+        let new_balance = current
+            .checked_add(amount)
+            .expect("Insurance balance overflow");
+        token::Client::new(&env, &Self::get_insurance_token(env.clone())).transfer(
+            &caller,
+            &env.current_contract_address(),
+            &amount,
+        );
         env.storage()
             .persistent()
-            .set(&DataKey::InsuranceBalance, &(current + amount));
+            .set(&DataKey::InsuranceBalance, &new_balance);
     }
 
     /// Trigger an insurance payout ("withdrawing protocol fees") to a lender
@@ -348,16 +368,28 @@ impl DefaultManagementContract {
         caller.require_auth();
         Self::assert_insurance_authority(&env, &caller);
         Self::assert_not_paused(&env);
+        if amount <= 0 {
+            panic!("Insurance payout must be positive");
+        }
 
         let balance = Self::get_insurance_balance(env.clone());
         if balance < amount {
             panic!("Insufficient insurance funds");
         }
 
-        // Deduct from fund
+        let new_balance = balance
+            .checked_sub(amount)
+            .expect("Insurance balance underflow");
+        token::Client::new(&env, &Self::get_insurance_token(env.clone())).transfer(
+            &env.current_contract_address(),
+            &lender,
+            &amount,
+        );
+
+        // Deduct from fund after the token transfer succeeds.
         env.storage()
             .persistent()
-            .set(&DataKey::InsuranceBalance, &(balance - amount));
+            .set(&DataKey::InsuranceBalance, &new_balance);
 
         // Record the event
         let count: u32 = env

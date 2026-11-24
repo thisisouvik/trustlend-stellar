@@ -547,7 +547,7 @@ function constructorArgsFor(
       return ["--admin", adminAddress];
 
     case "default_management":
-      return ["--admin", adminAddress, "--initial_insurance_balance", "0"];
+      return ["--admin", adminAddress, "--insurance_token", xlm];
 
     case "pooled_lending":
       // Pool 0 with the interest-rate curve the app's defaults assume:

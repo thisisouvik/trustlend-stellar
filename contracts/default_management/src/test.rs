@@ -1,14 +1,17 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, Address, Env};
+use soroban_sdk::{testutils::Address as _, token, Address, Env};
 
 fn setup() -> (Env, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
-    let contract_id = env.register(DefaultManagementContract, (&admin, 10_000_000_i128));
+    let insurance_token = env.register_stellar_asset_contract_v2(Address::generate(&env)).address();
+    let contract_id = env.register(DefaultManagementContract, (&admin, &insurance_token));
+    token::StellarAssetClient::new(&env, &insurance_token).mint(&admin, &100_000_000);
+    DefaultManagementContractClient::new(&env, &contract_id).add_to_insurance(&admin, &10_000_000);
 
     (env, contract_id, admin)
 }
@@ -23,8 +26,11 @@ fn setup_with_multisig() -> (Env, Address, Address, Address, Address) {
     let signer1 = Address::generate(&env);
     let borrower = Address::generate(&env);
 
-    let contract_id = env.register(DefaultManagementContract, (&admin, 10_000_000_i128));
+    let insurance_token = env.register_stellar_asset_contract_v2(Address::generate(&env)).address();
+    let contract_id = env.register(DefaultManagementContract, (&admin, &insurance_token));
     let client = DefaultManagementContractClient::new(&env, &contract_id);
+    token::StellarAssetClient::new(&env, &insurance_token).mint(&admin, &100_000_000);
+    client.add_to_insurance(&admin, &10_000_000);
 
     let admins = soroban_sdk::vec![&env, admin.clone(), signer1.clone()];
     client.setup_multisig(&admin, &admins, &2);
@@ -53,6 +59,7 @@ fn test_basic_initialization() {
 
     assert_eq!(client.get_admin(), admin);
     assert_eq!(client.get_insurance_balance(), 10_000_000);
+    assert_eq!(token::Client::new(&env, &client.get_insurance_token()).balance(&contract_id), 10_000_000);
 }
 
 #[test]
@@ -78,11 +85,29 @@ fn test_insurance_payout() {
     client.trigger_insurance_payout(&multisig, &1, &lender, &5_000_000);
 
     assert_eq!(client.get_insurance_balance(), 5_000_000);
+    assert_eq!(token::Client::new(&env, &client.get_insurance_token()).balance(&lender), 5_000_000);
+    assert_eq!(token::Client::new(&env, &client.get_insurance_token()).balance(&contract_id), 5_000_000);
     assert_eq!(client.get_insurance_event_count(), 1);
     let event = client.get_insurance_event(&1);
     assert_eq!(event.loan_id, 1);
     assert_eq!(event.lender, lender);
     assert_eq!(event.amount_paid, 5_000_000);
+}
+
+#[test]
+#[should_panic(expected = "Insurance deposit must be positive")]
+fn test_insurance_deposit_rejects_zero_amount() {
+    let (_env, contract_id, admin) = setup();
+    DefaultManagementContractClient::new(&_env, &contract_id).add_to_insurance(&admin, &0);
+}
+
+#[test]
+#[should_panic(expected = "Insurance payout must be positive")]
+fn test_insurance_payout_rejects_negative_amount() {
+    let (env, contract_id, _admin, multisig) = setup_with_linked_multisig();
+    let lender = Address::generate(&env);
+    DefaultManagementContractClient::new(&env, &contract_id)
+        .trigger_insurance_payout(&multisig, &1, &lender, &-1);
 }
 
 #[test]
@@ -403,7 +428,7 @@ fn test_constructor_initializes_and_cannot_be_reinvoked() {
     let args: soroban_sdk::Vec<soroban_sdk::Val> = soroban_sdk::vec![
         &env,
         attacker.into_val(&env),
-        0i128.into_val(&env),
+        client.get_insurance_token().into_val(&env),
     ];
     for name in ["initialize", "__constructor"] {
         let res = env.try_invoke_contract::<(), soroban_sdk::Error>(

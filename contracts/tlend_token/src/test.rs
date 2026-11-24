@@ -11,7 +11,12 @@ fn setup<'a>() -> (Env, Address, TlendTokenContractClient<'a>) {
     let admin = Address::generate(&env);
     let id = env.register(
         TlendTokenContract,
-        (&admin, 7_u32, String::from_str(&env, "TrustLend"), String::from_str(&env, "TLEND")),
+        (
+            &admin,
+            7_u32,
+            String::from_str(&env, "TrustLend"),
+            String::from_str(&env, "TLEND"),
+        ),
     );
     let token = TlendTokenContractClient::new(&env, &id);
 
@@ -141,7 +146,8 @@ fn test_allowance_expires() {
     token.approve(&alice, &spender, &100, &expiration);
     assert_eq!(token.allowance(&alice, &spender), 100);
 
-    env.ledger().with_mut(|l| l.sequence_number = expiration + 1);
+    env.ledger()
+        .with_mut(|l| l.sequence_number = expiration + 1);
     assert_eq!(token.allowance(&alice, &spender), 0);
 }
 
@@ -203,4 +209,83 @@ fn test_set_admin() {
     let new_admin = Address::generate(&env);
     token.set_admin(&new_admin);
     assert_eq!(token.admin(), new_admin);
+}
+
+// ─── Maximum Total Supply Cap Tests (Issue #426) ───────────────────────────
+
+#[test]
+fn test_max_supply_constant() {
+    let (_env, _admin, token) = setup();
+    assert_eq!(token.max_supply(), MAX_TOTAL_SUPPLY);
+    assert_eq!(MAX_SUPPLY, MAX_TOTAL_SUPPLY);
+}
+
+#[test]
+fn test_mint_up_to_max_supply_succeeds() {
+    let (env, _admin, token) = setup();
+    let alice = Address::generate(&env);
+
+    // Mint in two chunks up to exactly MAX_TOTAL_SUPPLY
+    let chunk1 = MAX_TOTAL_SUPPLY - 5_000_000;
+    let chunk2 = 5_000_000;
+
+    token.mint(&alice, &chunk1);
+    assert_eq!(token.total_supply(), chunk1);
+    assert_eq!(token.balance(&alice), chunk1);
+
+    token.mint(&alice, &chunk2);
+    assert_eq!(token.total_supply(), MAX_TOTAL_SUPPLY);
+    assert_eq!(token.balance(&alice), MAX_TOTAL_SUPPLY);
+}
+
+#[test]
+#[should_panic(expected = "Total supply exceeds maximum cap")]
+fn test_mint_exceeding_max_supply_panics() {
+    let (env, _admin, token) = setup();
+    let alice = Address::generate(&env);
+
+    token.mint(&alice, &(MAX_TOTAL_SUPPLY + 1));
+}
+
+#[test]
+#[should_panic(expected = "Total supply exceeds maximum cap")]
+fn test_mint_incremental_beyond_max_supply_panics() {
+    let (env, _admin, token) = setup();
+    let alice = Address::generate(&env);
+
+    token.mint(&alice, &MAX_TOTAL_SUPPLY);
+    assert_eq!(token.total_supply(), MAX_TOTAL_SUPPLY);
+
+    // 1 stroop beyond cap must revert
+    token.mint(&alice, &1);
+}
+
+#[test]
+fn test_burn_allows_reminting_under_cap() {
+    let (env, _admin, token) = setup();
+    let alice = Address::generate(&env);
+
+    token.mint(&alice, &MAX_TOTAL_SUPPLY);
+    assert_eq!(token.total_supply(), MAX_TOTAL_SUPPLY);
+
+    // Burn 10,000 units
+    token.burn(&alice, &10_000);
+    assert_eq!(token.total_supply(), MAX_TOTAL_SUPPLY - 10_000);
+
+    // Can re-mint 10,000 units back up to cap
+    token.mint(&alice, &10_000);
+    assert_eq!(token.total_supply(), MAX_TOTAL_SUPPLY);
+}
+
+#[test]
+#[should_panic(expected = "Total supply exceeds maximum cap")]
+fn test_remint_beyond_cap_after_burn_panics() {
+    let (env, _admin, token) = setup();
+    let alice = Address::generate(&env);
+
+    token.mint(&alice, &MAX_TOTAL_SUPPLY);
+    token.burn(&alice, &5_000);
+
+    // Minting 5_001 exceeds cap by 1
+    token.mint(&alice, &5_001);
 }

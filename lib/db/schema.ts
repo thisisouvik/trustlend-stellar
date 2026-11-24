@@ -320,6 +320,7 @@ export const loanRepayments = pgTable(
   (t) => [
     index("idx_loan_repayments_loan_id").on(t.loanId),
     index("idx_loan_repayments_payer_id").on(t.payerId),
+    uniqueIndex("idx_loan_repayments_tx_ref").on(t.txRef).where(sql`${t.txRef} IS NOT NULL`),
   ],
 );
 

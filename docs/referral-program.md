@@ -113,6 +113,12 @@ The Drizzle schema (`lib/db/schema.ts`, applied by `drizzle/0000_init.sql` and `
 - `record_referral()`, `qualify_referral()`, `settle_referral_payout()`,
   `get_referral_stats()`, `ensure_referral_code()`.
 
+Referral claiming is executed with the pooled database client's transaction
+API. `record_referral()` performs validation and `INSERT ... ON CONFLICT
+(referee_id) DO NOTHING` in that boundary, then returns the winning row. Two
+simultaneous claims with different links therefore preserve one attribution
+instead of producing duplicate graph edges or a unique-key error.
+
 All write paths are `SECURITY DEFINER`. **No direct insert or update policy is
 granted to authenticated users**, so nobody can attribute themselves to a
 referrer or mark their own bonus as paid. RLS on reads lets a referrer see who

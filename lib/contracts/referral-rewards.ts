@@ -82,7 +82,7 @@ export async function calculateBonusView(loanAmountStroops: bigint, caller: stri
   return toBig(await read("calculate_bonus_view", [i128ToScVal(loanAmountStroops)], caller));
 }
 
-/** The referee signs this once to attribute themselves to a referrer. */
+/** The referee signs this once to attribute themselves to an immutable referrer. */
 export async function registerReferral(refereeAddress: string, referrerAddress: string) {
   return write("register_referral", [addressToScVal(refereeAddress), addressToScVal(referrerAddress)], refereeAddress);
 }

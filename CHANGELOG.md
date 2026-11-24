@@ -131,6 +131,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CODE_OF_CONDUCT, SECURITY, issue and pull request templates.
 
 ### Changed
+- Referral claims now use a pooled database transaction and retain the unique
+  `referrals.referee_id` guard, making concurrent invite claims idempotent
+  (#432).
 - README rewritten for open-source readers; rate-limiting and payment-due
   scheduler details moved to `docs/rate-limiting.md` and
   `docs/payment-due-scheduler.md`; roadmap and contributing guide refreshed.

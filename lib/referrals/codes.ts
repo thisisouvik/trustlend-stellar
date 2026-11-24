@@ -28,6 +28,9 @@ export const REFERRAL_RANDOM_LENGTH = 6;
 /** Total code length, including the prefix. */
 export const REFERRAL_CODE_LENGTH = REFERRAL_PREFIX.length + REFERRAL_RANDOM_LENGTH;
 
+/** Session-scoped handoff between an invite visit and authenticated claiming. */
+export const REFERRAL_CLAIM_STORAGE_KEY = "trustlend.referralCode";
+
 /**
  * With a 30-character alphabet and 6 random slots the space is 30^6 ≈ 729M.
  * Enumeration is impractical at any sane request rate, and collisions are

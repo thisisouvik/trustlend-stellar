@@ -1299,6 +1299,9 @@ mod good_receiver {
     use super::*;
     use soroban_sdk::{contract, contractimpl};
 
+    #[contractclient(name = "LendingRepayClient")]
+    pub trait LendingRepayment { fn repay_flash_loan(env: Env, receiver: Address); }
+
     #[contract]
     pub struct GoodReceiver;
 
@@ -1317,7 +1320,8 @@ mod good_receiver {
             let repayment = amount
                 .checked_add(fee)
                 .expect("Overflow computing repayment");
-            token_client.transfer(&caller, &pool, &repayment);
+            token_client.approve(&caller, &pool, &repayment, &(env.ledger().sequence() + 100));
+            LendingRepayClient::new(&env, &pool).repay_flash_loan(&caller);
         }
     }
 }
@@ -1325,6 +1329,9 @@ mod good_receiver {
 mod generous_receiver {
     use super::*;
     use soroban_sdk::{contract, contractimpl};
+
+    #[contractclient(name = "LendingRepayClient")]
+    pub trait LendingRepayment { fn repay_flash_loan(env: Env, receiver: Address); }
 
     #[contract]
     pub struct GenerousReceiver;
@@ -1346,7 +1353,8 @@ mod generous_receiver {
                 .expect("Overflow computing repayment")
                 .checked_add(100)
                 .expect("Overflow adding surplus");
-            token_client.transfer(&caller, &pool, &repayment);
+            token_client.approve(&caller, &pool, &repayment, &(env.ledger().sequence() + 100));
+            LendingRepayClient::new(&env, &pool).repay_flash_loan(&caller);
         }
     }
 }
@@ -1392,6 +1400,25 @@ mod stingy_receiver {
             _pool: Address,
             _params: Bytes,
         ) {
+        }
+    }
+}
+
+mod reentrant_collateral_receiver {
+    use super::*;
+    use soroban_sdk::{contract, contractimpl};
+
+    #[contractclient(name = "LendingDepositClient")]
+    pub trait LendingCollateral { fn deposit_collateral(env: Env, borrower: Address, asset: Address, amount: i128); }
+
+    #[contract]
+    pub struct ReentrantCollateralReceiver;
+
+    #[contractimpl]
+    impl FlashLoanReceiver for ReentrantCollateralReceiver {
+        fn execute_operation(env: Env, token: Address, amount: i128, _fee: i128, pool: Address, _params: Bytes) {
+            let borrower = env.current_contract_address();
+            LendingDepositClient::new(&env, &pool).deposit_collateral(&borrower, &token, &amount);
         }
     }
 }
@@ -1471,7 +1498,7 @@ fn test_flash_loan_accepts_overpayment() {
         &Bytes::new(&env),
     );
     let pool_after = token::Client::new(&env, &token_address).balance(&contract_id);
-    assert_eq!(pool_after, pool_before + fee + 100);
+    assert_eq!(pool_after, pool_before + fee);
 }
 
 #[test]
@@ -1525,6 +1552,16 @@ fn test_flash_loan_reverts_on_partial_repayment() {
         &1_000_0000000,
         &Bytes::new(&env),
     );
+}
+
+#[test]
+#[should_panic(expected = "Reentrancy lock is active")]
+fn test_flash_loan_blocks_collateral_deposit_during_receiver_callback() {
+    let (env, contract_id, admin, _borrower, token_address) = setup_flash_loan();
+    let client = LendingContractClient::new(&env, &contract_id);
+    client.whitelist_asset(&admin, &token_address);
+    let receiver = env.register(reentrant_collateral_receiver::ReentrantCollateralReceiver, ());
+    client.flash_loan(&receiver, &token_address, &1_000_0000000, &Bytes::new(&env));
 }
 
 #[test]

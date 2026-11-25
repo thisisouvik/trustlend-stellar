@@ -22,6 +22,7 @@
 
 # misc
 .DS_Store
+._*
 *.pem
 
 # debug
@@ -62,3 +63,5 @@ contracts/.deployments/
 # playwright
 playwright-report/
 test-results/
+.npm-cache*
+

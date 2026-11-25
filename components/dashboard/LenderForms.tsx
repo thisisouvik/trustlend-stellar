@@ -608,7 +608,7 @@ export function LenderForms({
   const PLATFORM_WALLET =
     platformAddress ?? process.env.NEXT_PUBLIC_PLATFORM_STELLAR_ADDRESS ?? "";
 
-  // "Add token to wallet" is a Freighter-extension-only affordance — the kit
+  // "Add token to wallet" is a Varial-extension-only affordance — the kit
   // exposes no equivalent for WalletConnect/xBull/Albedo, so a mobile wallet
   // user would only ever see it fail. Read the provider after mount: reading
   // localStorage during render would not match the server-rendered HTML.
@@ -987,24 +987,34 @@ export function LenderForms({
             type="button"
             onClick={async () => {
               try {
-                const { isConnected, addToken } = await import('@stellar/freighter-api');
+                let isConnectedFn: () => Promise<{ isConnected?: boolean; error?: unknown }>;
+                let addTokenFn: (params: { contractId: string; networkPassphrase?: string }) => Promise<{ result?: unknown; error?: unknown }>;
+                try {
+                  const varial = await import('@stellar/varial-sdk');
+                  isConnectedFn = varial.isConnected;
+                  addTokenFn = varial.addToken;
+                } catch {
+                  const freighter = await import('@stellar/freighter-api');
+                  isConnectedFn = freighter.isConnected;
+                  addTokenFn = freighter.addToken;
+                }
                 // isConnected() resolves to an object, so it is always truthy —
                 // the boolean has to be read off the `isConnected` field.
-                const connection = await isConnected();
+                const connection = await isConnectedFn();
                 if (connection.error || !connection.isConnected) {
-                  setAddTokenStatus("Freighter is not available. Unlock the extension and try again.");
+                  setAddTokenStatus("Varial is not available. Unlock the extension and try again.");
                   return;
                 }
-                // Freighter v6 replaced watchAsset(code/issuer) with
+                // Varial (formerly Freighter) replaced watchAsset(code/issuer) with
                 // addToken(contractId) for Soroban tokens.
-                const result = await addToken({
+                const result = await addTokenFn({
                   contractId: lpTokenContractId,
                   networkPassphrase: getNetworkPassphrase(),
                 });
                 setAddTokenStatus(
                   result.error
                     ? `Could not add the LP token: ${String(result.error)}`
-                    : "LP token added to Freighter.",
+                    : "LP token added to Varial.",
                 );
               } catch (e) {
                 console.error(e);

@@ -222,6 +222,8 @@ pub enum DataKey {
     LoanCount,
     BorrowerLoanCount(Address),
     BorrowerLoanAt(Address, u32),
+    /// Loan IDs whose status still encumbers the borrower's collateral.
+    ActiveLoans(Address),
     LenderLoanCount(Address),
     LenderLoanAt(Address, u32),
     Payment(u32, u32),
@@ -238,14 +240,18 @@ pub enum DataKey {
     MultisigThreshold,
     /// Whether the contract is paused
     IsPaused,
-    /// Whether a given signer has already called pause (dedup)
-    PauseSigner(Address),
+    /// Whether a signer has authorised pause in a given round (dedup)
+    PauseSigner(Address, u32),
     /// Number of unique signers who have called pause
     PauseSignerCount,
-    /// Whether a given signer has already called unpause (dedup)
-    UnpauseSigner(Address),
+    /// Whether a signer has authorised unpause in a given round (dedup)
+    UnpauseSigner(Address, u32),
     /// Number of unique signers who have called unpause
     UnpauseSignerCount,
+    /// Current pause approval round; advances each time a pause completes
+    PauseRound,
+    /// Current unpause approval round; advances each time an unpause completes
+    UnpauseRound,
     /// Flash loan fee bps
     FlashLoanFeeBps,
     /// Cooldown timestamp for rate switches
@@ -261,6 +267,8 @@ pub enum DataKey {
     PriceOracle,
     /// Aggregated oracle price samples for a collateral asset.
     OraclePriceSamples(Address),
+    /// Ledger timestamp at which the asset's current oracle price was posted.
+    OraclePriceUpdatedAt(Address),
     /// TWAP fallback price for a collateral asset.
     OracleTwapPrice(Address),
     /// Borrower Loyalty Rewards contract address
@@ -291,12 +299,16 @@ const MAX_PLATFORM_FEE_BPS: u32 = 1000;
 const DEFAULT_FLASH_LOAN_FEE_BPS: u32 = 9;
 /// Safety ceiling on the flash-loan fee (500 bps = 5 %).
 const MAX_FLASH_LOAN_FEE_BPS: u32 = 500;
+/// Oracle prices older than this are not safe for collateral valuation.
+const ORACLE_PRICE_MAX_AGE_SECONDS: u64 = 300;
 
 /// Fee for switching rate models: 0.5% of remaining debt (50 bps).
 const RATE_SWITCH_FEE_BPS: u32 = 50;
 
 /// Cooldown between rate switches: 24 hours in seconds.
 const RATE_SWITCH_COOLDOWN_SECS: u64 = 86_400;
+/// Oracle collateral prices older than this cannot be used for borrowing.
+pub const MAX_COLLATERAL_PRICE_AGE_SECS: u64 = 3_600;
 
 /// Default collateral factor for assets without explicit config: 75% LTV.
 const DEFAULT_COLLATERAL_FACTOR_BPS: u32 = 7500;
@@ -312,6 +324,9 @@ const MIN_COLLATERAL_FACTOR_BPS: u32 = 1000;
 
 /// Minimum borrow amount constraint to prevent spam/dust loans (1 XLM = 10_000_000 stroops).
 pub const MIN_BORROW_AMOUNT: i128 = 10_000_000;
+/// Loan requests must charge a non-zero, bounded protocol APR.
+pub const MIN_INTEREST_RATE_BPS: u32 = 100;
+pub const MAX_INTEREST_RATE_BPS: u32 = 5_000;
 
 /// Grace period before liquidation: 12 hours = 43,200 seconds (Issue #157)
 const GRACE_PERIOD_SECONDS: u64 = 43_200;
@@ -326,10 +341,11 @@ pub struct LendingContract;
 impl LendingContract {
     // ── Admin ─────────────────────────────────────────────────────────────────
 
-    pub fn initialize(env: Env, admin: Address) {
-        if env.storage().instance().has(&DataKey::Admin) {
-            panic!("Contract already initialised");
-        }
+    /// Soroban constructor: runs atomically as part of `stellar contract deploy`
+    /// (`-- <constructor args>`), so the contract is never live in an
+    /// uninitialised state that a third party could front-run to claim
+    /// admin rights (issue #352). There is no public `initialize`.
+    pub fn __constructor(env: Env, admin: Address) {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::LoanCount, &0u32);
         // Whitelist XLM as default collateral asset (using dummy address for now)
@@ -370,6 +386,7 @@ impl LendingContract {
         env.storage()
             .instance()
             .set(&DataKey::MultisigThreshold, &threshold);
+        Self::reset_signer_rounds(&env);
         env.storage()
             .instance()
             .set(&DataKey::MultisigAdmins, &final_admins);
@@ -398,7 +415,8 @@ impl LendingContract {
         }
 
         // Dedup: only count each signer once
-        let signer_key = DataKey::PauseSigner(caller.clone());
+        let round = Self::signer_round(&env, &DataKey::PauseRound);
+        let signer_key = DataKey::PauseSigner(caller.clone(), round);
         if env.storage().instance().has(&signer_key) {
             panic!("Signer has already authorised pause");
         }
@@ -417,10 +435,9 @@ impl LendingContract {
         let threshold: u32 = Self::get_multisig_threshold(env.clone());
         if new_count >= threshold {
             env.storage().instance().set(&DataKey::IsPaused, &true);
-            // Reset signer tracking for next pause cycle
-            env.storage()
-                .instance()
-                .set(&DataKey::PauseSignerCount, &0u32);
+            // Clear this round's approvals so the same signers can act again
+            // in the next cycle (issue #354).
+            Self::close_signer_round(&env, true);
             env.events()
                 .publish((symbol_short!("lending"), symbol_short!("paused")), ());
         }
@@ -440,7 +457,8 @@ impl LendingContract {
             panic!("Contract is not paused");
         }
 
-        let signer_key = DataKey::UnpauseSigner(caller.clone());
+        let round = Self::signer_round(&env, &DataKey::UnpauseRound);
+        let signer_key = DataKey::UnpauseSigner(caller.clone(), round);
         if env.storage().instance().has(&signer_key) {
             panic!("Signer has already authorised unpause");
         }
@@ -459,9 +477,9 @@ impl LendingContract {
         let threshold: u32 = Self::get_multisig_threshold(env.clone());
         if new_count >= threshold {
             env.storage().instance().set(&DataKey::IsPaused, &false);
-            env.storage()
-                .instance()
-                .set(&DataKey::UnpauseSignerCount, &0u32);
+            // Clear this round's approvals so the same signers can act again
+            // in the next cycle (issue #354).
+            Self::close_signer_round(&env, false);
             env.events()
                 .publish((symbol_short!("lending"), symbol_short!("unpaused")), ());
         }
@@ -507,6 +525,7 @@ impl LendingContract {
             .set(&DataKey::MultiSigAdmin, &multisig);
         let mut msig_admins = Vec::new(&env);
         msig_admins.push_back(multisig);
+        Self::reset_signer_rounds(&env);
         env.storage()
             .instance()
             .set(&DataKey::MultisigAdmins, &msig_admins);
@@ -874,12 +893,24 @@ impl LendingContract {
             .publish((symbol_short!("oracle"), symbol_short!("set")), oracle);
     }
 
+    /// Expose `set_oracle` as an alias for `set_price_oracle` so that multisig
+    /// proposals executing `AdminAction::SetOracle` against `LendingContract`
+    /// dispatch without symbol mismatch errors.
+    pub fn set_oracle(env: Env, caller: Address, oracle: Address) {
+        Self::set_price_oracle(env, caller, oracle);
+    }
+
     /// Get the authorized price oracle address.
     pub fn get_price_oracle(env: Env) -> Address {
         env.storage()
             .instance()
             .get(&DataKey::PriceOracle)
             .expect("Price oracle not configured")
+    }
+
+    /// Alias for `get_price_oracle` to align with the oracle getter pattern.
+    pub fn get_oracle(env: Env) -> Address {
+        Self::get_price_oracle(env)
     }
 
     /// Store multiple oracle price samples for an asset.
@@ -893,6 +924,11 @@ impl LendingContract {
         if prices.is_empty() {
             panic!("At least one oracle price sample is required");
         }
+        for price in prices.iter() {
+            if price <= 0 {
+                panic!("Oracle price samples must be positive");
+            }
+        }
 
         if !env
             .storage()
@@ -905,6 +941,9 @@ impl LendingContract {
         env.storage()
             .instance()
             .set(&DataKey::OraclePriceSamples(asset.clone()), &prices);
+        env.storage()
+            .instance()
+            .set(&DataKey::OraclePriceUpdatedAt(asset), &env.ledger().timestamp());
     }
 
     /// Store a TWAP fallback price for an asset.
@@ -927,6 +966,9 @@ impl LendingContract {
         env.storage()
             .instance()
             .set(&DataKey::OracleTwapPrice(asset.clone()), &price);
+        env.storage()
+            .instance()
+            .set(&DataKey::OraclePriceUpdatedAt(asset), &env.ledger().timestamp());
     }
 
     // ── Asset collateral configuration (multisig-gated) ───────────────────────
@@ -939,9 +981,7 @@ impl LendingContract {
     /// can be borrowed, in basis-points (e.g. 8000 = 80% LTV).
     /// Clamped to [MIN_COLLATERAL_FACTOR_BPS, MAX_COLLATERAL_FACTOR_BPS].
     ///
-    /// `has_price_oracle` — if true, the contract expects a price feed from
-    /// the authorized oracle; if false, the asset is valued at face value
-    /// (i.e. 1 unit = 1 USD) for borrowing power calculations.
+    /// `has_price_oracle` — must be true to use this asset as collateral.
     ///
     /// `volatility_bps` — estimated annualized volatility in bps, used in
     /// dynamic liquidation threshold calculations.
@@ -1096,9 +1136,11 @@ impl LendingContract {
     /// `amount` must be positive and not exceed the current balance for that asset.
     ///
     /// After withdrawal, checks that the borrower's remaining collateral
-    /// still covers their active loan positions. If not, the withdrawal panics.
-    /// This prevents borrowers from withdrawing collateral that would
-    /// leave their loans under-collateralized.
+    /// still covers every loan it is locked for — Pending, Approved and
+    /// Active (Issue #416). If not, the withdrawal panics. This prevents
+    /// borrowers from withdrawing collateral that would leave their loans
+    /// under-collateralized, including requests that have not activated yet.
+    /// Collateral is released once a loan is repaid, defaulted or cancelled.
     pub fn withdraw_collateral(env: Env, borrower: Address, asset: Address, amount: i128) {
         borrower.require_auth();
         Self::assert_not_paused(&env);
@@ -1145,14 +1187,18 @@ impl LendingContract {
         }
 
         // Check borrowing power constraint: after withdrawal, borrowing power
-        // must still cover all active loans.
+        // must still cover every loan the collateral is locked for — pending
+        // requests and approved loans as well as active ones. Counting only
+        // active loans let a borrower drain the vault between requesting a
+        // loan and its activation (Issue #416).
         let borrowing_power = Self::compute_borrowing_power_from_entries(&env, &new_entries);
-        let total_active_debt: i128 = Self::get_total_active_debt_of_borrower(&env, &borrower);
+        let total_encumbered_debt: i128 =
+            Self::get_total_encumbered_debt_of_borrower(&env, &borrower);
 
-        if borrowing_power < total_active_debt {
+        if borrowing_power < total_encumbered_debt {
             panic!(
-                "Withdrawal would leave loans under-collateralized: borrowing power {} < debt {}",
-                borrowing_power, total_active_debt,
+                "Withdrawal would leave pending or active loans under-collateralized: borrowing power {} < debt {}",
+                borrowing_power, total_encumbered_debt,
             );
         }
 
@@ -1228,7 +1274,16 @@ impl LendingContract {
     /// limit and claim unearned loyalty rewards.
     ///
     /// The function also checks that the borrower has sufficient borrowing
-    /// power (from multi-asset collateral) to cover the requested loan amount.
+    /// power to cover the requested loan amount. Borrowing power is computed
+    /// from the collateral actually deposited into the borrower's vault via
+    /// `deposit_collateral` (Issue #415); `request.collateral_entries` is only
+    /// a declaration and every declared amount must be backed by that vault.
+    ///
+    /// The collateral is locked for the loan from this point (Issue #416):
+    /// only borrowing power not already encumbered by the borrower's other
+    /// Pending, Approved or Active loans counts, and `withdraw_collateral`
+    /// refuses to release it until the loan is repaid, defaulted or cancelled
+    /// via `cancel_loan_request`.
     pub fn create_loan_request(env: Env, borrower: Address, request: LoanRequestInput) -> u32 {
         borrower.require_auth();
         Self::assert_not_paused(&env);
@@ -1249,6 +1304,12 @@ impl LendingContract {
         if amount < MIN_BORROW_AMOUNT {
             panic!("Loan amount below minimum borrow threshold");
         }
+        if interest_rate_bps < MIN_INTEREST_RATE_BPS {
+            panic!("Interest rate is below the protocol minimum");
+        }
+        if interest_rate_bps > MAX_INTEREST_RATE_BPS {
+            panic!("Interest rate is outside protocol bounds");
+        }
 
         let reputation: Address = env
             .storage()
@@ -1261,6 +1322,9 @@ impl LendingContract {
 
         if amount > max_loan_amount {
             panic!("Amount exceeds reputation-based limit");
+        }
+        if interest_rate_bps < MIN_INTEREST_RATE_BPS {
+            panic!("Interest rate is below the protocol minimum");
         }
         if duration_days == 0 || duration_days > 365 {
             panic!("Duration must be between 1 and 365 days");
@@ -1286,8 +1350,17 @@ impl LendingContract {
             }
         }
 
-        // Check borrowing power: total borrowing power must be >= loan amount
-        let borrowing_power = Self::compute_borrowing_power_from_entries(&env, &collateral_entries);
+        // Borrowing power comes from the borrower's on-chain vault
+        // (`DataKey::UserCollateral`), i.e. tokens actually taken into custody
+        // by `deposit_collateral` — never from the caller-supplied entries,
+        // which would let a borrower declare phantom collateral (Issue #415).
+        let vault_entries = Self::get_user_collateral_entries(env.clone(), borrower.clone());
+        let total_power = Self::compute_borrowing_power_from_entries(&env, &vault_entries);
+
+        // Collateral already locked by the borrower's other Pending, Approved
+        // or Active loans cannot back this one too (Issue #416).
+        let encumbered = Self::get_total_encumbered_debt_of_borrower(&env, &borrower);
+        let borrowing_power = total_power.saturating_sub(encumbered).max(0);
 
         if borrowing_power < amount {
             panic!(
@@ -1295,6 +1368,10 @@ impl LendingContract {
                 borrowing_power, amount
             );
         }
+
+        // The declared entries are kept for client compatibility, but each
+        // asset's declared total must be backed by the vault balance.
+        Self::assert_entries_backed_by_vault(&collateral_entries, &vault_entries);
 
         // interest = principal × rate_bps × days / (10_000 × 365)
         let interest = Self::calculate_interest(amount, interest_rate_bps, duration_days);
@@ -1362,6 +1439,7 @@ impl LendingContract {
 
         // Track per-borrower list
         Self::store_borrower_loan_id(&env, &borrower, loan_id);
+        Self::add_active_loan_id(&env, &borrower, loan_id);
 
         env.events().publish(
             (symbol_short!("loan"), symbol_short!("request")),
@@ -1401,6 +1479,37 @@ impl LendingContract {
         env.events().publish(
             (symbol_short!("loan"), symbol_short!("approved")),
             (loan_id, lender, escrow_id),
+        );
+    }
+
+    /// Borrower cancels their own loan request before it is funded, releasing
+    /// the collateral locked for it (Issue #416).
+    ///
+    /// Only Pending requests can be cancelled. An Approved loan must first be
+    /// returned to Pending by the lender (`revoke_approval`), so a lender's
+    /// escrowed commitment is never orphaned by the borrower.
+    pub fn cancel_loan_request(env: Env, borrower: Address, loan_id: u32) {
+        borrower.require_auth();
+
+        let mut loan = Self::get_loan(env.clone(), loan_id);
+        if loan.borrower != borrower {
+            panic!("Caller is not the borrower");
+        }
+        if loan.status != LoanStatus::Pending {
+            panic!("Only PENDING loan requests can be cancelled");
+        }
+
+        loan.status = LoanStatus::Cancelled;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Loan(loan_id), &loan);
+        if loan.status == LoanStatus::Cancelled {
+            Self::remove_active_loan_id(&env, &loan.borrower, loan_id);
+        }
+
+        env.events().publish(
+            (symbol_short!("loan"), symbol_short!("cancel")),
+            (loan_id, borrower),
         );
     }
 
@@ -1539,6 +1648,9 @@ impl LendingContract {
         env.storage()
             .persistent()
             .set(&DataKey::Loan(loan_id), &loan);
+        if loan.status == LoanStatus::Repaid {
+            Self::remove_active_loan_id(&env, &loan.borrower, loan_id);
+        }
         env.events().publish(
             (symbol_short!("loan"), symbol_short!("payment")),
             (loan_id, amount, loan.remaining_due, loan.status.clone()),
@@ -1568,6 +1680,7 @@ impl LendingContract {
         env.storage()
             .persistent()
             .set(&DataKey::Loan(loan_id), &loan);
+        Self::remove_active_loan_id(&env, &loan.borrower, loan_id);
 
         // Clean up grace period tracking since loan is now defaulted
         env.storage().persistent().remove(&DataKey::GracePeriodStart(loan_id));
@@ -1859,10 +1972,9 @@ impl LendingContract {
     /// Get the total active debt for a borrower across all their active loans.
     /// Used to enforce collateralization on withdrawal.
     fn get_total_active_debt_of_borrower(env: &Env, borrower: &Address) -> i128 {
-        let loan_count = Self::get_borrower_loan_count(env.clone(), borrower.clone());
+        let loans: Vec<u32> = env.storage().persistent().get(&DataKey::ActiveLoans(borrower.clone())).unwrap_or(Vec::new(env));
         let mut total_debt: i128 = 0;
-        for i in 0..loan_count {
-            let loan_id = Self::get_borrower_loan_at(env.clone(), borrower.clone(), i);
+        for loan_id in loans.iter() {
             let loan = Self::get_loan(env.clone(), loan_id);
             if loan.status == LoanStatus::Active || loan.status == LoanStatus::Approved {
                 total_debt = total_debt
@@ -1871,6 +1983,36 @@ impl LendingContract {
             }
         }
         total_debt
+    }
+
+    /// Total debt the borrower's collateral is locked for: the remaining
+    /// balance of every loan that is Pending, Approved or Active
+    /// (Issue #416). Repaid, Defaulted and Cancelled loans release their
+    /// collateral. Used to gate `withdraw_collateral` and new loan requests;
+    /// liquidation keeps using `get_total_active_debt_of_borrower`, so an
+    /// unfunded request can never make a borrower liquidatable.
+    fn get_total_encumbered_debt_of_borrower(env: &Env, borrower: &Address) -> i128 {
+        let loans: Vec<u32> = env.storage().persistent().get(&DataKey::ActiveLoans(borrower.clone())).unwrap_or(Vec::new(env));
+        let mut total_debt: i128 = 0;
+        for loan_id in loans.iter() {
+            let loan = Self::get_loan(env.clone(), loan_id);
+            if matches!(
+                loan.status,
+                LoanStatus::Pending | LoanStatus::Approved | LoanStatus::Active
+            ) {
+                total_debt = total_debt
+                    .checked_add(loan.remaining_due)
+                    .expect("Overflow summing encumbered debt");
+            }
+        }
+        total_debt
+    }
+
+    /// Debt currently locking the borrower's collateral (Pending, Approved
+    /// and Active loans). Collateral can only be withdrawn while the
+    /// remaining borrowing power stays at or above this amount.
+    pub fn get_encumbered_debt(env: Env, borrower: Address) -> i128 {
+        Self::get_total_encumbered_debt_of_borrower(&env, &borrower)
     }
 
     /// Calculate the health factor for a borrower.
@@ -1983,13 +2125,54 @@ impl LendingContract {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
+    /// Panic unless, for every asset named in `declared`, the summed declared
+    /// amount is covered by the borrower's deposited `vault` balance for that
+    /// asset. Summing per asset stops a request from listing the same
+    /// deposit several times (Issue #415).
+    fn assert_entries_backed_by_vault(
+        declared: &Vec<CollateralEntry>,
+        vault: &Vec<CollateralEntry>,
+    ) {
+        for (i, entry) in declared.iter().enumerate() {
+            // Each asset is checked once, at its first occurrence.
+            if declared
+                .iter()
+                .take(i)
+                .any(|earlier| earlier.asset == entry.asset)
+            {
+                continue;
+            }
+
+            let mut declared_total: i128 = 0;
+            for other in declared.iter() {
+                if other.asset == entry.asset {
+                    declared_total = declared_total
+                        .checked_add(other.amount)
+                        .expect("Overflow summing declared collateral");
+                }
+            }
+
+            let deposited: i128 = vault
+                .iter()
+                .find(|v| v.asset == entry.asset)
+                .map(|v| v.amount)
+                .unwrap_or(0);
+
+            if declared_total > deposited {
+                panic!(
+                    "Declared collateral exceeds deposited vault balance: {} > {}",
+                    declared_total, deposited
+                );
+            }
+        }
+    }
+
     /// Compute borrowing power from a set of collateral entries.
     ///
     /// Borrowing power = sum over entries of:
     ///   (amount * price * collateral_factor_bps) / (PRICE_PRECISION * 10_000)
     ///
-    /// Where `price` is the oracle price if configured, or PRICE_PRECISION (1.0)
-    /// if no oracle is configured.
+    /// Where `price` is a fresh oracle price.
     fn compute_borrowing_power_from_entries(env: &Env, entries: &Vec<CollateralEntry>) -> i128 {
         let mut total_power: i128 = 0;
         for entry in entries.iter() {
@@ -2021,36 +2204,38 @@ impl LendingContract {
     /// For example, if 1 XLM = $0.10 USD, the price would be:
     ///   (1 XLM in stroops = 10_000_000) * PRICE_PRECISION / 1 = 10_000_000 * 10_000_000 / 1
     ///
-    /// But for collateral valuation, we use a simpler scheme:
-    ///   - If the asset has an oracle, price is posted by the oracle
-    ///   - If not, price = PRICE_PRECISION (i.e. face value = 1.0 base unit per asset unit)
-    ///
-    /// For now, without a live oracle, all assets are valued at face value (1:1).
-    /// This still allows testing the multi-collateral framework with different
-    /// collateral factors.
     fn get_asset_price(env: &Env, asset: &Address, config: &AssetCollateralConfig) -> i128 {
-        if config.has_price_oracle {
-            let samples: Vec<i128> = env
-                .storage()
-                .instance()
-                .get(&DataKey::OraclePriceSamples(asset.clone()))
-                .unwrap_or(Vec::new(env));
-
-            if !samples.is_empty() {
-                return Self::median_price(env, &samples);
-            }
-
-            if let Some(twap_price) = env
-                .storage()
-                .instance()
-                .get::<DataKey, i128>(&DataKey::OracleTwapPrice(asset.clone()))
-            {
-                return twap_price;
-            }
+        if !config.has_price_oracle {
+            panic!("Collateral asset has no active price oracle: Collateral asset requires a configured price oracle");
         }
 
-        // No oracle or no live price data — fall back to face value.
-        PRICE_PRECISION
+        let updated_at: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::OraclePriceUpdatedAt(asset.clone()))
+            .expect("No oracle price registered for collateral asset");
+        if env.ledger().timestamp() > updated_at + ORACLE_PRICE_MAX_AGE_SECONDS {
+            panic!("Collateral oracle price is stale: Oracle price for collateral asset is stale");
+        }
+
+        let samples: Vec<i128> = env
+            .storage()
+            .instance()
+            .get(&DataKey::OraclePriceSamples(asset.clone()))
+            .unwrap_or(Vec::new(env));
+        if !samples.is_empty() {
+            return Self::median_price(env, &samples);
+        }
+
+        if let Some(twap_price) = env
+            .storage()
+            .instance()
+            .get::<DataKey, i128>(&DataKey::OracleTwapPrice(asset.clone()))
+        {
+            return twap_price;
+        }
+
+        panic!("No oracle price registered for collateral asset");
     }
 
     fn median_price(env: &Env, prices: &Vec<i128>) -> i128 {
@@ -2128,6 +2313,27 @@ impl LendingContract {
         env.storage().persistent().set(&count_key, &(count + 1));
     }
 
+    fn add_active_loan_id(env: &Env, borrower: &Address, loan_id: u32) {
+        let key = DataKey::ActiveLoans(borrower.clone());
+        let mut loans: Vec<u32> = env.storage().persistent().get(&key).unwrap_or(Vec::new(env));
+        loans.push_back(loan_id);
+        env.storage().persistent().set(&key, &loans);
+    }
+
+    fn remove_active_loan_id(env: &Env, borrower: &Address, loan_id: u32) {
+        let key = DataKey::ActiveLoans(borrower.clone());
+        let mut loans: Vec<u32> = env.storage().persistent().get(&key).unwrap_or(Vec::new(env));
+        let mut index = 0;
+        while index < loans.len() {
+            if loans.get(index) == Some(loan_id) {
+                loans.remove(index);
+                break;
+            }
+            index += 1;
+        }
+        env.storage().persistent().set(&key, &loans);
+    }
+
     fn push_loan_id_for_lender(env: &Env, lender: &Address, loan_id: u32) {
         let count_key = DataKey::LenderLoanCount(lender.clone());
         let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
@@ -2155,6 +2361,52 @@ impl LendingContract {
         if *caller != admin {
             panic!("Unauthorised: caller is not admin");
         }
+    }
+
+    // ── Pause / unpause signer rounds (issue #354) ───────────────────────────
+
+    /// Current approval round for pause (`PauseRound`) or unpause
+    /// (`UnpauseRound`). Signer approvals are keyed by round, so approvals
+    /// from a completed cycle can never block the same signers in a later one.
+    fn signer_round(env: &Env, round_key: &DataKey) -> u32 {
+        env.storage().instance().get(round_key).unwrap_or(0)
+    }
+
+    /// Close the current pause (`pause == true`) or unpause round: delete its
+    /// per-signer approvals for the current signer set, reset the counter and
+    /// advance to a fresh round. Deleting the entries keeps instance storage
+    /// from growing with every cycle; advancing the round guarantees a clean
+    /// slate even for approvals of signers no longer in the set.
+    fn close_signer_round(env: &Env, pause: bool) {
+        let (round_key, count_key) = if pause {
+            (DataKey::PauseRound, DataKey::PauseSignerCount)
+        } else {
+            (DataKey::UnpauseRound, DataKey::UnpauseSignerCount)
+        };
+        let round = Self::signer_round(env, &round_key);
+        let admins: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigAdmins)
+            .unwrap_or(Vec::new(env));
+        for admin in admins.iter() {
+            let signer_key = if pause {
+                DataKey::PauseSigner(admin, round)
+            } else {
+                DataKey::UnpauseSigner(admin, round)
+            };
+            env.storage().instance().remove(&signer_key);
+        }
+        env.storage().instance().set(&count_key, &0u32);
+        env.storage().instance().set(&round_key, &(round + 1));
+    }
+
+    /// Start fresh pause and unpause rounds. Called whenever the signer set
+    /// changes, so partial approvals from the old set neither linger as
+    /// "already authorised" nor count toward the new set's threshold.
+    fn reset_signer_rounds(env: &Env) {
+        Self::close_signer_round(env, true);
+        Self::close_signer_round(env, false);
     }
 
     fn assert_multisig_admin(env: &Env, caller: &Address) {

@@ -79,7 +79,10 @@ export async function POST(request: NextRequest) {
     // ── 3. Generate SDK token ────────────────────────────────────────────────
     const tokenResult = await generateSdkToken(applicantId!, user.id);
 
-    return NextResponse.json(tokenResult, { status: 200 });
+    return NextResponse.json(tokenResult, {
+      status: 200,
+      headers: { "Cache-Control": "no-store" },
+    });
   } catch (error) {
     if (isRedirectError(error)) throw error;
     console.error("[KYC Token] Error:", error);

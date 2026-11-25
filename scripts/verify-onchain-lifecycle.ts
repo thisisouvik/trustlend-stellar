@@ -7,7 +7,8 @@
  * Creates two throwaway testnet accounts (borrower, lender), then walks the
  * exact path the app takes, using the same server modules the API routes use:
  *
- *   1. borrower signs create_loan_request      → verifyContractInvocation + get_loan
+ *   1. borrower deposits collateral, then signs create_loan_request
+ *                                               → verifyContractInvocation + get_loan
  *   2. lender pays the borrower (classic op)    → verifyPaymentTransaction
  *   3. lender signs approve_loan(id, 0)         → verifyContractInvocation
  *   4. server signs activate_loan               → status Active
@@ -53,7 +54,7 @@ async function main() {
   const lifecycle = await import("../lib/stellar/onchain-lifecycle");
   const { verifyPaymentTransaction, PAYMENT_MEMO } = await import("../lib/stellar/verify-payment");
   const { encodeLoanRequestInput } = await import("../lib/contracts/lending");
-  const { addr } = await import("../lib/stellar/server-contract");
+  const { addr, i128 } = await import("../lib/stellar/server-contract");
   const { nativeAssetContractId } = await import("../lib/stellar/native-asset");
 
   const lendingId = lifecycle.lendingContractId();
@@ -127,7 +128,19 @@ async function main() {
   await invoke(borrower, "init_borrower", [addr(borrower.publicKey())], reputationId);
   ok("reputation profile created (tier None, 1 000 XLM limit)");
 
-  // ── 1. create_loan_request ────────────────────────────────────────────────
+  // ── 1. deposit_collateral + create_loan_request ───────────────────────────
+  // Borrowing power is read from the borrower's on-chain vault, so the
+  // declared collateral must be deposited first (Issue #415).
+  step("Borrower signs deposit_collateral (200 XLM native)");
+  const collateralAsset = nativeAssetContractId(PASSPHRASE);
+  const collateralAmount = lifecycle.xlmToStroops(200);
+  await invoke(borrower, "deposit_collateral", [
+    addr(borrower.publicKey()),
+    addr(collateralAsset),
+    i128(collateralAmount),
+  ]);
+  ok("200 XLM deposited into the lending vault");
+
   step("Borrower signs create_loan_request (100 XLM, 30 days, 200 XLM native collateral)");
   const amount = lifecycle.xlmToStroops(100);
   const request = encodeLoanRequestInput({
@@ -136,7 +149,7 @@ async function main() {
     durationDays: 30,
     interestRateBps: 1500,
     maxLoanAmountStroops: lifecycle.xlmToStroops(500),
-    collateralEntries: [{ asset: nativeAssetContractId(PASSPHRASE), amount: lifecycle.xlmToStroops(200) }],
+    collateralEntries: [{ asset: collateralAsset, amount: collateralAmount }],
     rateModel: "Fixed",
     reputationTier: "None",
   });

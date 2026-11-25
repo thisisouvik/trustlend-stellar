@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, token, Env};
+use soroban_sdk::{testutils::Address as _, token, Env, IntoVal};
 
 const REFERENCE_LOAN: i128 = 1_000_0000000; // 1_000 XLM
 const BASE_BONUS: i128 = 10_0000000; // 10 TLND (7 decimals)
@@ -10,9 +10,9 @@ fn default_config() -> ReferralConfig {
     ReferralConfig {
         base_bonus: BASE_BONUS,
         reference_loan_amount: REFERENCE_LOAN,
-        max_size_multiplier_bps: 20_000, // cap at 2x
+        max_size_multiplier_bps: 20_000,  // cap at 2x
         min_qualifying_loan: 100_0000000, // 100 XLM
-        max_referrals_per_referrer: 0,   // unlimited
+        max_referrals_per_referrer: 0,    // unlimited
     }
 }
 
@@ -34,10 +34,11 @@ fn setup_with(config: ReferralConfig, funding: i128) -> Ctx {
     let token_id = env
         .register_stellar_asset_contract_v2(admin.clone())
         .address();
-    let contract_id = env.register(ReferralRewardsContract, ());
-    let client = ReferralRewardsContractClient::new(&env, &contract_id);
 
-    client.initialize(&admin, &token_id, &lending, &config);
+    let contract_id = env.register(
+        ReferralRewardsContract,
+        (&admin, &token_id, &lending, config),
+    );
 
     if funding > 0 {
         token::StellarAssetClient::new(&env, &token_id).mint(&contract_id, &funding);
@@ -77,16 +78,36 @@ fn test_initialize_sets_state() {
     assert_eq!(c.get_total_referrals_registered(), 0);
 }
 
+/// Issue #352: initialization runs in the Soroban constructor, atomically with
+/// deployment. There is no `initialize` entrypoint left to front-run, and the
+/// constructor cannot be re-invoked on the live contract to seize admin rights.
 #[test]
-#[should_panic(expected = "already initialised")]
-fn test_double_initialize_panics() {
+fn test_constructor_initializes_and_cannot_be_reinvoked() {
+    use soroban_sdk::{IntoVal, Symbol};
     let ctx = setup();
-    client(&ctx).initialize(
-        &ctx.admin,
-        &ctx.token_id,
-        &ctx.lending,
-        &default_config(),
-    );
+    let env = ctx.env.clone();
+    let admin = ctx.admin.clone();
+    assert_eq!(client(&ctx).get_admin(), admin);
+    let attacker = Address::generate(&env);
+    let args: soroban_sdk::Vec<soroban_sdk::Val> = soroban_sdk::vec![
+        &env,
+        attacker.into_val(&env),
+        ctx.token_id.into_val(&env),
+        ctx.lending.into_val(&env),
+        default_config().into_val(&env),
+    ];
+    for name in ["initialize", "__constructor"] {
+        let res = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &ctx.contract_id,
+            &Symbol::new(&env, name),
+            args.clone(),
+        );
+        assert!(res.is_err(), "{name} must not be callable after deployment");
+    }
+    let stored: Address = env.as_contract(&ctx.contract_id, || {
+        env.storage().instance().get(&DataKey::Admin).unwrap()
+    });
+    assert_eq!(stored, admin);
 }
 
 #[test]
@@ -373,6 +394,12 @@ fn test_admin_can_withdraw_unspent() {
     let c = client(&ctx);
     let treasury = Address::generate(&ctx.env);
 
+    c.setup_multisig(
+        &ctx.admin,
+        &soroban_sdk::vec![&ctx.env, ctx.admin.clone()],
+        &1,
+    );
+
     c.withdraw_unspent(&ctx.admin, &treasury, &BASE_BONUS);
     assert_eq!(balance_of(&ctx, &treasury), BASE_BONUS);
 }
@@ -381,8 +408,14 @@ fn test_admin_can_withdraw_unspent() {
 #[should_panic(expected = "Insufficient reward balance")]
 fn test_withdraw_beyond_balance_panics() {
     let ctx = setup_with(default_config(), BASE_BONUS);
+    let c = client(&ctx);
+    c.setup_multisig(
+        &ctx.admin,
+        &soroban_sdk::vec![&ctx.env, ctx.admin.clone()],
+        &1,
+    );
     let treasury = Address::generate(&ctx.env);
-    client(&ctx).withdraw_unspent(&ctx.admin, &treasury, &(BASE_BONUS * 10));
+    c.withdraw_unspent(&ctx.admin, &treasury, &(BASE_BONUS * 10));
 }
 
 #[test]
@@ -397,7 +430,10 @@ fn test_set_lending_contract_reroutes_payout_authority() {
     c.register_referral(&referee, &referrer);
 
     // The old lending address no longer triggers payouts.
-    assert_eq!(c.claim_referral_bonus(&ctx.lending, &referee, &REFERENCE_LOAN), 0);
+    assert_eq!(
+        c.claim_referral_bonus(&ctx.lending, &referee, &REFERENCE_LOAN),
+        0
+    );
     assert_eq!(
         c.claim_referral_bonus(&new_lending, &referee, &REFERENCE_LOAN),
         BASE_BONUS
@@ -422,4 +458,280 @@ fn test_referrer_accumulates_across_referees() {
     assert_eq!(c.get_paid_referral_count(&referrer), 3);
     assert_eq!(c.get_total_bonuses_paid(), BASE_BONUS * 3);
     assert_eq!(balance_of(&ctx, &referrer), BASE_BONUS * 3);
+}
+
+// ─── Multi-Sig Governance and Pause Controls ────────────────────────────────
+
+fn setup_with_multisig() -> (Ctx, Address, Address) {
+    let ctx = setup();
+    let signer1 = Address::generate(&ctx.env);
+    let signer2 = Address::generate(&ctx.env);
+    let admins = soroban_sdk::vec![
+        &ctx.env,
+        ctx.admin.clone(),
+        signer1.clone(),
+        signer2.clone()
+    ];
+    client(&ctx).setup_multisig(&ctx.admin, &admins, &2);
+    (ctx, signer1, signer2)
+}
+
+#[test]
+#[should_panic(expected = "Multisig not configured")]
+fn test_withdraw_unspent_fails_when_multisig_not_configured() {
+    let ctx = setup();
+    let c = client(&ctx);
+    let treasury = Address::generate(&ctx.env);
+    c.withdraw_unspent(&ctx.admin, &treasury, &BASE_BONUS);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorised: caller is not a multisig admin")]
+fn test_withdraw_unspent_fails_for_non_multisig_admin() {
+    let (ctx, _signer1, _signer2) = setup_with_multisig();
+    let c = client(&ctx);
+    let stranger = Address::generate(&ctx.env);
+    let treasury = Address::generate(&ctx.env);
+    c.withdraw_unspent(&stranger, &treasury, &BASE_BONUS);
+}
+
+#[test]
+fn test_set_multisig_admin_links_and_allows_withdrawal() {
+    let ctx = setup();
+    let c = client(&ctx);
+    let multisig = Address::generate(&ctx.env);
+    let treasury = Address::generate(&ctx.env);
+
+    c.set_multisig_admin(&ctx.admin, &multisig);
+    assert_eq!(c.get_multisig_admin(), multisig);
+    let admins = c.get_multisig_admins();
+    assert_eq!(admins.len(), 1);
+    assert_eq!(admins.get(0).unwrap(), multisig);
+
+    // Linked multisig can withdraw unspent tokens
+    c.withdraw_unspent(&multisig, &treasury, &BASE_BONUS);
+    assert_eq!(balance_of(&ctx, &treasury), BASE_BONUS);
+}
+
+#[test]
+#[should_panic(expected = "Multisig admin already configured")]
+fn test_set_multisig_admin_cannot_be_reinvoked() {
+    let ctx = setup();
+    let c = client(&ctx);
+    let msig1 = Address::generate(&ctx.env);
+    let msig2 = Address::generate(&ctx.env);
+    c.set_multisig_admin(&ctx.admin, &msig1);
+    c.set_multisig_admin(&ctx.admin, &msig2);
+}
+
+#[test]
+fn test_setup_multisig_configuration_and_queries() {
+    let ctx = setup();
+    let c = client(&ctx);
+    let s1 = Address::generate(&ctx.env);
+    let s2 = Address::generate(&ctx.env);
+
+    // Admin omitted from input Vec is automatically included
+    c.setup_multisig(
+        &ctx.admin,
+        &soroban_sdk::vec![&ctx.env, s1.clone(), s2.clone()],
+        &2,
+    );
+    assert_eq!(c.get_multisig_threshold(), 2);
+    let admins = c.get_multisig_admins();
+    assert_eq!(admins.len(), 3);
+    assert!(admins.contains(&ctx.admin));
+    assert!(admins.contains(&s1));
+    assert!(admins.contains(&s2));
+    assert!(!c.is_paused());
+    assert_eq!(c.get_pause_signer_count(), 0);
+}
+
+#[test]
+#[should_panic(expected = "Threshold must be at least 1")]
+fn test_setup_multisig_zero_threshold_rejected() {
+    let ctx = setup();
+    let c = client(&ctx);
+    c.setup_multisig(
+        &ctx.admin,
+        &soroban_sdk::vec![&ctx.env, ctx.admin.clone()],
+        &0,
+    );
+}
+
+#[test]
+#[should_panic(expected = "Threshold exceeds number of admins")]
+fn test_setup_multisig_threshold_too_high_rejected() {
+    let ctx = setup();
+    let c = client(&ctx);
+    c.setup_multisig(
+        &ctx.admin,
+        &soroban_sdk::vec![&ctx.env, ctx.admin.clone()],
+        &5,
+    );
+}
+
+#[test]
+#[should_panic(expected = "Unauthorised: caller is not admin")]
+fn test_setup_multisig_non_admin_rejected() {
+    let ctx = setup();
+    let c = client(&ctx);
+    let stranger = Address::generate(&ctx.env);
+    c.setup_multisig(
+        &stranger,
+        &soroban_sdk::vec![&ctx.env, ctx.admin.clone()],
+        &1,
+    );
+}
+
+#[test]
+fn test_pause_and_unpause_threshold_workflow() {
+    let (ctx, signer1, signer2) = setup_with_multisig();
+    let c = client(&ctx);
+
+    // First signer approves pause (threshold = 2)
+    c.pause(&ctx.admin);
+    assert!(!c.is_paused());
+    assert_eq!(c.get_pause_signer_count(), 1);
+
+    // Second signer approves pause -> triggers paused state
+    c.pause(&signer1);
+    assert!(c.is_paused());
+
+    // Operations blocked while paused
+    let treasury = Address::generate(&ctx.env);
+    let withdraw_res = ctx.env.try_invoke_contract::<(), soroban_sdk::Error>(
+        &ctx.contract_id,
+        &soroban_sdk::Symbol::new(&ctx.env, "withdraw_unspent"),
+        soroban_sdk::vec![
+            &ctx.env,
+            ctx.admin.into_val(&ctx.env),
+            treasury.into_val(&ctx.env),
+            BASE_BONUS.into_val(&ctx.env),
+        ],
+    );
+    assert!(withdraw_res.is_err());
+
+    let referee = Address::generate(&ctx.env);
+    let referrer = Address::generate(&ctx.env);
+    let register_res = ctx.env.try_invoke_contract::<(), soroban_sdk::Error>(
+        &ctx.contract_id,
+        &soroban_sdk::Symbol::new(&ctx.env, "register_referral"),
+        soroban_sdk::vec![
+            &ctx.env,
+            referee.into_val(&ctx.env),
+            referrer.into_val(&ctx.env),
+        ],
+    );
+    assert!(register_res.is_err());
+
+    // claim_referral_bonus safely returns 0 when paused without panicking
+    assert_eq!(
+        c.claim_referral_bonus(&ctx.lending, &referee, &REFERENCE_LOAN),
+        0
+    );
+
+    // Unpause requires threshold (2 approvals)
+    c.unpause(&signer1);
+    assert!(c.is_paused());
+
+    c.unpause(&signer2);
+    assert!(!c.is_paused());
+
+    // Operations resume after unpause
+    c.register_referral(&referee, &referrer);
+    assert_eq!(c.get_referrer_of(&referee), Some(referrer.clone()));
+
+    assert_eq!(
+        c.claim_referral_bonus(&ctx.lending, &referee, &REFERENCE_LOAN),
+        BASE_BONUS
+    );
+
+    c.withdraw_unspent(&ctx.admin, &treasury, &BASE_BONUS);
+    assert_eq!(balance_of(&ctx, &treasury), BASE_BONUS);
+}
+
+#[test]
+#[should_panic(expected = "Signer has already authorised pause")]
+fn test_duplicate_pause_signer_rejected() {
+    let (ctx, _signer1, _signer2) = setup_with_multisig();
+    let c = client(&ctx);
+    c.pause(&ctx.admin);
+    c.pause(&ctx.admin);
+}
+
+#[test]
+#[should_panic(expected = "Signer has already authorised unpause")]
+fn test_duplicate_unpause_signer_rejected() {
+    let (ctx, signer1, _signer2) = setup_with_multisig();
+    let c = client(&ctx);
+    c.pause(&ctx.admin);
+    c.pause(&signer1);
+    assert!(c.is_paused());
+
+    c.unpause(&ctx.admin);
+    c.unpause(&ctx.admin);
+}
+
+#[test]
+#[should_panic(expected = "Contract is already paused")]
+fn test_pause_when_already_paused_rejected() {
+    let (ctx, signer1, _signer2) = setup_with_multisig();
+    let c = client(&ctx);
+    c.pause(&ctx.admin);
+    c.pause(&signer1);
+    assert!(c.is_paused());
+
+    c.pause(&ctx.admin);
+}
+
+#[test]
+#[should_panic(expected = "Contract is not paused")]
+fn test_unpause_when_not_paused_rejected() {
+    let (ctx, _signer1, _signer2) = setup_with_multisig();
+    let c = client(&ctx);
+    c.unpause(&ctx.admin);
+}
+
+#[test]
+fn test_pause_cycles_repeat_with_same_signers() {
+    let (ctx, signer1, _signer2) = setup_with_multisig();
+    let c = client(&ctx);
+
+    // Cycle 1
+    c.pause(&ctx.admin);
+    c.pause(&signer1);
+    assert!(c.is_paused());
+
+    c.unpause(&ctx.admin);
+    c.unpause(&signer1);
+    assert!(!c.is_paused());
+
+    // Cycle 2: same signers can pause again in the next round
+    c.pause(&ctx.admin);
+    assert_eq!(c.get_pause_signer_count(), 1);
+    c.pause(&signer1);
+    assert!(c.is_paused());
+}
+
+#[test]
+fn test_setup_multisig_clears_partial_approvals() {
+    let (ctx, signer1, _signer2) = setup_with_multisig();
+    let c = client(&ctx);
+
+    c.pause(&ctx.admin);
+    assert_eq!(c.get_pause_signer_count(), 1);
+
+    // Reconfiguring multisig clears partial approvals
+    c.setup_multisig(
+        &ctx.admin,
+        &soroban_sdk::vec![&ctx.env, ctx.admin.clone(), signer1.clone()],
+        &2,
+    );
+    assert_eq!(c.get_pause_signer_count(), 0);
+
+    c.pause(&ctx.admin);
+    assert!(!c.is_paused());
+    c.pause(&signer1);
+    assert!(c.is_paused());
 }

@@ -35,14 +35,14 @@ interface WalletOption {
 const WALLET_OPTIONS: WalletOption[] = [
   {
     provider: "freighter",
-    title: "Freighter",
-    description: "Use the browser extension wallet already supported by TrustLend.",
+    title: "Varial",
+    description: "Use the Varial browser extension wallet (formerly Freighter) already supported by TrustLend.",
   },
   {
     provider: "walletconnect",
     title: "WalletConnect",
     description:
-      "Scan a QR code with LOBSTR, Freighter Mobile, or any other WalletConnect v2 Stellar wallet.",
+      "Scan a QR code with LOBSTR, Varial Mobile, or any other WalletConnect v2 Stellar wallet.",
     badge: "Mobile",
   },
   {

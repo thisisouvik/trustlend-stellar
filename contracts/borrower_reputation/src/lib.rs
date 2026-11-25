@@ -1,5 +1,7 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String, Vec, BytesN};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String, Vec,
+};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -20,20 +22,29 @@ pub enum ReputationTier {
 #[derive(Clone, Eq, PartialEq)]
 #[cfg_attr(test, derive(Debug))]
 pub enum ReputationEvent {
-    TestLoanRepaid,    // +50 pts
-    LoanRepaidOnTime,  // +20 pts
-    LoanPaidEarly,     // +30 pts
-    LoanLate1Day,      // -5  pts
-    LoanLate7Days,     // -50 pts
-    LoanDefaulted,     // -100 pts
-    LateWarning,       // -50 pts (applied on Day 8 of overdue)
+    TestLoanRepaid,   // +50 pts
+    LoanRepaidOnTime, // +20 pts
+    LoanPaidEarly,    // +30 pts
+    LoanLate1Day,     // -5  pts
+    LoanLate7Days,    // -50 pts
+    LoanDefaulted,    // -100 pts
+    LateWarning,      // -50 pts (applied on Day 8 of overdue)
 }
 
 /// Bitmask flags for BorrowerProfile to pack multiple boolean flags into a single u32.
-pub const FLAG_IS_FROZEN: u32 = 1 << 0;   // Bit 0: Account is frozen
-pub const FLAG_IS_ACTIVE: u32 = 1 << 1;   // Bit 1: Account is active
+pub const FLAG_IS_FROZEN: u32 = 1 << 0; // Bit 0: Account is frozen
+pub const FLAG_IS_ACTIVE: u32 = 1 << 1; // Bit 1: Account is active
 pub const FLAG_IS_VERIFIED: u32 = 1 << 2; // Bit 2: KYC / identity verified
 pub const FLAG_ZK_UPGRADED: u32 = 1 << 3; // Bit 3: Upgraded via ZK credit proof
+
+/// Historical score checkpoint at a specific ledger sequence.
+#[contracttype]
+#[derive(Clone, Eq, PartialEq)]
+#[cfg_attr(test, derive(Debug))]
+pub struct ReputationCheckpoint {
+    pub ledger: u32,
+    pub score: i128,
+}
 
 /// Full on-chain borrower profile stored in persistent ledger storage.
 #[contracttype]
@@ -154,11 +165,19 @@ pub enum DataKey {
     MultisigAdmins,
     MultisigThreshold,
     IsPaused,
-    PauseSigner(Address),
+    /// Whether a signer has authorised pause in a given round (dedup)
+    PauseSigner(Address, u32),
     PauseSignerCount,
-    UnpauseSigner(Address),
+    /// Whether a signer has authorised unpause in a given round (dedup)
+    UnpauseSigner(Address, u32),
     UnpauseSignerCount,
+    /// Current pause approval round; advances each time a pause completes
+    PauseRound,
+    /// Current unpause approval round; advances each time an unpause completes
+    UnpauseRound,
     ZkVerifier,
+    /// Historical score checkpoints for an account (deduped by ledger sequence)
+    Checkpoints(Address),
 }
 
 // ─── Oracle constants ───────────────────────────────────────────────────────────
@@ -180,11 +199,11 @@ pub struct BorrowerReputationContract;
 impl BorrowerReputationContract {
     // ── Admin ─────────────────────────────────────────────────────────────────
 
-    /// One-time init — must be called right after deployment.
-    pub fn initialize(env: Env, admin: Address) {
-        if env.storage().instance().has(&DataKey::Admin) {
-            panic!("Contract already initialised");
-        }
+    /// Soroban constructor: runs atomically as part of `stellar contract deploy`
+    /// (`-- <constructor args>`), so the contract is never live in an
+    /// uninitialised state that a third party could front-run to claim
+    /// admin rights (issue #352). There is no public `initialize`.
+    pub fn __constructor(env: Env, admin: Address) {
         env.storage().instance().set(&DataKey::Admin, &admin);
     }
 
@@ -212,11 +231,20 @@ impl BorrowerReputationContract {
             final_admins.push_back(admin);
         }
 
-        env.storage().instance().set(&DataKey::MultisigThreshold, &threshold);
-        env.storage().instance().set(&DataKey::MultisigAdmins, &final_admins);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigThreshold, &threshold);
+        Self::reset_signer_rounds(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigAdmins, &final_admins);
         env.storage().instance().set(&DataKey::IsPaused, &false);
-        env.storage().instance().set(&DataKey::PauseSignerCount, &0u32);
-        env.storage().instance().set(&DataKey::UnpauseSignerCount, &0u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::PauseSignerCount, &0u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::UnpauseSignerCount, &0u32);
     }
 
     pub fn pause(env: Env, caller: Address) {
@@ -232,7 +260,8 @@ impl BorrowerReputationContract {
             panic!("Contract is already paused");
         }
 
-        let signer_key = DataKey::PauseSigner(caller.clone());
+        let round = Self::signer_round(&env, &DataKey::PauseRound);
+        let signer_key = DataKey::PauseSigner(caller.clone(), round);
         if env.storage().instance().has(&signer_key) {
             panic!("Signer has already authorised pause");
         }
@@ -251,11 +280,11 @@ impl BorrowerReputationContract {
         let threshold: u32 = Self::get_multisig_threshold(env.clone());
         if new_count >= threshold {
             env.storage().instance().set(&DataKey::IsPaused, &true);
-            env.storage().instance().set(&DataKey::PauseSignerCount, &0u32);
-            env.events().publish(
-                (symbol_short!("rep"), symbol_short!("paused")),
-                (),
-            );
+            // Clear this round's approvals so the same signers can act again
+            // in the next cycle (issue #354).
+            Self::close_signer_round(&env, true);
+            env.events()
+                .publish((symbol_short!("rep"), symbol_short!("paused")), ());
         }
     }
 
@@ -272,7 +301,8 @@ impl BorrowerReputationContract {
             panic!("Contract is not paused");
         }
 
-        let signer_key = DataKey::UnpauseSigner(caller.clone());
+        let round = Self::signer_round(&env, &DataKey::UnpauseRound);
+        let signer_key = DataKey::UnpauseSigner(caller.clone(), round);
         if env.storage().instance().has(&signer_key) {
             panic!("Signer has already authorised unpause");
         }
@@ -291,11 +321,11 @@ impl BorrowerReputationContract {
         let threshold: u32 = Self::get_multisig_threshold(env.clone());
         if new_count >= threshold {
             env.storage().instance().set(&DataKey::IsPaused, &false);
-            env.storage().instance().set(&DataKey::UnpauseSignerCount, &0u32);
-            env.events().publish(
-                (symbol_short!("rep"), symbol_short!("unpaused")),
-                (),
-            );
+            // Clear this round's approvals so the same signers can act again
+            // in the next cycle (issue #354).
+            Self::close_signer_round(&env, false);
+            env.events()
+                .publish((symbol_short!("rep"), symbol_short!("unpaused")), ());
         }
     }
 
@@ -344,7 +374,7 @@ impl BorrowerReputationContract {
             panic!("Profile already exists");
         }
         let profile = BorrowerProfile {
-            address: borrower,
+            address: borrower.clone(),
             reputation_score: 0,
             reputation_tier: ReputationTier::None,
             total_borrowed: 0,
@@ -356,6 +386,7 @@ impl BorrowerReputationContract {
             freeze_reason: String::from_str(&env, ""),
         };
         env.storage().persistent().set(&key, &profile);
+        Self::write_checkpoint(&env, &borrower, 0);
     }
 
     pub fn has_profile(env: Env, borrower: Address) -> bool {
@@ -379,6 +410,70 @@ impl BorrowerReputationContract {
             .get::<DataKey, BorrowerProfile>(&DataKey::BorrowerProfile(borrower))
             .map(|p| p.reputation_score)
             .unwrap_or(0)
+    }
+
+    /// Read reputation score snapshotted at a specific past ledger sequence.
+    /// Used by GovernanceContract for proposal checkpointing.
+    pub fn get_past_reputation_score(env: Env, borrower: Address, ledger: u32) -> i128 {
+        if ledger > env.ledger().sequence() {
+            panic!("Cannot query future ledger");
+        }
+        let key = DataKey::Checkpoints(borrower.clone());
+        let checkpoints: Vec<ReputationCheckpoint> = match env.storage().persistent().get(&key) {
+            Some(cps) => cps,
+            None => {
+                return Self::get_reputation_score(env, borrower);
+            }
+        };
+
+        let len = checkpoints.len();
+        if len == 0 {
+            return Self::get_reputation_score(env, borrower);
+        }
+
+        let first = checkpoints.get(0).unwrap();
+        if ledger < first.ledger {
+            return 0;
+        }
+
+        let last = checkpoints.get(len - 1).unwrap();
+        if ledger >= last.ledger {
+            return last.score;
+        }
+
+        let mut low: u32 = 0;
+        let mut high: u32 = len - 1;
+        let mut result = 0i128;
+
+        while low <= high {
+            let mid = low + (high - low) / 2;
+            let cp = checkpoints.get(mid).unwrap();
+            if cp.ledger <= ledger {
+                result = cp.score;
+                low = mid + 1;
+            } else {
+                if mid == 0 {
+                    break;
+                }
+                high = mid - 1;
+            }
+        }
+
+        result
+    }
+
+    /// Alias for `get_past_reputation_score`.
+    pub fn get_reputation_score_at_ledger(env: Env, borrower: Address, ledger: u32) -> i128 {
+        Self::get_past_reputation_score(env, borrower, ledger)
+    }
+
+    /// Return all checkpoints recorded for an account.
+    pub fn get_checkpoints(env: Env, borrower: Address) -> Vec<ReputationCheckpoint> {
+        let key = DataKey::Checkpoints(borrower);
+        env.storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(&env))
     }
 
     // ── Loan eligibility ──────────────────────────────────────────────────────
@@ -423,10 +518,15 @@ impl BorrowerReputationContract {
         if env.storage().instance().has(&DataKey::MultiSigAdmin) {
             panic!("Multisig admin already configured");
         }
-        env.storage().instance().set(&DataKey::MultiSigAdmin, &multisig);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultiSigAdmin, &multisig);
         let mut msig_admins = Vec::new(&env);
         msig_admins.push_back(multisig);
-        env.storage().instance().set(&DataKey::MultisigAdmins, &msig_admins);
+        Self::reset_signer_rounds(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigAdmins, &msig_admins);
     }
 
     pub fn get_multisig_admin(env: Env) -> Address {
@@ -520,7 +620,9 @@ impl BorrowerReputationContract {
     pub fn set_zk_verifier(env: Env, admin: Address, verifier: Address) {
         admin.require_auth();
         Self::assert_admin(&env, &admin);
-        env.storage().instance().set(&DataKey::ZkVerifier, &verifier);
+        env.storage()
+            .instance()
+            .set(&DataKey::ZkVerifier, &verifier);
         env.events()
             .publish((symbol_short!("zk_verif"), symbol_short!("set")), verifier);
     }
@@ -540,8 +642,18 @@ impl BorrowerReputationContract {
         nullifier: BytesN<32>,
     ) {
         caller.require_auth();
-        let is_admin = env.storage().instance().get::<DataKey, Address>(&DataKey::Admin).map(|a| a == caller).unwrap_or(false);
-        let is_zk_verifier = env.storage().instance().get::<DataKey, Address>(&DataKey::ZkVerifier).map(|v| v == caller).unwrap_or(false);
+        let is_admin = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::Admin)
+            .map(|a| a == caller)
+            .unwrap_or(false);
+        let is_zk_verifier = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::ZkVerifier)
+            .map(|v| v == caller)
+            .unwrap_or(false);
         if !is_admin && !is_zk_verifier {
             panic!("Unauthorised: caller is neither admin nor registered ZK verifier");
         }
@@ -582,6 +694,7 @@ impl BorrowerReputationContract {
         profile.set_zk_upgraded(true);
 
         env.storage().persistent().set(&key, &profile);
+        Self::write_checkpoint(&env, &borrower, profile.reputation_score);
 
         env.events().publish(
             (symbol_short!("zk_tier"), symbol_short!("upgrade")),
@@ -615,7 +728,12 @@ impl BorrowerReputationContract {
         }
 
         let (delta, flag_default, flag_repaid) = Self::event_info(&event);
-        let new_score = (profile.reputation_score as i32 + delta).max(0) as i128;
+        // All arithmetic in i128 (the stored width): downcasting the score to
+        // i32 would wrap scores above i32::MAX. `delta as i128` only widens.
+        let new_score = profile
+            .reputation_score
+            .saturating_add(delta as i128)
+            .max(0);
         profile.reputation_score = new_score;
         profile.reputation_tier = Self::score_to_tier(new_score);
 
@@ -627,6 +745,7 @@ impl BorrowerReputationContract {
         }
 
         env.storage().persistent().set(&key, &profile);
+        Self::write_checkpoint(&env, &borrower, new_score);
 
         env.events().publish(
             (symbol_short!("rep"), symbol_short!("event")),
@@ -680,6 +799,7 @@ impl BorrowerReputationContract {
         profile.reputation_score = 0;
         profile.reputation_tier = ReputationTier::None;
         env.storage().persistent().set(&key, &profile);
+        Self::write_checkpoint(&env, &borrower, 0);
 
         env.events().publish(
             (symbol_short!("rep"), symbol_short!("freeze")),
@@ -745,13 +865,13 @@ impl BorrowerReputationContract {
     /// Returns (points_delta, is_default_event, is_repaid_event).
     fn event_info(event: &ReputationEvent) -> (i32, bool, bool) {
         match event {
-            ReputationEvent::TestLoanRepaid   => (50,  false, true),
-            ReputationEvent::LoanRepaidOnTime => (20,  false, true),
-            ReputationEvent::LoanPaidEarly    => (30,  false, true),
-            ReputationEvent::LoanLate1Day     => (-5,  false, false),
-            ReputationEvent::LoanLate7Days    => (-50, false, false),
-            ReputationEvent::LoanDefaulted    => (-100, true, false),
-            ReputationEvent::LateWarning      => (-50, false, false),
+            ReputationEvent::TestLoanRepaid => (50, false, true),
+            ReputationEvent::LoanRepaidOnTime => (20, false, true),
+            ReputationEvent::LoanPaidEarly => (30, false, true),
+            ReputationEvent::LoanLate1Day => (-5, false, false),
+            ReputationEvent::LoanLate7Days => (-50, false, false),
+            ReputationEvent::LoanDefaulted => (-100, true, false),
+            ReputationEvent::LateWarning => (-50, false, false),
         }
     }
 
@@ -771,31 +891,31 @@ impl BorrowerReputationContract {
 
     fn tier_max_loan(tier: &ReputationTier) -> i128 {
         match tier {
-            ReputationTier::None     => 1_000_0000000,    // 1,000 XLM
-            ReputationTier::Beginner => 2_000_0000000,    // 2,000 XLM
-            ReputationTier::Silver   => 5_000_0000000,    // 5,000 XLM
-            ReputationTier::Gold     => 10_000_0000000,   // 10,000 XLM
-            ReputationTier::Platinum => 100_000_0000000,  // 100,000 XLM
+            ReputationTier::None => 1_000_0000000,       // 1,000 XLM
+            ReputationTier::Beginner => 2_000_0000000,   // 2,000 XLM
+            ReputationTier::Silver => 5_000_0000000,     // 5,000 XLM
+            ReputationTier::Gold => 10_000_0000000,      // 10,000 XLM
+            ReputationTier::Platinum => 100_000_0000000, // 100,000 XLM
         }
     }
 
     fn tier_index(tier: &ReputationTier) -> u32 {
         match tier {
-            ReputationTier::None     => 0,
+            ReputationTier::None => 0,
             ReputationTier::Beginner => 1,
-            ReputationTier::Silver   => 2,
-            ReputationTier::Gold     => 3,
+            ReputationTier::Silver => 2,
+            ReputationTier::Gold => 3,
             ReputationTier::Platinum => 4,
         }
     }
 
     fn tier_interest_rate(tier: &ReputationTier) -> u32 {
         match tier {
-            ReputationTier::None     => 1500, // 15.00 %
+            ReputationTier::None => 1500,     // 15.00 %
             ReputationTier::Beginner => 1300, // 13.00 %
-            ReputationTier::Silver   => 1200, // 12.00 %
-            ReputationTier::Gold     => 1000, // 10.00 %
-            ReputationTier::Platinum =>  800, //  8.00 %
+            ReputationTier::Silver => 1200,   // 12.00 %
+            ReputationTier::Gold => 1000,     // 10.00 %
+            ReputationTier::Platinum => 800,  //  8.00 %
         }
     }
 
@@ -854,6 +974,52 @@ impl BorrowerReputationContract {
         }
     }
 
+    // ── Pause / unpause signer rounds (issue #354) ───────────────────────────
+
+    /// Current approval round for pause (`PauseRound`) or unpause
+    /// (`UnpauseRound`). Signer approvals are keyed by round, so approvals
+    /// from a completed cycle can never block the same signers in a later one.
+    fn signer_round(env: &Env, round_key: &DataKey) -> u32 {
+        env.storage().instance().get(round_key).unwrap_or(0)
+    }
+
+    /// Close the current pause (`pause == true`) or unpause round: delete its
+    /// per-signer approvals for the current signer set, reset the counter and
+    /// advance to a fresh round. Deleting the entries keeps instance storage
+    /// from growing with every cycle; advancing the round guarantees a clean
+    /// slate even for approvals of signers no longer in the set.
+    fn close_signer_round(env: &Env, pause: bool) {
+        let (round_key, count_key) = if pause {
+            (DataKey::PauseRound, DataKey::PauseSignerCount)
+        } else {
+            (DataKey::UnpauseRound, DataKey::UnpauseSignerCount)
+        };
+        let round = Self::signer_round(env, &round_key);
+        let admins: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigAdmins)
+            .unwrap_or(Vec::new(env));
+        for admin in admins.iter() {
+            let signer_key = if pause {
+                DataKey::PauseSigner(admin, round)
+            } else {
+                DataKey::UnpauseSigner(admin, round)
+            };
+            env.storage().instance().remove(&signer_key);
+        }
+        env.storage().instance().set(&count_key, &0u32);
+        env.storage().instance().set(&round_key, &(round + 1));
+    }
+
+    /// Start fresh pause and unpause rounds. Called whenever the signer set
+    /// changes, so partial approvals from the old set neither linger as
+    /// "already authorised" nor count toward the new set's threshold.
+    fn reset_signer_rounds(env: &Env) {
+        Self::close_signer_round(env, true);
+        Self::close_signer_round(env, false);
+    }
+
     fn assert_multisig_admin(env: &Env, caller: &Address) {
         let multisig_admins: Vec<Address> = env
             .storage()
@@ -877,6 +1043,41 @@ impl BorrowerReputationContract {
         if is_paused {
             panic!("Contract is paused");
         }
+    }
+
+    /// Record a historical score checkpoint for `borrower` at current ledger sequence.
+    /// Deduplicates multiple score changes occurring in the same ledger by updating
+    /// the last checkpoint's score.
+    fn write_checkpoint(env: &Env, borrower: &Address, new_score: i128) {
+        let current_ledger = env.ledger().sequence();
+        let key = DataKey::Checkpoints(borrower.clone());
+        let mut checkpoints: Vec<ReputationCheckpoint> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+
+        let len = checkpoints.len();
+        if len > 0 {
+            let last = checkpoints.get(len - 1).unwrap();
+            if last.ledger == current_ledger {
+                checkpoints.set(
+                    len - 1,
+                    ReputationCheckpoint {
+                        ledger: current_ledger,
+                        score: new_score,
+                    },
+                );
+                env.storage().persistent().set(&key, &checkpoints);
+                return;
+            }
+        }
+
+        checkpoints.push_back(ReputationCheckpoint {
+            ledger: current_ledger,
+            score: new_score,
+        });
+        env.storage().persistent().set(&key, &checkpoints);
     }
 }
 

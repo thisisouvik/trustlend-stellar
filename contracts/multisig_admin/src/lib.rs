@@ -51,7 +51,8 @@ pub enum AdminAction {
     /// Link the DAO Governance contract on the Lending contract.
     /// Fields: `(target, governance)`.
     SetGovernance(Address, Address),
-    /// Register the authorised Credit Oracle on the Reputation contract.
+    /// Register the authorised Credit Oracle on the Reputation contract or
+    /// Price Oracle on the Lending contract.
     /// Fields: `(target, oracle)`.
     SetOracle(Address, Address),
     /// Add funds to the insurance pool on the Default-Management contract.
@@ -99,14 +100,15 @@ pub struct MultiSigAdminContract;
 impl MultiSigAdminContract {
     // ── Init ─────────────────────────────────────────────────────────────────────
 
-    /// Bootstrap the initial signer set + approval threshold. One-time only —
-    /// membership changes thereafter go through `propose`/`approve`/`execute`
-    /// (`AddSigner` / `RemoveSigner` / `SetThreshold`), same as every other
-    /// admin action this contract protects.
-    pub fn initialize(env: Env, signers: Vec<Address>, threshold: u32) {
-        if env.storage().instance().has(&DataKey::Signers) {
-            panic!("Contract already initialised");
-        }
+    /// Soroban constructor: runs atomically as part of `stellar contract deploy`
+    /// (`-- <constructor args>`), so the contract is never live in an
+    /// uninitialised state that a third party could front-run to claim
+    /// admin rights (issue #352). There is no public `initialize`.
+    ///
+    /// Bootstraps the initial signer set + approval threshold; membership
+    /// changes thereafter go through `propose`/`approve`/`execute`
+    /// (`AddSigner` / `RemoveSigner` / `SetThreshold`).
+    pub fn __constructor(env: Env, signers: Vec<Address>, threshold: u32) {
         if signers.is_empty() {
             panic!("At least one signer is required");
         }

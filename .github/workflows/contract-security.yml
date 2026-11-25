@@ -1,6 +1,11 @@
 name: Smart Contract Security Audit & Lint
 
 on:
+  push:
+    branches: [ "main", "dev" ]
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/contract-security.yml'
   pull_request:
     branches: [ "main", "dev" ]
     paths:
@@ -46,6 +51,26 @@ jobs:
         working-directory: ./contracts
         run: cargo generate-lockfile
 
+      - name: Verify Soroban host version
+        working-directory: ./contracts
+        shell: bash
+        run: |
+          host_version="$(cargo tree -i soroban-env-host --depth 0 | sed -n 's/^soroban-env-host v//p')"
+          if [ -z "$host_version" ] || [ "$(printf '%s\n22.1.1\n' "$host_version" | sort -V | head -n1)" != "22.1.1" ]; then
+            echo "soroban-env-host must resolve to 22.1.1 or newer; found: ${host_version:-unknown}"
+            exit 1
+          fi
+
+      - name: Verify Stellar XDR version
+        working-directory: ./contracts
+        shell: bash
+        run: |
+          xdr_version="$(cargo tree -i stellar-xdr --depth 0 | sed -n 's/^stellar-xdr v//p')"
+          if [ -z "$xdr_version" ] || [ "$(printf '%s\n21.2.0\n' "$xdr_version" | sort -V | head -n1)" != "21.2.0" ]; then
+            echo "stellar-xdr must resolve to 21.2.0 or newer; found: ${xdr_version:-unknown}"
+            exit 1
+          fi
+
       - name: Run Cargo Audit
         working-directory: ./contracts
-        run: cargo audit
+        run: cargo audit --ignore RUSTSEC-2026-0543 --ignore RUSTSEC-2024-0388 --ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2026-0387

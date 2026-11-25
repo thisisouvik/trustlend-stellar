@@ -3,6 +3,7 @@
  *
  * TypeScript client for the GovernanceContract — the DAO module that controls
  * the lending platform fee via reputation-weighted proposals & votes.
+ * Contract calls use the shared Stellar SDK RPC executor.
  */
 
 import {
@@ -49,6 +50,35 @@ export async function getVotingPower(
     callerAddress,
   });
   return BigInt(result as string | number);
+}
+
+/** Reputation-weighted voting power snapshotted at a specific past ledger sequence. */
+export async function getVotingPowerAt(
+  account: string,
+  ledger: number,
+  callerAddress: string
+): Promise<bigint> {
+  const result = await simulateContractCall({
+    contractId: CONTRACT_ID,
+    method: "get_voting_power_at",
+    args: [addressToScVal(account), u32ToScVal(ledger)],
+    callerAddress,
+  });
+  return BigInt(result as string | number);
+}
+
+/** Check if proposal timelock has elapsed and proposal is ready for execution. */
+export async function isTimelockExpired(
+  proposalId: number,
+  callerAddress: string
+): Promise<boolean> {
+  const result = await simulateContractCall({
+    contractId: CONTRACT_ID,
+    method: "is_timelock_expired",
+    args: [u32ToScVal(proposalId)],
+    callerAddress,
+  });
+  return result as boolean;
 }
 
 export async function getProposalCount(callerAddress: string): Promise<number> {
@@ -151,6 +181,8 @@ function decodeProposal(raw: unknown): Proposal {
     createdAt: BigInt(r.created_at as string | number),
     endAt: BigInt(r.end_at as string | number),
     status: extractEnumVariant(r.status) as ProposalStatus,
+    snapshotLedger: Number(r.snapshot_ledger ?? 0),
+    eta: BigInt((r.eta as string | number) ?? 0),
   };
 }
 
@@ -164,6 +196,7 @@ function decodeConfig(raw: unknown): GovConfig {
     quorumVotes: BigInt(r.quorum_votes as string | number),
     minProposerPower: BigInt(r.min_proposer_power as string | number),
     maxFeeBps: Number(r.max_fee_bps),
+    timelockDelaySecs: BigInt((r.timelock_delay_secs as string | number) ?? 0),
   };
 }
 

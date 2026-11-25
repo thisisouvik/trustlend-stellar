@@ -21,19 +21,15 @@ fn setup<'a>() -> World<'a> {
 
     let admin = Address::generate(&env);
 
-    let token_id = env.register(TlendTokenContract, ());
-    let token = TlendTokenContractClient::new(&env, &token_id);
-    token.initialize(
-        &admin,
-        &7,
-        &String::from_str(&env, "TrustLend"),
-        &String::from_str(&env, "TLEND"),
+    let token_id = env.register(
+        TlendTokenContract,
+        (&admin, 7_u32, String::from_str(&env, "TrustLend"), String::from_str(&env, "TLEND")),
     );
+    let token = TlendTokenContractClient::new(&env, &token_id);
     token.mint(&admin, &TOTAL_SUPPLY);
 
-    let vesting_id = env.register(TlendVestingContract, ());
+    let vesting_id = env.register(TlendVestingContract, (&admin, &token_id));
     let vesting = TlendVestingContractClient::new(&env, &vesting_id);
-    vesting.initialize(&admin, &token_id);
 
     World { env, admin, token, vesting }
 }
@@ -315,4 +311,31 @@ fn test_claim_without_schedule_panics() {
     let w = setup();
     let nobody = Address::generate(&w.env);
     w.vesting.claim(&nobody);
+}
+
+/// Issue #352: initialization runs in the Soroban constructor, atomically with
+/// deployment. There is no `initialize` entrypoint left to front-run, and the
+/// constructor cannot be re-invoked on the live contract to seize admin rights.
+#[test]
+fn test_constructor_initializes_and_cannot_be_reinvoked() {
+    use soroban_sdk::{IntoVal, Symbol};
+    let w = setup();
+    let env = w.env.clone();
+    let admin = w.admin.clone();
+    assert_eq!(w.vesting.get_admin(), admin);
+    let attacker = Address::generate(&env);
+    let args: soroban_sdk::Vec<soroban_sdk::Val> = soroban_sdk::vec![
+        &env,
+        attacker.into_val(&env),
+        w.token.address.into_val(&env),
+    ];
+    for name in ["initialize", "__constructor"] {
+        let res = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &w.vesting.address,
+            &Symbol::new(&env, name),
+            args.clone(),
+        );
+        assert!(res.is_err(), "{name} must not be callable after deployment");
+    }
+    assert_eq!(w.vesting.get_admin(), admin);
 }

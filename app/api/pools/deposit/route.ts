@@ -9,6 +9,7 @@ import { syncPoolOnchain } from "@/lib/pools/onchain";
 import { platformWalletAddress } from "@/lib/stellar/platform-wallet";
 import { PAYMENT_MEMO, verifyPaymentTransaction } from "@/lib/stellar/verify-payment";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
+import { isBoundedString } from "@/lib/http/request-validation";
 
 /**
  * POST /api/pools/deposit
@@ -53,7 +54,7 @@ export async function POST(request: NextRequest) {
       lenderAddress?: string;
     };
 
-    if (!poolId || !amount || amount <= 0 || !Number.isFinite(amount)) {
+    if (!isBoundedString(poolId, 128) || !amount || amount <= 0 || !Number.isFinite(amount)) {
       return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
     if (amount > 1_000_000) {
@@ -61,7 +62,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Require a real Stellar tx hash — no ghost deposits
-    if (!txHash || txHash.trim().length < 10) {
+    if (!isBoundedString(txHash, 128) || !isBoundedString(lenderAddress, 128)) {
       return NextResponse.json(
         { error: "A confirmed Stellar transaction hash is required" },
         { status: 400 }

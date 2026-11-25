@@ -22,6 +22,9 @@ import {
   lendingContractId,
   readOnchainLoan,
   readOnchainLoanId,
+  readUserBorrowingPower,
+  readUserCollateral,
+  readUserHealthFactor,
   recordPaymentOnchain,
   verifyContractInvocation,
   xlmToStroops,
@@ -183,6 +186,7 @@ export async function verifyOnchainLoanRequest(params: {
   borrowerWallets: string[];
   amountXlm: number;
   durationDays: number;
+  interestRateBps: number;
 }): Promise<LoanRequestCheck> {
   if (!isOnchainLifecycleRequired()) return { ok: true, metadata: {} };
 
@@ -238,8 +242,32 @@ export async function verifyOnchainLoanRequest(params: {
   if (loan.durationDays !== params.durationDays) {
     return { ok: false, status: 422, reason: "On-chain loan duration does not match the requested duration" };
   }
+  if (loan.interestRateBps !== params.interestRateBps) {
+    return { ok: false, status: 422, reason: "On-chain loan interest rate does not match the quoted APR" };
+  }
   if (loan.status !== "Pending") {
     return { ok: false, status: 409, reason: `On-chain loan is already ${loan.status}` };
+  }
+
+  // Require collateral to be deposited in custody, and verify contract-valued
+  // borrowing power against this request. The health factor covers existing
+  // active debt; pending requests are not included in the contract's total debt.
+  try {
+    const [collateral, borrowingPower, healthFactor] = await Promise.all([
+      readUserCollateral(params.walletAddress),
+      readUserBorrowingPower(params.walletAddress),
+      readUserHealthFactor(params.walletAddress),
+    ]);
+    const deposited = collateral.some((entry) => entry.amountStroops > 0n);
+    if (!deposited) return { ok: false, status: 422, reason: "Deposit collateral into the lending contract before applying" };
+    if (borrowingPower < xlmToStroops(params.amountXlm)) {
+      return { ok: false, status: 422, reason: "On-chain collateral borrowing power is insufficient for this loan" };
+    }
+    if (healthFactor < 10_000) {
+      return { ok: false, status: 422, reason: "Borrower health factor is below the required 1.0 threshold" };
+    }
+  } catch (error) {
+    return { ok: false, status: 502, reason: `Could not verify on-chain collateral: ${errorMessage(error)}` };
   }
 
   // One on-chain loan maps to exactly one row.

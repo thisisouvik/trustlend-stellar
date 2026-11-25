@@ -10,7 +10,7 @@ import { qualifyReferralForLoan } from "@/lib/referrals/qualify";
 import { PAYMENT_MEMO, verifyPaymentTransaction } from "@/lib/stellar/verify-payment";
 import { activateFundedLoanOnchain } from "@/lib/loans/onchain";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
-import { isBoundedString } from "@/lib/http/request-validation";
+import { isOnchainLifecycleRequired, readOnchainLoanId, readUserBorrowingPower, readUserCollateral, readUserHealthFactor, xlmToStroops } from "@/lib/stellar/onchain-lifecycle";
 
 /**
  * POST /api/loans/fund
@@ -119,6 +119,31 @@ export async function POST(request: NextRequest) {
 
     if (!loan) {
       return NextResponse.json({ error: "Loan not found" }, { status: 404 });
+    }
+
+    // Recheck custody at funding time: collateral can have been withdrawn
+    // after the application was accepted. Fail closed for on-chain loans.
+    if (isOnchainLifecycleRequired()) {
+      const onchainLoanId = readOnchainLoanId(loan.metadata);
+      if (!onchainLoanId) {
+        return NextResponse.json({ error: "This loan has no verified on-chain collateral record" }, { status: 409 });
+      }
+      try {
+        const [collateral, borrowingPower, healthFactor] = await Promise.all([
+          readUserCollateral(loan.borrower_wallet),
+          readUserBorrowingPower(loan.borrower_wallet),
+          readUserHealthFactor(loan.borrower_wallet),
+        ]);
+        if (!collateral.some((entry) => entry.amountStroops > 0n) || borrowingPower < xlmToStroops(loan.principal_amount)) {
+          return NextResponse.json({ error: "Borrower collateral is not sufficient or locked in the lending contract" }, { status: 409 });
+        }
+        if (healthFactor < 10_000) {
+          return NextResponse.json({ error: "Borrower health factor is below the required threshold" }, { status: 409 });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return NextResponse.json({ error: `Could not verify on-chain collateral: ${message}` }, { status: 502 });
+      }
     }
 
     const fundableStatuses = ["requested", "approved"];

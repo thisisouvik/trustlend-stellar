@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { enforceRouteRateLimit } from "@/lib/rate-limit";
 import { and, eq, sql } from "drizzle-orm";
-import { getDb } from "@/lib/db/client";
+import { getDb, getPooledDb } from "@/lib/db/client";
 import { ledgerTransactions, loanRepayments, loans, profiles, reputationEvents } from "@/lib/db/schema";
 import { getLoanLenders } from "@/lib/loans/lenders";
 import { splitRepaymentAcrossLenders } from "@/lib/loans/funding";
@@ -49,6 +49,8 @@ export async function POST(request: NextRequest) {
     if (!db) {
       return NextResponse.json({ error: "Database unavailable" }, { status: 500 });
     }
+    const txDb = getPooledDb();
+    if (!txDb) return NextResponse.json({ error: "Transactional database unavailable" }, { status: 503 });
 
     // Double-check borrower & loan
     const [loanRow] = await db
@@ -153,15 +155,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create repayment record in DB
-    const [repayment] = await db
-      .insert(loanRepayments)
-      .values({ loanId, payerId: user.id, amount: String(amount), txRef: txHash })
-      .returning();
-
-    // Calculate updated balances
-    const newRepaidAmount = (loan.repaid_amount || 0) + amount;
-    
     // Total due calculation matches preflight
     const principal    = Number(loan.principal_amount ?? 0);
     const durationDays = Number(loan.duration_days ?? 30);
@@ -180,21 +173,58 @@ export async function POST(request: NextRequest) {
     const platformFee  = resolvedFee.feeAmount;
     const totalDue     = principal + totalInterest + platformFee;
 
-    let newStatus = loan.status === "funded" ? "active" : loan.status;
-    // adding a small tolerance for floating point rounding issues
-    if (newRepaidAmount >= totalDue - 0.0001) {
-      newStatus = "repaid";
-    } else if (newStatus !== "active") {
-      newStatus = "active";
+    // Lock and reread the authoritative row after Horizon verification.
+    // Different valid payment transactions racing for the same loan therefore
+    // cannot both apply against the same repaid balance.
+    let repayment: typeof loanRepayments.$inferSelect;
+    let newRepaidAmount = 0;
+    let newStatus = "active";
+    try {
+      const result = await txDb.transaction(async (tx) => {
+        const [lockedLoan] = await tx.select({
+          status: loans.status,
+          repaidAmount: loans.repaidAmount,
+          principalAmount: loans.principalAmount,
+          aprBps: loans.aprBps,
+          durationDays: loans.durationDays,
+        }).from(loans).where(and(eq(loans.id, loanId), eq(loans.borrowerId, user.id))).for("update").limit(1);
+        if (!lockedLoan) throw new Error("Loan not found");
+        if (lockedLoan.status === "repaid" || lockedLoan.status === "defaulted") throw new Error("Loan is no longer repayable");
+        const lockedPrincipal = Number(lockedLoan.principalAmount);
+        const lockedInterest = lockedPrincipal * (Number(lockedLoan.aprBps ?? 0) / 10000) * (Number(lockedLoan.durationDays ?? 30) / 365);
+        const lockedFeeSetting = await getPlatformFeeBps(tx as unknown as typeof db);
+        const lockedFee = resolveLoanFeeBps({ principal: lockedPrincipal, loanMetadata: loan.metadata, activeSetting: lockedFeeSetting }).feeAmount;
+        const due = lockedPrincipal + lockedInterest + lockedFee;
+        const updatedRepaid = Number(lockedLoan.repaidAmount ?? 0) + amount;
+        if (updatedRepaid > due + 0.0001) throw new Error("Repayment exceeds the remaining loan balance");
+        const status = updatedRepaid >= due - 0.0001 ? "repaid" : "active";
+        const [repayRow] = await tx.insert(loanRepayments).values({ loanId, payerId: user.id, amount: String(amount), txRef: txHash }).returning();
+        await tx.update(loans).set({ repaidAmount: String(updatedRepaid), status: status as typeof loans.$inferInsert.status }).where(eq(loans.id, loanId));
+        await tx.insert(ledgerTransactions).values({
+          userId: user.id, category: "loan_repay", amount: String(amount), currency: "XLM", status: "confirmed",
+          refType: "loan_repay", refId: repayRow.id,
+          metadata: { txHash, borrowerAddress: verification.source, verifiedLedger: verification.ledger, lenderAddress, lenderUserId,
+            lenderPayouts: lenderPayouts.map((entry) => ({ lenderUserId: entry.lenderId, address: entry.address, share: +entry.share.toFixed(7), payout: entry.payout })),
+            loanId, repaymentId: repayRow.id, principalAmount: lockedPrincipal, repaidSoFar: updatedRepaid, repaidAt: new Date().toISOString(),
+            platformFeeBps: resolvedFee.feeBps, platformFeeAmount: lockedFee, platformFeeSource: resolvedFee.source, platformFeeVersion: resolvedFee.version },
+        });
+        await tx.insert(reputationEvents).values({ userId: user.id, sourceType: "loan_repayment", sourceId: loanId,
+          pointsDelta: status === "repaid" ? 20 : 5, reason: `On-chain repayment of ${amount.toFixed(2)} XLM` });
+        return { repayment: repayRow, repaid: updatedRepaid, status };
+      });
+      repayment = result.repayment;
+      newRepaidAmount = result.repaid;
+      newStatus = result.status;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("idx_loan_repayments_tx_ref") || message.includes("duplicate key value")) {
+        return NextResponse.json({ error: "This transaction hash has already been recorded" }, { status: 409 });
+      }
+      if (message.includes("no longer repayable") || message.includes("exceeds the remaining")) {
+        return NextResponse.json({ error: message }, { status: 409 });
+      }
+      throw error;
     }
-
-    await db
-      .update(loans)
-      .set({
-        repaidAmount: String(newRepaidAmount),
-        status: newStatus as typeof loans.$inferInsert.status,
-      })
-      .where(eq(loans.id, loanId));
 
     // ── Mirror the repayment to the LendingContract ──────────────────────────
     const onchain = await recordRepaymentOnchain({
@@ -202,53 +232,6 @@ export async function POST(request: NextRequest) {
       loanId,
       loanMetadata: loan.metadata,
       amountXlm: amount,
-    });
-
-    // Record on Ledger
-    await db.insert(ledgerTransactions).values({
-      userId: user.id, // the borrower
-      category: "loan_repay",
-      amount: String(amount),
-      currency: "XLM",
-      status: "confirmed",
-      refType: "loan_repay",
-      refId: repayment.id, // link to the repayment record
-      metadata: {
-        txHash,
-        borrowerAddress: verification.source,
-        verifiedLedger: verification.ledger,
-        lenderAddress,
-        lenderUserId,
-        // Full pro-rata breakdown so each lender's share of this repayment is
-        // auditable after the fact (Issue #269).
-        lenderPayouts: lenderPayouts.map((entry) => ({
-          lenderUserId: entry.lenderId,
-          address: entry.address,
-          share: +entry.share.toFixed(7),
-          payout: entry.payout,
-        })),
-        loanId,
-        repaymentId: repayment.id,
-        principalAmount: loan.principal_amount,
-        repaidSoFar: newRepaidAmount,
-        repaidAt: new Date().toISOString(),
-        // Which fee was charged and where it came from, so a borrower dispute
-        // can be settled from the ledger alone (issue #324).
-        platformFeeBps: resolvedFee.feeBps,
-        platformFeeAmount: platformFee,
-        platformFeeSource: resolvedFee.source,
-        platformFeeVersion: resolvedFee.version,
-      },
-    });
-
-    // Add reputation points
-    const repayPoints = newStatus === "repaid" ? 20 : 5;
-    await db.insert(reputationEvents).values({
-      userId: user.id,
-      sourceType: "loan_repayment",
-      sourceId: loanId,
-      pointsDelta: repayPoints,
-      reason: `On-chain repayment of ${amount.toFixed(2)} XLM`,
     });
 
     // Notifications

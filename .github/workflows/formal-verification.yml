@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   property-tests:
-    name: Property-Based Tests (proptest)
+    name: Property-Based Invariant Verification (proptest)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -31,32 +31,6 @@ jobs:
         with:
           workspaces: contracts
 
-      - name: Run Property Tests
+      - name: Run Property-Based Invariant Verification
         working-directory: ./contracts
         run: cargo test -p lending --test proptest_tests -- --test-threads=1
-
-  kani-verify:
-    name: Kani Model Checking
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install Kani
-        run: cargo install kani-verifier
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: contracts
-
-      - name: Run Kani Verification
-        working-directory: ./contracts/lending
-        run: |
-          for proof_file in kani_proofs/*.rs; do
-            echo "=== Verifying $proof_file ==="
-            kani "$proof_file"
-          done

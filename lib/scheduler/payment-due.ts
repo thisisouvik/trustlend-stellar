@@ -158,12 +158,23 @@ export interface RunResult {
   succeeded: number;
   failed: number;
   errors: string[];
+  aborted?: boolean;
+  abortReason?: string;
+  remaining?: number;
+}
+
+export interface PaymentDueSchedulerOptions {
+  signal?: AbortSignal;
+  onProgress?: (progress: RunResult) => Promise<void> | void;
 }
 
 /**
  * Main scheduler entrypoint. Queries due loans and delivers webhook notifications.
+ * Respects deadline AbortSignal to gracefully flush and report partial batch progress.
  */
-export async function runPaymentDueScheduler(): Promise<RunResult> {
+export async function runPaymentDueScheduler(
+  options?: PaymentDueSchedulerOptions,
+): Promise<RunResult> {
   const webhookUrl = process.env.WEBHOOK_NOTIFICATION_URL;
   const emailEnabled = isResendConfigured();
   if (!webhookUrl && !emailEnabled) {
@@ -172,14 +183,27 @@ export async function runPaymentDueScheduler(): Promise<RunResult> {
 
   const dueLoans = webhookUrl ? await queryDueLoans() : [];
   const overdueLoans = emailEnabled ? await queryOverdueEmailLoans() : [];
+  const totalCount = dueLoans.length + overdueLoans.length;
   const result: RunResult = {
-    processed: dueLoans.length + overdueLoans.length,
+    processed: 0,
     succeeded: 0,
     failed: 0,
     errors: [],
   };
 
-  for (const loan of dueLoans) {
+  for (let i = 0; i < dueLoans.length; i++) {
+    if (options?.signal?.aborted) {
+      result.aborted = true;
+      result.abortReason = "Execution deadline reached; safely aborted payment-due notification batch";
+      result.remaining = (dueLoans.length - i) + overdueLoans.length;
+      console.warn(
+        `[payment-due] Aborted before loan ${dueLoans[i].id}. Remaining loans: ${result.remaining}`,
+      );
+      break;
+    }
+
+    const loan = dueLoans[i];
+    result.processed++;
     try {
       await sendWebhookNotification(loan, webhookUrl!);
       await markLoanNotified(loan.id);
@@ -192,25 +216,47 @@ export async function runPaymentDueScheduler(): Promise<RunResult> {
       result.errors.push(`loan ${loan.id}: ${msg}`);
       console.error(`[payment-due] Failed to notify loan ${loan.id}:`, msg);
     }
+
+    if (options?.onProgress) {
+      await options.onProgress(result);
+    }
   }
 
-  for (const loan of overdueLoans) {
-    try {
-      const outstandingAmount = loan.principal_amount - loan.repaid_amount;
-      await sendPaymentOverdueEmail({
-        userId: loan.borrower_id,
-        loanId: loan.id,
-        dueAt: loan.due_at,
-        amount: outstandingAmount > 0 ? outstandingAmount : loan.principal_amount,
-      });
-      await markLoanOverdueEmailed(loan.id);
-      result.succeeded++;
-      console.log(`[payment-due] Sent overdue email for loan ${loan.id}`);
-    } catch (err) {
-      result.failed++;
-      const msg = err instanceof Error ? err.message : String(err);
-      result.errors.push(`loan ${loan.id}: ${msg}`);
-      console.error(`[payment-due] Failed overdue email for loan ${loan.id}:`, msg);
+  if (!result.aborted) {
+    for (let j = 0; j < overdueLoans.length; j++) {
+      if (options?.signal?.aborted) {
+        result.aborted = true;
+        result.abortReason = "Execution deadline reached; safely aborted payment-due overdue email batch";
+        result.remaining = overdueLoans.length - j;
+        console.warn(
+          `[payment-due] Aborted before overdue loan ${overdueLoans[j].id}. Remaining overdue: ${result.remaining}`,
+        );
+        break;
+      }
+
+      const loan = overdueLoans[j];
+      result.processed++;
+      try {
+        const outstandingAmount = loan.principal_amount - loan.repaid_amount;
+        await sendPaymentOverdueEmail({
+          userId: loan.borrower_id,
+          loanId: loan.id,
+          dueAt: loan.due_at,
+          amount: outstandingAmount > 0 ? outstandingAmount : loan.principal_amount,
+        });
+        await markLoanOverdueEmailed(loan.id);
+        result.succeeded++;
+        console.log(`[payment-due] Sent overdue email for loan ${loan.id}`);
+      } catch (err) {
+        result.failed++;
+        const msg = err instanceof Error ? err.message : String(err);
+        result.errors.push(`loan ${loan.id}: ${msg}`);
+        console.error(`[payment-due] Failed overdue email for loan ${loan.id}:`, msg);
+      }
+
+      if (options?.onProgress) {
+        await options.onProgress(result);
+      }
     }
   }
 

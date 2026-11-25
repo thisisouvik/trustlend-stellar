@@ -19,6 +19,9 @@ const eslintConfig = defineConfig([
   // Allow intentionally unused variables when prefixed with underscore (standard TS convention)
   {
     rules: {
+      "react-hooks/set-state-in-effect": "warn",
+      "react-hooks/purity": "warn",
+      "react-hooks/preserve-manual-memoization": "warn",
       "@typescript-eslint/no-unused-vars": [
         "warn",
         {

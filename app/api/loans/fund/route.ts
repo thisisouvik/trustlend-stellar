@@ -10,6 +10,7 @@ import { qualifyReferralForLoan } from "@/lib/referrals/qualify";
 import { PAYMENT_MEMO, verifyPaymentTransaction } from "@/lib/stellar/verify-payment";
 import { activateFundedLoanOnchain } from "@/lib/loans/onchain";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
+import { isOnchainLifecycleRequired, readOnchainLoanId, readUserBorrowingPower, readUserCollateral, readUserHealthFactor, xlmToStroops } from "@/lib/stellar/onchain-lifecycle";
 
 /**
  * POST /api/loans/fund
@@ -55,7 +56,7 @@ export async function POST(request: NextRequest) {
       approveTxHash?: string;
     };
 
-    if (!loanId) {
+    if (!isBoundedString(loanId, 128)) {
       return NextResponse.json({ error: "loanId is required" }, { status: 400 });
     }
     if (!txHash || txHash.trim().length < 10) {
@@ -66,6 +67,9 @@ export async function POST(request: NextRequest) {
     }
 
     const normalizedTxHash = txHash.trim();
+    if (!isBoundedString(normalizedTxHash, 128) || !isBoundedString(lenderAddress, 128)) {
+      return NextResponse.json({ error: "Invalid funding request" }, { status: 400 });
+    }
 
     // ── Replay guard ─────────────────────────────────────────────────────────
     // Dedupe on the transaction hash, not on the loan: a loan may legitimately
@@ -115,6 +119,31 @@ export async function POST(request: NextRequest) {
 
     if (!loan) {
       return NextResponse.json({ error: "Loan not found" }, { status: 404 });
+    }
+
+    // Recheck custody at funding time: collateral can have been withdrawn
+    // after the application was accepted. Fail closed for on-chain loans.
+    if (isOnchainLifecycleRequired()) {
+      const onchainLoanId = readOnchainLoanId(loan.metadata);
+      if (!onchainLoanId) {
+        return NextResponse.json({ error: "This loan has no verified on-chain collateral record" }, { status: 409 });
+      }
+      try {
+        const [collateral, borrowingPower, healthFactor] = await Promise.all([
+          readUserCollateral(loan.borrower_wallet),
+          readUserBorrowingPower(loan.borrower_wallet),
+          readUserHealthFactor(loan.borrower_wallet),
+        ]);
+        if (!collateral.some((entry) => entry.amountStroops > 0n) || borrowingPower < xlmToStroops(loan.principal_amount)) {
+          return NextResponse.json({ error: "Borrower collateral is not sufficient or locked in the lending contract" }, { status: 409 });
+        }
+        if (healthFactor < 10_000) {
+          return NextResponse.json({ error: "Borrower health factor is below the required threshold" }, { status: 409 });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return NextResponse.json({ error: `Could not verify on-chain collateral: ${message}` }, { status: 502 });
+      }
     }
 
     const fundableStatuses = ["requested", "approved"];
@@ -320,7 +349,8 @@ export async function POST(request: NextRequest) {
 
       // ── Referral bonus (Issue #266) ──
       // The loan is now Active, which is what qualifies the borrower's
-      // referrer. The XLM payout itself is made on-chain by the lending
+      // referrer. That association was immutably claimed before qualification.
+      // The XLM payout itself is made on-chain by the lending
       // contract during activate_loan; this mirrors it for the dashboard.
       const referral = await qualifyReferralForLoan({
         db,

@@ -5,6 +5,7 @@ import { profiles, reputationEvents, reputationSnapshots } from "@/lib/db/schema
 import { enforceRouteRateLimit } from "@/lib/rate-limit";
 import { TIER_INTEREST_BPS, TIER_MAX_LOAN } from "@/types/contracts";
 import { offchainScoreToTier, STANDARD_BASE_APR_BPS } from "@/lib/reputation/scoring";
+import { isValidStellarAddress } from "@/lib/http/request-validation";
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,8 +15,8 @@ export async function GET(request: NextRequest) {
     const { searchParams } = request.nextUrl;
     const address = searchParams.get("address")?.trim();
 
-    if (!address) {
-      return NextResponse.json({ error: "wallet address is required" }, { status: 400 });
+    if (!isValidStellarAddress(address)) {
+      return NextResponse.json({ error: "A valid wallet address is required" }, { status: 400 });
     }
 
     const db = getDb();

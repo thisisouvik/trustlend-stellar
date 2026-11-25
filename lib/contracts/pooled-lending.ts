@@ -1,3 +1,6 @@
+/**
+ * Pooled lending facade backed by the shared Stellar SDK RPC executor.
+ */
 import type { xdr } from "@stellar/stellar-sdk";
 import {
   simulateContractCall,

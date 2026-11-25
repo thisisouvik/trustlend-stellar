@@ -29,6 +29,20 @@
       "when": 1790000000000,
       "tag": "0003_interest_rate_configs",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792000000000,
+      "tag": "0004_withdrawal_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795521600000,
+      "tag": "0005_referral_claim_atomicity",
+      "breakpoints": true
     }
   ]
 }

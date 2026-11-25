@@ -16,6 +16,10 @@ use soroban_sdk::{
 #[cfg(test)]
 mod test;
 
+/// Maximum total supply of TLEND tokens (100,000,000 TLEND with 7 decimals = 1,000,000,000,000,000 raw units).
+pub const MAX_TOTAL_SUPPLY: i128 = 1_000_000_000_000_000;
+pub const MAX_SUPPLY: i128 = MAX_TOTAL_SUPPLY;
+
 // ─── Types & Storage ─────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -45,11 +49,13 @@ pub struct TlendTokenContract;
 
 #[contractimpl]
 impl TlendTokenContract {
-    /// One-time setup. `decimals`/`name`/`symbol` are immutable token metadata.
-    pub fn initialize(env: Env, admin: Address, decimals: u32, name: String, symbol: String) {
-        if env.storage().instance().has(&DataKey::Admin) {
-            panic!("TLEND already initialised");
-        }
+    /// Soroban constructor: runs atomically as part of `stellar contract deploy`
+    /// (`-- <constructor args>`), so the contract is never live in an
+    /// uninitialised state that a third party could front-run to claim
+    /// admin rights (issue #352). There is no public `initialize`.
+    ///
+    /// `decimals`/`name`/`symbol` are immutable token metadata.
+    pub fn __constructor(env: Env, admin: Address, decimals: u32, name: String, symbol: String) {
         if decimals > 18 {
             panic!("Decimals must be <= 18");
         }
@@ -72,21 +78,36 @@ impl TlendTokenContract {
     }
 
     pub fn total_supply(env: Env) -> i128 {
-        env.storage().instance().get(&DataKey::TotalSupply).unwrap_or(0)
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalSupply)
+            .unwrap_or(0)
+    }
+
+    pub fn max_supply(_env: Env) -> i128 {
+        MAX_TOTAL_SUPPLY
     }
 
     // ── Internal helpers ─────────────────────────────────────────────────────
 
     fn read_admin(env: &Env) -> Address {
-        env.storage().instance().get(&DataKey::Admin).expect("TLEND not initialised")
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("TLEND not initialised")
     }
 
     fn read_balance(env: &Env, id: &Address) -> i128 {
-        env.storage().persistent().get(&DataKey::Balance(id.clone())).unwrap_or(0)
+        env.storage()
+            .persistent()
+            .get(&DataKey::Balance(id.clone()))
+            .unwrap_or(0)
     }
 
     fn write_balance(env: &Env, id: &Address, amount: i128) {
-        env.storage().persistent().set(&DataKey::Balance(id.clone()), &amount);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Balance(id.clone()), &amount);
     }
 
     fn spend_balance(env: &Env, id: &Address, amount: i128) {
@@ -106,7 +127,10 @@ impl TlendTokenContract {
         let key = DataKey::Allowance(from.clone(), spender.clone());
         match env.storage().temporary().get::<_, AllowanceValue>(&key) {
             Some(allowance) if allowance.expiration_ledger >= env.ledger().sequence() => allowance,
-            _ => AllowanceValue { amount: 0, expiration_ledger: 0 },
+            _ => AllowanceValue {
+                amount: 0,
+                expiration_ledger: 0,
+            },
         }
     }
 
@@ -121,9 +145,13 @@ impl TlendTokenContract {
             panic!("Expiration ledger is in the past");
         }
         let key = DataKey::Allowance(from.clone(), spender.clone());
-        env.storage()
-            .temporary()
-            .set(&key, &AllowanceValue { amount, expiration_ledger });
+        env.storage().temporary().set(
+            &key,
+            &AllowanceValue {
+                amount,
+                expiration_ledger,
+            },
+        );
     }
 
     fn spend_allowance(env: &Env, from: &Address, spender: &Address, amount: i128) {
@@ -215,9 +243,10 @@ impl token::TokenInterface for TlendTokenContract {
 
         Self::spend_balance(&env, &from, amount);
         let supply = Self::total_supply(env.clone());
-        env.storage().instance().set(&DataKey::TotalSupply, &(supply - amount));
-        env.events()
-            .publish((symbol_short!("burn"), from), amount);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalSupply, &(supply - amount));
+        env.events().publish((symbol_short!("burn"), from), amount);
     }
 
     fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
@@ -228,21 +257,31 @@ impl token::TokenInterface for TlendTokenContract {
         Self::spend_allowance(&env, &from, &spender, amount);
         Self::spend_balance(&env, &from, amount);
         let supply = Self::total_supply(env.clone());
-        env.storage().instance().set(&DataKey::TotalSupply, &(supply - amount));
-        env.events()
-            .publish((symbol_short!("burn"), from), amount);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalSupply, &(supply - amount));
+        env.events().publish((symbol_short!("burn"), from), amount);
     }
 
     fn decimals(env: Env) -> u32 {
-        env.storage().instance().get(&DataKey::Decimals).expect("TLEND not initialised")
+        env.storage()
+            .instance()
+            .get(&DataKey::Decimals)
+            .expect("TLEND not initialised")
     }
 
     fn name(env: Env) -> String {
-        env.storage().instance().get(&DataKey::Name).expect("TLEND not initialised")
+        env.storage()
+            .instance()
+            .get(&DataKey::Name)
+            .expect("TLEND not initialised")
     }
 
     fn symbol(env: Env) -> String {
-        env.storage().instance().get(&DataKey::Symbol).expect("TLEND not initialised")
+        env.storage()
+            .instance()
+            .get(&DataKey::Symbol)
+            .expect("TLEND not initialised")
     }
 }
 
@@ -287,9 +326,16 @@ impl token::StellarAssetInterface for TlendTokenContract {
         Self::check_non_negative_amount(amount);
         Self::check_authorized(&env, &to);
 
-        Self::receive_balance(&env, &to, amount);
         let supply = Self::total_supply(env.clone());
-        env.storage().instance().set(&DataKey::TotalSupply, &(supply + amount));
+        let new_supply = supply.checked_add(amount).expect("Total supply overflow");
+        if new_supply > MAX_TOTAL_SUPPLY {
+            panic!("Total supply exceeds maximum cap");
+        }
+
+        Self::receive_balance(&env, &to, amount);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalSupply, &new_supply);
         env.events()
             .publish((symbol_short!("mint"), admin, to), amount);
     }
@@ -301,7 +347,9 @@ impl token::StellarAssetInterface for TlendTokenContract {
 
         Self::spend_balance(&env, &from, amount);
         let supply = Self::total_supply(env.clone());
-        env.storage().instance().set(&DataKey::TotalSupply, &(supply - amount));
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalSupply, &(supply - amount));
         env.events()
             .publish((symbol_short!("clawback"), admin, from), amount);
     }

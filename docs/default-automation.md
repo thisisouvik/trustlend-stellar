@@ -1,5 +1,7 @@
 # Automated Default-Management & Insurance Payouts
 
+> Soroban contract actions use the application's centralized Stellar SDK RPC transport; automation does not depend on Horizon account lookups.
+
 > Implements issue **#23 — [Backend] Automate the Default Management insurance payouts**
 
 Default handling no longer needs a human admin. A secure, authenticated serverless
@@ -33,7 +35,8 @@ Vercel Cron (02:00 UTC)  ──Bearer CRON_SECRET──►  /api/cron/default-ma
         │     • default.record_default(admin, loanId, borrower, amount, daysOverdue)
         │     • DB: status=defaulted, defaulted_at, metadata.defaulted_onchain_at
         └─ daysOverdue ≥ INSURANCE_PAYOUT_DAYS and not yet paid:
-              • default.trigger_insurance_payout(admin, loanId, lender, amount)
+              • multisig.propose(admin, TriggerInsurancePayout(default, loanId, lender, amount))
+                (signers approve + execute → default.trigger_insurance_payout)
               • DB: metadata.insurance_paid_at
 ```
 
@@ -48,9 +51,12 @@ Vercel Cron (02:00 UTC)  ──Bearer CRON_SECRET──►  /api/cron/default-ma
 - **Signing key isolation:** contract calls are signed server-side with
   `ADMIN_SECRET_KEY`, read only inside [lib/stellar/server-contract.ts](../lib/stellar/server-contract.ts)
   (never `NEXT_PUBLIC_`, never sent to the browser).
-- **On-chain authorization:** `mark_defaulted`, `record_default`, and
-  `trigger_insurance_payout` all `require_auth()` the admin and assert
-  `caller == admin`, so a leaked endpoint alone cannot move funds without the key.
+- **On-chain authorization:** `mark_defaulted` and `record_default`
+  `require_auth()` the admin and assert `caller == admin`, so a leaked endpoint
+  alone cannot act without the key. `trigger_insurance_payout` is stricter: once
+  the MultiSigAdmin contract is linked, only that contract can call it
+  (issue #353), so even the admin key can only *propose* a payout — M-of-N
+  signers must approve before the insurance fund moves.
 
 ## 4. Ledger-time check (Task 2)
 

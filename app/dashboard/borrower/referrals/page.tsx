@@ -14,7 +14,7 @@ export default async function BorrowerReferralsPage() {
     <WorkspaceFrame
       roleLabel="Borrower"
       heading="Refer a friend"
-      description="Share your invite link and earn a TLND bonus each time someone you invited takes out their first loan."
+      description="Share your invite link and earn a TLND bonus each time someone you invited takes out their first loan. Each invite can be attributed only once."
       email={user.email ?? null}
       userName={String(user.fullName ?? "")}
       metrics={[]}

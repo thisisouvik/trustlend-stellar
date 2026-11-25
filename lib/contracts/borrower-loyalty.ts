@@ -2,6 +2,7 @@
  * lib/contracts/borrower-loyalty.ts
  *
  * TypeScript client for the BorrowerLoyaltyContract. Read functions run as
+ * simulations through the shared Stellar SDK RPC executor.
  * simulations; writes are signed by the connected wallet.
  */
 

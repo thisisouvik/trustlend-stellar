@@ -12,6 +12,8 @@ fee can be changed **only** through a passed vote — there is no admin override
 
 ## 1. Architecture
 
+> Governance contract reads and writes use the centralized Stellar SDK RPC transport.
+
 ```
                       reputation-weighted voting power
    ┌────────────────────────┐  get_reputation_score(addr)  ┌────────────────────────┐
@@ -51,28 +53,35 @@ Voting power = the caller's **reputation score** read from the reputation contra
 
 | Function | Auth | Purpose |
 |---|---|---|
-| `initialize(admin, lending, reputation, voting_period_secs, quorum_votes, min_proposer_power, max_fee_bps)` | once | Configure the DAO |
-| `propose_fee_change(proposer, new_fee_bps) -> id` | proposer | Open a proposal (requires ≥ `min_proposer_power` reputation; `new_fee_bps ≤ max_fee_bps`) |
-| `vote(voter, proposal_id, support)` | voter | One reputation-weighted vote per account, within the window |
-| `finalize(proposal_id) -> status` | anyone | After the window: `Passed` if quorum met **and** `votes_for > votes_against`, else `Rejected` |
-| `execute(proposal_id)` | anyone | Enact a `Passed` proposal → cross-calls `lending.set_platform_fee_bps` → `Executed` |
-| `get_config` / `get_proposal` / `get_proposal_count` / `get_voting_power` / `has_voted` | — | Reads |
+| `__constructor(admin, lending, reputation, voting_period_secs, quorum_votes, min_proposer_power, max_fee_bps, timelock_delay_secs)` | deploy | Configure the DAO with execution timelock |
+| `propose_fee_change(proposer, new_fee_bps) -> id` | proposer | Open a proposal (requires ≥ `min_proposer_power` reputation; snapshots `snapshot_ledger`) |
+| `vote(voter, proposal_id, support)` | voter | One reputation-weighted vote per account (weighted at `snapshot_ledger`) |
+| `finalize(proposal_id) -> status` | anyone | After voting window: `Passed` (sets timelock ETA) or `Rejected` |
+| `execute(proposal_id)` | anyone | Enact a `Passed` proposal after timelock expiry → cross-calls `lending.set_platform_fee_bps` |
+| `get_config` / `get_proposal` / `get_proposal_count` / `get_voting_power` / `get_voting_power_at` / `is_timelock_expired` / `has_voted` | — | Reads |
 
 ### Proposal lifecycle
 
 ```
-Active ──(finalize, quorum + majority)──► Passed ──(execute)──► Executed
+Active ──(finalize, quorum + majority)──► Passed (Timelock pending) ──(timelock elapsed + execute)──► Executed
    └──────(finalize, quorum unmet OR majority against)──────► Rejected
 ```
 
 ### Why this is safe / "automated"
 
+- **Proposal checkpointing & snapshotting:** Voting power is snapshotted at proposal
+  creation ledger (`snapshot_ledger`). Even if an account's score changes during the voting
+  window, votes are weighted by past reputation at `snapshot_ledger`, preventing flash-reputation
+  manipulation.
+- **Execution timelock:** Passed proposals enforce a minimum timelock delay (default 24 hours)
+  before `execute` can be called, giving protocol participants reaction time to review or exit.
 - **Vote-only fee changes:** the lending guard `caller == governance` means a passed
   proposal is the *only* way to move the fee. Verified by
   `test_lending_rejects_non_governance_caller`.
 - **Cross-contract auth:** `execute` passes `env.current_contract_address()` as the
   caller; Soroban auto-authorizes a contract for sub-calls made on its own behalf, so
-  no key/admin is involved — execution is permissionless once a proposal passes.
+  no key/admin is involved — execution is permissionless once a proposal passes and the
+  timelock expires.
 - **Sybil/finality guards:** one vote per account, voting window enforced, quorum +
   majority required, and both the proposal and lending layers cap the fee at 10 %.
 

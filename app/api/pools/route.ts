@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { enforceRouteRateLimit } from "@/lib/rate-limit";
 import { getDb } from "@/lib/db/client";
 import { fetchPools } from "@/lib/db/pools";
+import { parseBoundedInteger } from "@/lib/http/request-validation";
 
 /**
  * GET /api/pools
@@ -56,12 +57,11 @@ export async function GET(request: NextRequest) {
       | "paused"
       | "closed"
       | null;
-    const limit = searchParams.has("limit")
-      ? parseInt(searchParams.get("limit") || "10", 10)
-      : 10;
-    const offset = searchParams.has("offset")
-      ? parseInt(searchParams.get("offset") || "0", 10)
-      : 0;
+    const safeLimit = parseBoundedInteger(searchParams.get("limit"), 10, 1, 100);
+    const safeOffset = parseBoundedInteger(searchParams.get("offset"), 0, 0, 1_000_000);
+    if (safeLimit === null || safeOffset === null) {
+      return NextResponse.json({ error: "Invalid pagination parameters" }, { status: 400 });
+    }
     const orderBy = (searchParams.get("orderBy") || "created_at") as
       | "created_at"
       | "available_liquidity";
@@ -72,8 +72,8 @@ export async function GET(request: NextRequest) {
     // Fetch pools using optimized function
     const result = await fetchPools(db, {
       status: status || undefined,
-      limit,
-      offset,
+      limit: safeLimit,
+      offset: safeOffset,
       orderBy,
       orderDirection,
     });
@@ -83,8 +83,8 @@ export async function GET(request: NextRequest) {
         success: true,
         pools: result.pools,
         pagination: {
-          limit,
-          offset,
+          limit: safeLimit,
+          offset: safeOffset,
           hasMore: result.hasMore,
           estimatedTotal: result.estimatedTotalCount,
         },

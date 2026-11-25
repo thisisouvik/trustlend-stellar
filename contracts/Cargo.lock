@@ -954,6 +954,7 @@ name = "lending"
 version = "0.1.0"
 dependencies = [
  "borrower-loyalty",
+ "borrower-reputation",
  "proptest",
  "referral-rewards",
  "soroban-sdk",
@@ -1837,6 +1838,7 @@ dependencies = [
 name = "treasury"
 version = "0.1.0"
 dependencies = [
+ "borrower-reputation",
  "default-management",
  "governance",
  "lending",

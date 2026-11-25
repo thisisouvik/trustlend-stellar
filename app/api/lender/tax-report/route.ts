@@ -14,6 +14,7 @@ import {
   taxReportFilename,
 } from "@/lib/lender/tax-report";
 import { enforceRouteRateLimit } from "@/lib/rate-limit";
+import { parseBoundedInteger } from "@/lib/http/request-validation";
 
 export const runtime = "nodejs";
 
@@ -32,13 +33,17 @@ export async function GET(request: NextRequest) {
 
     // `year=all` lifts the filter; anything unparseable falls back to this year.
     const isAllYears = yearStr === "all";
-    const parsedYear = yearStr ? parseInt(yearStr, 10) : NaN;
+    const parsedYearValue = parseBoundedInteger(yearStr, new Date().getFullYear(), 2000, 2100);
+    if (!isAllYears && parsedYearValue === null) {
+      return NextResponse.json({ error: "Invalid tax year" }, { status: 400 });
+    }
+    if (format !== "pdf" && format !== "csv") {
+      return NextResponse.json({ error: "Invalid report format" }, { status: 400 });
+    }
     const year =
       isAllYears
         ? null
-        : Number.isFinite(parsedYear)
-          ? parsedYear
-          : new Date().getFullYear();
+        : parsedYearValue;
 
     const db = getDb();
     if (!db) {

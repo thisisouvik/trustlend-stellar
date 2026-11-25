@@ -30,7 +30,7 @@ const ROLE_META: Record<AuthSelectableRole, { label: string; icon: LucideIcon; t
 const DEFAULT_POINTS = [
   "Sign in by signing a challenge — no passwords",
   "Non-custodial: your keys never leave your wallet",
-  "Freighter, xBull, Albedo and WalletConnect supported",
+  "Varial, xBull, Albedo and WalletConnect supported",
 ];
 
 export function AuthPageClient() {

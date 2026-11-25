@@ -2,6 +2,7 @@
  * lib/contracts/reputation.ts
  *
  * TypeScript client for the BorrowerReputationContract.
+ * Contract reads and writes are routed through the shared Stellar SDK RPC executor.
  * Wraps every public contract function with proper arg encoding/decoding.
  */
 
@@ -107,7 +108,7 @@ export async function isAccountFrozen(
   return result as boolean;
 }
 
-// ─── Write functions (require Freighter signature) ────────────────────────────
+// ─── Write functions (require Varial signature) ────────────────────────────
 
 /**
  * Borrower registers their on-chain profile (called after KYC approval).

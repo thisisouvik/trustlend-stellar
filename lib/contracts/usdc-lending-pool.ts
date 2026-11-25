@@ -3,6 +3,7 @@
  *
  * TypeScript client for the UsdcLendingPoolContract. Read functions run as
  * simulations; writes are signed by the connected wallet.
+ * Both paths use the shared Stellar SDK RPC executor.
  */
 
 import {
@@ -67,8 +68,17 @@ export async function deposit(depositorAddress: string, amountStroops: bigint) {
   return { txHash: hash };
 }
 
-export async function withdraw(depositorAddress: string) {
-  const { hash } = await write("withdraw", [addressToScVal(depositorAddress)], depositorAddress);
+/**
+ * Withdraw `amountStroops` of principal plus all accrued yield. Partial
+ * amounts leave the rest of the position earning; pass the full principal
+ * (see `getDeposit`) to close the position.
+ */
+export async function withdraw(depositorAddress: string, amountStroops: bigint) {
+  const { hash } = await write(
+    "withdraw",
+    [addressToScVal(depositorAddress), i128ToScVal(amountStroops)],
+    depositorAddress,
+  );
   return { txHash: hash };
 }
 

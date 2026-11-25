@@ -38,7 +38,10 @@ export async function GET(request: NextRequest) {
       created_at: n.createdAt.toISOString(),
     }));
 
-    return NextResponse.json({ notifications: data }, { status: 200 });
+    return NextResponse.json(
+      { notifications: data },
+      { status: 200, headers: { "Cache-Control": "private, no-store" } },
+    );
   } catch {
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }

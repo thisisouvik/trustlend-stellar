@@ -320,6 +320,7 @@ export const loanRepayments = pgTable(
   (t) => [
     index("idx_loan_repayments_loan_id").on(t.loanId),
     index("idx_loan_repayments_payer_id").on(t.payerId),
+    uniqueIndex("idx_loan_repayments_tx_ref").on(t.txRef).where(sql`${t.txRef} IS NOT NULL`),
   ],
 );
 
@@ -488,6 +489,9 @@ export const ledgerTransactions = pgTable(
   (t) => [
     index("idx_ledger_transactions_user_id_created_at").on(t.userId, t.createdAt),
     index("idx_ledger_transactions_status").on(t.status),
+    uniqueIndex("idx_ledger_withdrawal_idempotency")
+      .on(t.userId, sql`(${t.metadata}->>'withdrawalIdempotencyKey')`)
+      .where(sql`${t.category} = 'withdrawal' AND ${t.metadata} ? 'withdrawalIdempotencyKey'`),
   ],
 );
 
@@ -582,6 +586,7 @@ export const referrals = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [
+    // The permanent, database-level guard against duplicate attribution.
     uniqueIndex("referrals_referee_id_key").on(t.refereeId),
     index("idx_referrals_referrer_id").on(t.referrerId),
     index("idx_referrals_status").on(t.status),
@@ -605,6 +610,50 @@ export const notifications = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("idx_notifications_user_id_created_at").on(t.userId, t.createdAt)],
+);
+
+/** Scheduled cron execution logs tracking dead-man switches and partial progress. */
+export const cronExecutionLogs = pgTable(
+  "cron_execution_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobName: text("job_name").notNull(),
+    status: text("status").notNull().default("running"), // 'running' | 'completed' | 'aborted' | 'failed'
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    durationMs: integer("duration_ms"),
+    processedCount: integer("processed_count").notNull().default(0),
+    successCount: integer("success_count").notNull().default(0),
+    failureCount: integer("failure_count").notNull().default(0),
+    aborted: boolean("aborted").notNull().default(false),
+    abortReason: text("abort_reason"),
+    error: text("error"),
+    metadata: jsonb("metadata"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("idx_cron_logs_job_started_at").on(t.jobName, t.startedAt),
+    index("idx_cron_logs_status").on(t.status),
+  ],
+);
+
+/** Failure and timeout alerts triggered by scheduled cron runs. */
+export const cronAlerts = pgTable(
+  "cron_alerts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    logId: uuid("log_id").references(() => cronExecutionLogs.id, { onDelete: "cascade" }),
+    jobName: text("job_name").notNull(),
+    level: text("level").notNull().default("error"), // 'warn' | 'error' | 'critical'
+    message: text("message").notNull(),
+    details: jsonb("details"),
+    resolved: boolean("resolved").notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("idx_cron_alerts_job_created").on(t.jobName, t.createdAt),
+    index("idx_cron_alerts_resolved").on(t.resolved),
+  ],
 );
 
 // ─── Relations (for db.query.* relational API) ───────────────────────────────
@@ -666,6 +715,17 @@ export const referralsRelations = relations(referrals, ({ one }) => ({
   qualifyingLoan: one(loans, { fields: [referrals.qualifyingLoanId], references: [loans.id] }),
 }));
 
+export const cronExecutionLogsRelations = relations(cronExecutionLogs, ({ many }) => ({
+  alerts: many(cronAlerts),
+}));
+
+export const cronAlertsRelations = relations(cronAlerts, ({ one }) => ({
+  executionLog: one(cronExecutionLogs, {
+    fields: [cronAlerts.logId],
+    references: [cronExecutionLogs.id],
+  }),
+}));
+
 // ─── Row types ────────────────────────────────────────────────────────────────
 
 export type User = typeof users.$inferSelect;
@@ -686,3 +746,7 @@ export type FraudSignal = typeof fraudSignals.$inferSelect;
 export type RiskAssessment = typeof riskAssessments.$inferSelect;
 export type InterestRateConfigRow = typeof interestRateConfigs.$inferSelect;
 export type PlatformSettingRow = typeof platformSettings.$inferSelect;
+export type CronExecutionLog = typeof cronExecutionLogs.$inferSelect;
+export type NewCronExecutionLog = typeof cronExecutionLogs.$inferInsert;
+export type CronAlert = typeof cronAlerts.$inferSelect;
+export type NewCronAlert = typeof cronAlerts.$inferInsert;

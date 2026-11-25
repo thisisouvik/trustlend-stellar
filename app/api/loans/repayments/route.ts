@@ -5,6 +5,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/lib/db/client";
 import { loanRepayments, loans } from "@/lib/db/schema";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
+import { isBoundedString } from "@/lib/http/request-validation";
 
 export async function GET(request: NextRequest) {
   try {
@@ -15,7 +16,7 @@ export async function GET(request: NextRequest) {
     const { user } = await requireAuthenticatedUser("borrower");
     const loanId = request.nextUrl.searchParams.get("loanId");
 
-    if (!loanId) {
+    if (!isBoundedString(loanId, 128)) {
       return NextResponse.json({ error: "loanId is required" }, { status: 400 });
     }
 

@@ -54,6 +54,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Internal server error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("[analytics] Failed to build response:", message);
+    return NextResponse.json({ error: "Failed to load analytics" }, { status: 500 });
   }
 }

@@ -95,11 +95,11 @@ pub struct ZkCreditVerifierContract;
 
 #[contractimpl]
 impl ZkCreditVerifierContract {
-    /// Initialize contract with admin address.
-    pub fn initialize(env: Env, admin: Address) {
-        if env.storage().instance().has(&DataKey::Admin) {
-            panic!("Contract already initialised");
-        }
+    /// Soroban constructor: runs atomically as part of `stellar contract deploy`
+    /// (`-- <constructor args>`), so the contract is never live in an
+    /// uninitialised state that a third party could front-run to claim
+    /// admin rights (issue #352). There is no public `initialize`.
+    pub fn __constructor(env: Env, admin: Address) {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::TotalVerifications, &0u32);
     }

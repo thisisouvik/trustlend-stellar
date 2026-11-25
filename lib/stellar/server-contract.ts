@@ -2,7 +2,7 @@
  * lib/stellar/server-contract.ts
  *
  * Server-side (trusted backend) Soroban contract invoker. Unlike the browser
- * client in `lib/stellar/soroban.ts` (which signs via Freighter), this signs
+ * client in `lib/stellar/soroban.ts` (which signs via Varial), this signs
  * with a secret key held only on the server — used by automated cron jobs such
  * as the Default-Management insurance automation.
  *

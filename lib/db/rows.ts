@@ -10,6 +10,8 @@
  */
 
 import type {
+  CronAlert,
+  CronExecutionLog,
   LedgerTransaction,
   LendingPool,
   Loan,
@@ -188,3 +190,37 @@ export function snapshotToRow(s: ReputationSnapshot) {
   };
 }
 export type SnapshotRow = ReturnType<typeof snapshotToRow>;
+
+export function cronExecutionLogToRow(c: CronExecutionLog) {
+  return {
+    id: c.id,
+    job_name: c.jobName,
+    status: c.status,
+    started_at: c.startedAt.toISOString(),
+    completed_at: iso(c.completedAt),
+    duration_ms: c.durationMs,
+    processed_count: c.processedCount,
+    success_count: c.successCount,
+    failure_count: c.failureCount,
+    aborted: c.aborted,
+    abort_reason: c.abortReason,
+    error: c.error,
+    metadata: (c.metadata ?? {}) as Record<string, unknown>,
+    created_at: c.createdAt.toISOString(),
+  };
+}
+export type CronExecutionLogRow = ReturnType<typeof cronExecutionLogToRow>;
+
+export function cronAlertToRow(a: CronAlert) {
+  return {
+    id: a.id,
+    log_id: a.logId,
+    job_name: a.jobName,
+    level: a.level,
+    message: a.message,
+    details: (a.details ?? {}) as Record<string, unknown>,
+    resolved: a.resolved,
+    created_at: a.createdAt.toISOString(),
+  };
+}
+export type CronAlertRow = ReturnType<typeof cronAlertToRow>;

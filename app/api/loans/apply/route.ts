@@ -9,6 +9,7 @@ import { verifyOnchainLoanRequest } from "@/lib/loans/onchain";
 import { getActiveRateConfig, isRateModel, priceLoanApr } from "@/lib/loans/rate-config";
 import { getPlatformFeeBps } from "@/lib/platform/settings";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
+import { isBoundedString, isValidStellarAddress } from "@/lib/http/request-validation";
 
 /**
  * POST /api/loans/apply
@@ -63,6 +64,13 @@ export async function POST(request: NextRequest) {
     const onchainTxHash: unknown = body.onchainTxHash ?? body.onchain_tx_hash;
     const walletAddress: unknown = body.walletAddress ?? body.wallet_address;
     const preflight = body.preflight === true;
+
+    if (walletAddress !== undefined && !isValidStellarAddress(walletAddress)) {
+      return NextResponse.json({ error: "Invalid wallet address" }, { status: 400 });
+    }
+    if (onchainTxHash !== undefined && !isBoundedString(onchainTxHash, 128)) {
+      return NextResponse.json({ error: "Invalid transaction hash" }, { status: 400 });
+    }
 
     const MIN_BORROW_AMOUNT = 1; // Minimum 1 XLM to prevent dust/spam loans
 

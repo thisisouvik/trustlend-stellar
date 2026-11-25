@@ -56,11 +56,9 @@ fn setup_unfunded() -> (Env, Address, Address, Address, Address) {
     asset_client.mint(&user, &1_000_000_000); // 1 000 USDC (7 decimals assumed)
 
     // Deploy pool contract
-    let pool_id = env.register(UsdcLendingPool, ());
 
     // Initialize pool: 5 % annual yield (500 bps)
-    let client = UsdcLendingPoolClient::new(&env, &pool_id);
-    client.initialize(&admin, &usdc_addr, &500_u32);
+    let pool_id = env.register(UsdcLendingPool, (&admin, &usdc_addr, &500_u32));
 
     (env, pool_id, admin, user, usdc_addr)
 }
@@ -71,6 +69,12 @@ const HALF_YEAR: u32 = 3_153_600;
 
 fn advance(env: &Env, ledgers: u32) {
     env.ledger().with_mut(|li| li.sequence_number += ledgers);
+}
+
+/// Close `user`'s whole position: withdraw all principal (plus yield).
+fn withdraw_all(client: &UsdcLendingPoolClient, user: &Address) {
+    let (principal, _) = client.get_deposit(user);
+    client.withdraw(user, &principal);
 }
 
 /// A fresh depositor holding `balance` USDC.
@@ -114,12 +118,32 @@ fn test_initialize_stores_pool_state() {
     assert_eq!(state.total_yield_paid, 0);
 }
 
+/// Issue #352: initialization runs in the Soroban constructor, atomically with
+/// deployment. There is no `initialize` entrypoint left to front-run, and the
+/// constructor cannot be re-invoked on the live contract to seize admin rights.
 #[test]
-#[should_panic(expected = "already initialized")]
-fn test_initialize_rejects_double_init() {
+fn test_constructor_initializes_and_cannot_be_reinvoked() {
+    use soroban_sdk::{IntoVal, Symbol};
     let (env, pool_id, admin, _user, usdc) = setup();
-    let client = UsdcLendingPoolClient::new(&env, &pool_id);
-    client.initialize(&admin, &usdc, &500_u32);
+    let attacker = Address::generate(&env);
+    let args: soroban_sdk::Vec<soroban_sdk::Val> = soroban_sdk::vec![
+        &env,
+        attacker.into_val(&env),
+        usdc.into_val(&env),
+        500u32.into_val(&env),
+    ];
+    for name in ["initialize", "__constructor"] {
+        let res = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &pool_id,
+            &Symbol::new(&env, name),
+            args.clone(),
+        );
+        assert!(res.is_err(), "{name} must not be callable after deployment");
+    }
+    let stored: Address = env.as_contract(&pool_id, || {
+        env.storage().instance().get(&DataKey::Admin).unwrap()
+    });
+    assert_eq!(stored, admin);
 }
 
 #[test]
@@ -130,9 +154,7 @@ fn test_initialize_rejects_zero_yield() {
 
     let admin = Address::generate(&env);
     let (usdc_addr, _, _) = create_token(&env, &admin);
-    let pool_id = env.register(UsdcLendingPool, ());
-    let client = UsdcLendingPoolClient::new(&env, &pool_id);
-    client.initialize(&admin, &usdc_addr, &0_u32);
+    env.register(UsdcLendingPool, (&admin, &usdc_addr, &0_u32));
 }
 
 #[test]
@@ -143,9 +165,7 @@ fn test_initialize_rejects_yield_over_max() {
 
     let admin = Address::generate(&env);
     let (usdc_addr, _, _) = create_token(&env, &admin);
-    let pool_id = env.register(UsdcLendingPool, ());
-    let client = UsdcLendingPoolClient::new(&env, &pool_id);
-    client.initialize(&admin, &usdc_addr, &10_001_u32);
+    env.register(UsdcLendingPool, (&admin, &usdc_addr, &10_001_u32));
 }
 
 // ─── Deposit tests ────────────────────────────────────────────────────────────
@@ -233,7 +253,7 @@ fn test_withdraw_returns_principal_plus_yield() {
     // 5% annual / 2 years ≈ 2.5% of 100M = ~2.5M
     assert!(expected_yield > 0, "yield should accrue over ledger time");
 
-    client.withdraw(&user);
+    withdraw_all(&client, &user);
 
     let balance_after_withdraw = token_client.balance(&user);
     let received = balance_after_withdraw - balance_after_deposit;
@@ -254,7 +274,7 @@ fn test_withdraw_updates_pool_total_withdrawn() {
     env.ledger().with_mut(|li| li.sequence_number += 100_u32);
 
     let (principal, yield_amt) = client.get_deposit(&user);
-    client.withdraw(&user);
+    withdraw_all(&client, &user);
 
     let state = client.get_pool_state();
     assert_eq!(state.total_withdrawn, principal + yield_amt);
@@ -266,7 +286,7 @@ fn test_withdraw_clears_deposit_record() {
     let client = UsdcLendingPoolClient::new(&env, &pool_id);
 
     client.deposit(&user, &100_000_000_i128);
-    client.withdraw(&user);
+    withdraw_all(&client, &user);
 
     let (principal, accrued) = client.get_deposit(&user);
     assert_eq!(principal, 0);
@@ -278,7 +298,7 @@ fn test_withdraw_clears_deposit_record() {
 fn test_withdraw_without_deposit_panics() {
     let (env, pool_id, _admin, user, _usdc) = setup();
     let client = UsdcLendingPoolClient::new(&env, &pool_id);
-    client.withdraw(&user);
+    client.withdraw(&user, &1_000_i128);
 }
 
 // ─── Yield accrual tests ──────────────────────────────────────────────────────
@@ -448,11 +468,11 @@ fn test_no_yield_without_funding() {
 
     assert_eq!(client.get_deposit(&user1), (100_000_000, 0));
     let before = token.balance(&user1);
-    client.withdraw(&user1);
+    withdraw_all(&client, &user1);
     assert_eq!(token.balance(&user1) - before, 100_000_000);
 
     // The second depositor's principal is intact.
-    client.withdraw(&user2);
+    withdraw_all(&client, &user2);
     assert_eq!(token.balance(&user2), 100_000_000);
     assert_eq!(token.balance(&pool_id), 0);
     assert_fully_backed(&env, &pool_id, &usdc);
@@ -471,7 +491,7 @@ fn test_direct_transfer_is_not_yield() {
 
     assert_eq!(client.get_deposit(&user), (100_000_000, 0));
     let before = token.balance(&user);
-    client.withdraw(&user);
+    withdraw_all(&client, &user);
     assert_eq!(token.balance(&user) - before, 100_000_000);
     assert_eq!(client.get_pool_state().yield_reserve, 0);
 }
@@ -499,7 +519,7 @@ fn test_yield_capped_by_funded_reserve() {
     assert_eq!(client.get_deposit(&user), (100_000_000, 1_000_000));
 
     let before = token.balance(&user);
-    client.withdraw(&user);
+    withdraw_all(&client, &user);
     assert_eq!(token.balance(&user) - before, 101_000_000);
     assert_eq!(token.balance(&pool_id), 0);
     assert_eq!(client.get_pool_state().total_yield_paid, 1_000_000);
@@ -525,14 +545,14 @@ fn test_reserve_shortfall_shared_pro_rata() {
     assert_eq!(client.get_deposit(&large).1, 3_000_000);
 
     let before = token.balance(&small);
-    client.withdraw(&small);
+    withdraw_all(&client, &small);
     assert_eq!(token.balance(&small) - before, 101_000_000);
     assert_fully_backed(&env, &pool_id, &usdc);
 
     // The remaining depositor's share is untouched by the early exit.
     advance(&env, YEAR);
     assert_eq!(client.get_deposit(&large).1, 3_000_000);
-    client.withdraw(&large);
+    withdraw_all(&client, &large);
     assert_eq!(token.balance(&large), 303_000_000);
     assert_eq!(token.balance(&pool_id), 0);
 }
@@ -647,16 +667,16 @@ fn test_multi_user_lifecycle_never_pays_unfunded_yield() {
     // Bob exits with his principal plus only funded yield.
     let (bob_principal, bob_yield) = client.get_deposit(&bob);
     assert!(bob_yield > 2_500_000 && bob_yield < 3_000_000);
-    client.withdraw(&bob);
+    withdraw_all(&client, &bob);
     assert_eq!(token.balance(&bob), bob_principal + bob_yield);
     assert_fully_backed(&env, &pool_id, &usdc);
 
     // More funding arrives; the remaining depositors exit.
     client.fund_yield(&funder, &20_000_000);
     advance(&env, YEAR);
-    client.withdraw(&alice);
+    withdraw_all(&client, &alice);
     assert_fully_backed(&env, &pool_id, &usdc);
-    client.withdraw(&carol);
+    withdraw_all(&client, &carol);
     assert_fully_backed(&env, &pool_id, &usdc);
 
     // Nobody lost principal.
@@ -683,4 +703,201 @@ fn test_multi_user_lifecycle_never_pays_unfunded_yield() {
         state.yield_reserve + state.yield_unclaimed
     );
     assert!(state.yield_unclaimed < 10, "only rounding dust may remain");
+}
+
+// ─── Partial withdrawals (Issue #421) ──────────────────────────────────────────
+
+#[test]
+fn test_partial_withdraw_pays_amount_plus_yield_and_keeps_remainder() {
+    let (env, pool_id, _admin, user, usdc) = setup();
+    let client = UsdcLendingPoolClient::new(&env, &pool_id);
+    let token = TokenClient::new(&env, &usdc);
+
+    client.deposit(&user, &400_000_000_i128);
+    advance(&env, HALF_YEAR);
+
+    let (_, earned) = client.get_deposit(&user);
+    assert!(earned > 0);
+    let balance_before = token.balance(&user);
+
+    client.withdraw(&user, &100_000_000_i128);
+
+    // Paid the requested principal plus everything earned so far.
+    assert_eq!(token.balance(&user) - balance_before, 100_000_000 + earned);
+
+    // The rest of the position stays open with its yield settled.
+    let (principal, accrued) = client.get_deposit(&user);
+    assert_eq!(principal, 300_000_000);
+    assert_eq!(accrued, 0);
+
+    let state = client.get_pool_state();
+    assert_eq!(state.total_principal, 300_000_000);
+    assert_eq!(state.total_withdrawn, 100_000_000 + earned);
+    assert_eq!(state.total_yield_paid, earned);
+    assert_eq!(state.depositor_count, 1);
+    assert_fully_backed(&env, &pool_id, &usdc);
+}
+
+#[test]
+fn test_remaining_principal_keeps_earning_after_partial_withdraw() {
+    let (env, pool_id, _admin, user, usdc) = setup();
+    let client = UsdcLendingPoolClient::new(&env, &pool_id);
+
+    client.deposit(&user, &400_000_000_i128);
+    advance(&env, HALF_YEAR);
+    client.withdraw(&user, &200_000_000_i128);
+
+    // A further half year on the remaining 200 USDC-units at 5 % ≈ 2.5 %.
+    advance(&env, HALF_YEAR);
+    let (principal, accrued) = client.get_deposit(&user);
+    assert_eq!(principal, 200_000_000);
+    let expected = 200_000_000 * 250 / 10_000; // 5_000_000
+    assert!(accrued > expected - 10 && accrued <= expected, "accrued {}", accrued);
+    assert_fully_backed(&env, &pool_id, &usdc);
+}
+
+#[test]
+fn test_successive_partial_withdrawals_close_position_at_zero() {
+    let (env, pool_id, _admin, user, usdc) = setup();
+    let client = UsdcLendingPoolClient::new(&env, &pool_id);
+    let token = TokenClient::new(&env, &usdc);
+    let start_balance = token.balance(&user);
+
+    client.deposit(&user, &300_000_000_i128);
+    advance(&env, 1_000);
+    client.withdraw(&user, &100_000_000_i128);
+    advance(&env, 1_000);
+    client.withdraw(&user, &150_000_000_i128);
+    assert_eq!(client.get_deposit(&user).0, 50_000_000);
+    advance(&env, 1_000);
+    client.withdraw(&user, &50_000_000_i128);
+
+    // Record removed once principal hits zero; all principal returned.
+    assert_eq!(client.get_deposit(&user), (0, 0));
+    assert_eq!(client.get_pool_state().total_principal, 0);
+    assert!(token.balance(&user) >= start_balance);
+    assert_fully_backed(&env, &pool_id, &usdc);
+}
+
+#[test]
+fn test_partial_withdraw_does_not_affect_other_depositors() {
+    let (env, pool_id, _admin, _user, usdc) = setup();
+    let client = UsdcLendingPoolClient::new(&env, &pool_id);
+    let alice = new_user(&env, &usdc, 200_000_000);
+    let bob = new_user(&env, &usdc, 200_000_000);
+
+    client.deposit(&alice, &200_000_000_i128);
+    client.deposit(&bob, &200_000_000_i128);
+    advance(&env, HALF_YEAR);
+
+    let bob_before = client.get_deposit(&bob);
+    client.withdraw(&alice, &50_000_000_i128);
+    assert_eq!(client.get_deposit(&bob), bob_before);
+
+    advance(&env, HALF_YEAR);
+    // Bob earns on 200, Alice now only on 150.
+    assert!(client.get_deposit(&bob).1 > client.get_deposit(&alice).1);
+    assert_fully_backed(&env, &pool_id, &usdc);
+}
+
+#[test]
+fn test_deposit_after_partial_withdraw_tops_up_same_position() {
+    let (env, pool_id, _admin, user, usdc) = setup();
+    let client = UsdcLendingPoolClient::new(&env, &pool_id);
+
+    client.deposit(&user, &300_000_000_i128);
+    client.withdraw(&user, &100_000_000_i128);
+    client.deposit(&user, &50_000_000_i128);
+
+    assert_eq!(client.get_deposit(&user).0, 250_000_000);
+    assert_eq!(client.get_pool_state().depositor_count, 1);
+    assert_fully_backed(&env, &pool_id, &usdc);
+}
+
+#[test]
+#[should_panic(expected = "amount exceeds deposited principal")]
+fn test_withdraw_more_than_principal_panics() {
+    let (env, pool_id, _admin, user, _usdc) = setup();
+    let client = UsdcLendingPoolClient::new(&env, &pool_id);
+    client.deposit(&user, &100_000_000_i128);
+    client.withdraw(&user, &100_000_001_i128);
+}
+
+#[test]
+#[should_panic(expected = "amount must be > 0")]
+fn test_withdraw_zero_amount_panics() {
+    let (env, pool_id, _admin, user, _usdc) = setup();
+    let client = UsdcLendingPoolClient::new(&env, &pool_id);
+    client.deposit(&user, &100_000_000_i128);
+    client.withdraw(&user, &0_i128);
+}
+
+#[test]
+#[should_panic(expected = "amount must be > 0")]
+fn test_withdraw_negative_amount_panics() {
+    let (env, pool_id, _admin, user, _usdc) = setup();
+    let client = UsdcLendingPoolClient::new(&env, &pool_id);
+    client.deposit(&user, &100_000_000_i128);
+    client.withdraw(&user, &-1_i128);
+}
+
+// ─── Yield rate velocity bounds (Issue #421) ───────────────────────────────────
+
+#[test]
+fn test_set_yield_rate_allows_max_step() {
+    let (env, pool_id, admin, _user, _usdc) = setup();
+    let client = UsdcLendingPoolClient::new(&env, &pool_id);
+
+    client.set_yield_rate(&admin, &(500 + MAX_RATE_CHANGE_BPS));
+    assert_eq!(client.get_pool_state().annual_yield_bps, 1000);
+
+    advance(&env, RATE_CHANGE_COOLDOWN_LEDGERS);
+    client.set_yield_rate(&admin, &500_u32);
+    assert_eq!(client.get_pool_state().annual_yield_bps, 500);
+}
+
+#[test]
+#[should_panic(expected = "yield rate change exceeds max step")]
+fn test_set_yield_rate_rejects_increase_over_max_step() {
+    let (env, pool_id, admin, _user, _usdc) = setup();
+    let client = UsdcLendingPoolClient::new(&env, &pool_id);
+    client.set_yield_rate(&admin, &(500 + MAX_RATE_CHANGE_BPS + 1));
+}
+
+#[test]
+#[should_panic(expected = "yield rate change exceeds max step")]
+fn test_set_yield_rate_rejects_decrease_over_max_step() {
+    let (env, pool_id, admin, _user, _usdc) = setup();
+    let client = UsdcLendingPoolClient::new(&env, &pool_id);
+
+    client.set_yield_rate(&admin, &1000_u32);
+    advance(&env, RATE_CHANGE_COOLDOWN_LEDGERS);
+    client.set_yield_rate(&admin, &(1000 - MAX_RATE_CHANGE_BPS - 1));
+}
+
+#[test]
+fn test_set_yield_rate_cooldown_between_changes() {
+    let (env, pool_id, admin, _user, _usdc) = setup();
+    let client = UsdcLendingPoolClient::new(&env, &pool_id);
+
+    client.set_yield_rate(&admin, &600_u32);
+
+    // A burst of updates cannot stack steps to shock the rate.
+    assert!(client.try_set_yield_rate(&admin, &700_u32).is_err());
+    advance(&env, RATE_CHANGE_COOLDOWN_LEDGERS - 1);
+    assert!(client.try_set_yield_rate(&admin, &700_u32).is_err());
+    assert_eq!(client.get_pool_state().annual_yield_bps, 600);
+
+    advance(&env, 1);
+    client.set_yield_rate(&admin, &700_u32);
+    assert_eq!(client.get_pool_state().annual_yield_bps, 700);
+}
+
+#[test]
+#[should_panic(expected = "yield rate change cooldown active")]
+fn test_set_yield_rate_back_to_back_panics() {
+    let (env, pool_id, admin, _user, _usdc) = setup();
+    let client = UsdcLendingPoolClient::new(&env, &pool_id);
+    client.set_yield_rate(&admin, &600_u32);
+    client.set_yield_rate(&admin, &700_u32);
 }

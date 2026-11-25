@@ -33,6 +33,7 @@ export interface QualifyReferralResult {
 
 /**
  * Mark the borrower's referral as qualified, if they have an unqualified one.
+ * Attribution is immutable before this point: this flow only changes status.
  *
  * Returns a result rather than throwing so the caller can notify on success
  * and simply carry on otherwise.

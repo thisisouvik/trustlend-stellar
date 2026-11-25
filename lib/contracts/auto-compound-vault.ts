@@ -3,6 +3,7 @@
  *
  * TypeScript client for the AutoCompoundVaultContract. Read functions run as
  * simulations; writes are signed by the connected wallet.
+ * Both paths use the shared Stellar SDK RPC executor.
  */
 
 import {

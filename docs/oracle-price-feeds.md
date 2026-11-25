@@ -1,5 +1,7 @@
 # Collateral Price Feeds
 
+> Oracle contract invocations use the centralized Stellar SDK RPC transport, including simulation and transaction assembly.
+
 > Implements issue **#267 — integrate a reliable Stellar price oracle to fetch
 > real-time valuations of user collateral**: XLM and BTC prices every 5 seconds,
 > with a fallback mechanism when the oracle is down.

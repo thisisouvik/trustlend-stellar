@@ -395,11 +395,20 @@ export interface KeeperSummary {
   healthy: number;
   skipped: number;
   failed: number;
+  aborted?: boolean;
+  abortReason?: string;
+  remaining?: number;
+}
+
+export interface LiquidationKeeperOptions {
+  signal?: AbortSignal;
+  onProgress?: (progress: KeeperSummary) => Promise<void> | void;
 }
 
 export async function runLiquidationKeeper(
   cfg: KeeperConfig,
-  signer: Keypair | null
+  signer: Keypair | null,
+  options?: LiquidationKeeperOptions,
 ): Promise<KeeperSummary> {
   const summary: KeeperSummary = { scanned: 0, liquidated: 0, healthy: 0, skipped: 0, failed: 0 };
 
@@ -451,7 +460,18 @@ export async function runLiquidationKeeper(
     cfg.source === "db" ? await fetchCandidatesFromDb(cfg) : await fetchCandidatesFromChain(cfg);
   summary.scanned = candidateIds.length;
 
-  for (const loanId of candidateIds) {
+  for (let i = 0; i < candidateIds.length; i++) {
+    if (options?.signal?.aborted) {
+      summary.aborted = true;
+      summary.abortReason = "Execution deadline reached; safely aborted liquidation evaluation batch";
+      summary.remaining = candidateIds.length - i;
+      console.warn(
+        `[liquidation-keeper] Aborted before candidate loan #${candidateIds[i]}. Remaining candidates: ${summary.remaining}`,
+      );
+      break;
+    }
+
+    const loanId = candidateIds[i];
     try {
       const loan = await getOnchainLoan(cfg, loanId);
       if (loan.status !== "Active") {
@@ -524,6 +544,10 @@ export async function runLiquidationKeeper(
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[liquidation-keeper] Loan #${loanId} failed:`, msg);
       await sendAlert(cfg, "error", `Liquidation check failed for loan #${loanId}: ${msg}`);
+    } finally {
+      if (options?.onProgress) {
+        await options.onProgress(summary);
+      }
     }
   }
 

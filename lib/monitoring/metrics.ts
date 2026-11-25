@@ -29,6 +29,45 @@ export const httpErrorsTotal = new client.Counter({
   registers: [register],
 });
 
+// ── Scheduled Cron metrics ──────────────────────────────────────────────────
+export const cronExecutionsTotal = new client.Counter({
+  name: "cron_executions_total",
+  help: "Total number of scheduled cron job executions",
+  labelNames: ["job_name", "status"] as const,
+  registers: [register],
+});
+
+export const cronExecutionDuration = new client.Histogram({
+  name: "cron_execution_duration_seconds",
+  help: "Duration of scheduled cron job executions in seconds",
+  labelNames: ["job_name", "status"] as const,
+  buckets: [0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300],
+  registers: [register],
+});
+
+export const cronAbortsTotal = new client.Counter({
+  name: "cron_aborts_total",
+  help: "Total number of scheduled cron jobs aborted by dead-man switch",
+  labelNames: ["job_name", "reason"] as const,
+  registers: [register],
+});
+
+export function recordCronMetrics(
+  jobName: string,
+  status: "completed" | "aborted" | "failed",
+  durationSeconds: number,
+  abortReason?: string,
+): void {
+  cronExecutionsTotal.inc({ job_name: jobName, status });
+  cronExecutionDuration.observe({ job_name: jobName, status }, durationSeconds);
+  if (status === "aborted") {
+    cronAbortsTotal.inc({
+      job_name: jobName,
+      reason: (abortReason ?? "deadline_exceeded").slice(0, 50),
+    });
+  }
+}
+
 // ── Memory gauge (complements default metrics with a simpler alias) ──────────
 export const processMemoryBytes = new client.Gauge({
   name: "process_memory_bytes",

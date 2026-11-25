@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enforceRouteRateLimit } from "@/lib/rate-limit";
 import { getDb } from "@/lib/db/client";
+import { isUuid } from "@/lib/http/request-validation";
 import {
   PERFORMANCE_RANGES,
   fetchPoolPerformance,
   parsePerformanceRange,
 } from "@/lib/pools/performance";
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * GET /api/pools/performance
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
     }
 
     const poolId = searchParams.get("poolId");
-    if (poolId !== null && !UUID_RE.test(poolId)) {
+    if (poolId !== null && !isUuid(poolId)) {
       return NextResponse.json({ error: "Invalid poolId" }, { status: 400 });
     }
 

@@ -5,6 +5,7 @@ import { getDb } from "@/lib/db/client";
 import { metaString, readMetadata } from "@/lib/db/metadata";
 import { ledgerTransactions } from "@/lib/db/schema";
 import { enforceRouteRateLimit } from "@/lib/rate-limit";
+import { isBoundedString } from "@/lib/http/request-validation";
 
 const PAGE_SIZE = 20;
 
@@ -26,6 +27,12 @@ export async function GET(request: NextRequest) {
 
     const cursor = request.nextUrl.searchParams.get("cursor") || undefined;
     const direction = request.nextUrl.searchParams.get("direction") || "next";
+    if (cursor && !isBoundedString(cursor, 64)) {
+      return NextResponse.json({ error: "Invalid cursor" }, { status: 400 });
+    }
+    if (direction !== "next" && direction !== "prev") {
+      return NextResponse.json({ error: "Invalid direction" }, { status: 400 });
+    }
 
     const columns = {
       id: ledgerTransactions.id,

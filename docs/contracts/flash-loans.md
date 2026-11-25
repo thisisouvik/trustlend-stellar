@@ -2,6 +2,8 @@
 
 > Implements issue **#70 — [Smart Contracts] Implement flash loan capabilities for TrustLend liquidity pools**
 
+> Flash-loan contract transactions use the centralized Stellar SDK RPC transport for simulation and transaction assembly.
+
 Adds uncollateralized, single-transaction flash loans against the Lending
 contract's own token balance, so external protocols can borrow, act, and repay
 — plus a small protocol fee — atomically within one Soroban transaction, for

@@ -10,6 +10,7 @@ import {
   signSessionToken,
 } from "@/lib/auth/session-token";
 import { enforceRouteRateLimit } from "@/lib/rate-limit";
+import { isBoundedString, isValidStellarAddress } from "@/lib/http/request-validation";
 
 /**
  * POST /api/auth/siws/verify
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest) {
       signedTxXdr?: string;
       role?: string;
     };
-    if (!address || !signedTxXdr) {
+    if (!isValidStellarAddress(address) || !isBoundedString(signedTxXdr, 20_000)) {
       return NextResponse.json(
         { error: "address and signedTxXdr are required", code: "invalid_challenge" },
         { status: 400 }

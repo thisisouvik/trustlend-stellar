@@ -53,144 +53,59 @@ stellar contract build
 echo "✔ Build complete"
 echo ""
 
-# ── Step 2: Deploy contracts ─────────────────────────────────────────────────
-# Order matters: Reputation + Escrow first (no deps), then Lending, then Default
+# ── Step 2: Deploy + initialise contracts ─────────────────────────────────────
+# Every contract initialises in its Soroban constructor, whose arguments are
+# passed after `--` on `stellar contract deploy` (issue #352). Deployment and
+# initialisation are one atomic transaction, so there is no window in which a
+# contract is live but uninitialised and an observer could front-run
+# `initialize` to claim admin rights. Order matters: contracts whose
+# constructors take another contract's id are deployed after it.
+
+# deploy_contract <wasm-basename> [constructor args...]
+deploy_contract() {
+  local wasm="$1"; shift
+  stellar contract deploy \
+    --wasm "target/wasm32v1-none/release/${wasm}.wasm" \
+    --network "$NETWORK" \
+    --source "$ADMIN_KEY" \
+    -- "$@"
+}
 
 echo "▶ Deploying BorrowerReputationContract…"
-REPUTATION_ID=$(stellar contract deploy \
-  --wasm target/wasm32v1-none/release/borrower_reputation.wasm \
-  --network "$NETWORK" \
-  --source "$ADMIN_KEY")
+REPUTATION_ID=$(deploy_contract borrower_reputation --admin "$ADMIN_ADDRESS")
 echo "  ✔ REPUTATION_CONTRACT_ID = $REPUTATION_ID"
 
 echo ""
 echo "▶ Deploying EscrowContract…"
-ESCROW_ID=$(stellar contract deploy \
-  --wasm target/wasm32v1-none/release/escrow.wasm \
-  --network "$NETWORK" \
-  --source "$ADMIN_KEY")
+ESCROW_ID=$(deploy_contract escrow --admin "$ADMIN_ADDRESS")
 echo "  ✔ ESCROW_CONTRACT_ID = $ESCROW_ID"
 
 echo ""
 echo "▶ Deploying LendingContract…"
-LENDING_ID=$(stellar contract deploy \
-  --wasm target/wasm32v1-none/release/lending.wasm \
-  --network "$NETWORK" \
-  --source "$ADMIN_KEY")
+LENDING_ID=$(deploy_contract lending --admin "$ADMIN_ADDRESS")
 echo "  ✔ LENDING_CONTRACT_ID = $LENDING_ID"
 
 echo ""
-echo "▶ Deploying DefaultManagementContract…"
-DEFAULT_ID=$(stellar contract deploy \
-  --wasm target/wasm32v1-none/release/default_management.wasm \
-  --network "$NETWORK" \
-  --source "$ADMIN_KEY")
+echo "▶ Deploying DefaultManagementContract (insurance_balance = 0)…"
+DEFAULT_ID=$(deploy_contract default_management \
+  --admin "$ADMIN_ADDRESS" \
+  --initial_insurance_balance 0)
 echo "  ✔ DEFAULT_CONTRACT_ID = $DEFAULT_ID"
 
+# Governance: 3-day voting window, quorum 500, min proposer power 150 (Silver),
+# fee cap 1000 bps (10 %), 24h timelock delay (86400s). Voting power = reputation score.
 echo ""
 echo "▶ Deploying GovernanceContract…"
-GOVERNANCE_ID=$(stellar contract deploy \
-  --wasm target/wasm32v1-none/release/governance.wasm \
-  --network "$NETWORK" \
-  --source "$ADMIN_KEY")
-echo "  ✔ GOVERNANCE_CONTRACT_ID = $GOVERNANCE_ID"
-
-echo ""
-echo "▶ Deploying MultiSigAdminContract…"
-MULTISIG_ID=$(stellar contract deploy \
-  --wasm target/wasm32v1-none/release/multisig_admin.wasm \
-  --network "$NETWORK" \
-  --source "$ADMIN_KEY")
-echo "  ✔ MULTISIG_ADMIN_CONTRACT_ID = $MULTISIG_ID"
-
-# ── TLEND governance token + distribution (issue #107) ───────────────────────
-
-echo ""
-echo "▶ Deploying TlendTokenContract…"
-TLEND_TOKEN_ID=$(stellar contract deploy \
-  --wasm target/wasm32v1-none/release/tlend_token.wasm \
-  --network "$NETWORK" \
-  --source "$ADMIN_KEY")
-echo "  ✔ TLEND_TOKEN_CONTRACT_ID = $TLEND_TOKEN_ID"
-
-echo ""
-echo "▶ Deploying TlendVestingContract…"
-TLEND_VESTING_ID=$(stellar contract deploy \
-  --wasm target/wasm32v1-none/release/tlend_vesting.wasm \
-  --network "$NETWORK" \
-  --source "$ADMIN_KEY")
-echo "  ✔ TLEND_VESTING_CONTRACT_ID = $TLEND_VESTING_ID"
-
-echo ""
-echo "▶ Deploying TlendAirdropContract…"
-TLEND_AIRDROP_ID=$(stellar contract deploy \
-  --wasm target/wasm32v1-none/release/tlend_airdrop.wasm \
-  --network "$NETWORK" \
-  --source "$ADMIN_KEY")
-echo "  ✔ TLEND_AIRDROP_CONTRACT_ID = $TLEND_AIRDROP_ID"
-
-# ── Step 3: Initialise contracts ──────────────────────────────────────────────
-
-echo ""
-echo "▶ Initialising BorrowerReputationContract…"
-stellar contract invoke \
-  --id "$REPUTATION_ID" \
-  --source "$ADMIN_KEY" \
-  --network "$NETWORK" \
-  -- initialize \
-  --admin "$ADMIN_ADDRESS"
-
-echo "▶ Initialising EscrowContract…"
-stellar contract invoke \
-  --id "$ESCROW_ID" \
-  --source "$ADMIN_KEY" \
-  --network "$NETWORK" \
-  -- initialize \
-  --admin "$ADMIN_ADDRESS"
-
-echo "▶ Initialising LendingContract…"
-stellar contract invoke \
-  --id "$LENDING_ID" \
-  --source "$ADMIN_KEY" \
-  --network "$NETWORK" \
-  -- initialize \
-  --admin "$ADMIN_ADDRESS"
-
-# Lending reads every borrower's tier and credit limit from the reputation
-# contract (Issue #335); loan requests are rejected until this link exists.
-echo "▶ Linking LendingContract → BorrowerReputationContract…"
-stellar contract invoke \
-  --id "$LENDING_ID" \
-  --source "$ADMIN_KEY" \
-  --network "$NETWORK" \
-  -- set_reputation_contract \
-  --admin "$ADMIN_ADDRESS" \
-  --reputation "$REPUTATION_ID"
-
-echo "▶ Initialising DefaultManagementContract (insurance_balance = 0)…"
-stellar contract invoke \
-  --id "$DEFAULT_ID" \
-  --source "$ADMIN_KEY" \
-  --network "$NETWORK" \
-  -- initialize \
-  --admin "$ADMIN_ADDRESS" \
-  --initial_insurance_balance 0
-
-# Governance: 3-day voting window, quorum 500, min proposer power 150 (Silver),
-# fee cap 1000 bps (10 %). Voting power = reputation score.
-echo "▶ Initialising GovernanceContract…"
-stellar contract invoke \
-  --id "$GOVERNANCE_ID" \
-  --source "$ADMIN_KEY" \
-  --network "$NETWORK" \
-  -- initialize \
+GOVERNANCE_ID=$(deploy_contract governance \
   --admin "$ADMIN_ADDRESS" \
   --lending "$LENDING_ID" \
   --reputation "$REPUTATION_ID" \
   --voting_period_secs 259200 \
   --quorum_votes 500 \
   --min_proposer_power 150 \
-  --max_fee_bps 1000
+  --max_fee_bps 1000 \
+  --timelock_delay_secs 86400)
+echo "  ✔ GOVERNANCE_CONTRACT_ID = $GOVERNANCE_ID"
 
 # ── Multi-Sig Admin (issue #73) ────────────────────────────────────────────────
 # Comma-separated G... signer addresses + how many must approve before a rare,
@@ -211,14 +126,80 @@ for i in "${!SIGNER_ARR[@]}"; do
 done
 SIGNERS_JSON+="]"
 
-echo "▶ Initialising MultiSigAdminContract (${MULTISIG_THRESHOLD}-of-${#SIGNER_ARR[@]})…"
+echo ""
+echo "▶ Deploying MultiSigAdminContract (${MULTISIG_THRESHOLD}-of-${#SIGNER_ARR[@]})…"
+MULTISIG_ID=$(deploy_contract multisig_admin \
+  --signers "$SIGNERS_JSON" \
+  --threshold "$MULTISIG_THRESHOLD")
+echo "  ✔ MULTISIG_ADMIN_CONTRACT_ID = $MULTISIG_ID"
+
+# ── TLEND governance token + distribution (issue #107) ───────────────────────
+# Decimals/name/symbol are fixed by the constructor.
+
+echo ""
+echo "▶ Deploying TlendTokenContract (TLEND, 7 decimals)…"
+TLEND_TOKEN_ID=$(deploy_contract tlend_token \
+  --admin "$ADMIN_ADDRESS" \
+  --decimals 7 \
+  --name "TrustLend" \
+  --symbol "TLEND")
+echo "  ✔ TLEND_TOKEN_CONTRACT_ID = $TLEND_TOKEN_ID"
+
+echo ""
+echo "▶ Deploying TlendVestingContract…"
+TLEND_VESTING_ID=$(deploy_contract tlend_vesting \
+  --admin "$ADMIN_ADDRESS" \
+  --token "$TLEND_TOKEN_ID")
+echo "  ✔ TLEND_VESTING_CONTRACT_ID = $TLEND_VESTING_ID"
+
+# The airdrop's Merkle root of eligible (address, amount) leaves is a
+# constructor argument — generate one off-chain and pass it in:
+#   export TLEND_AIRDROP_MERKLE_ROOT=<64-char hex sha256 root>
+# Without it the airdrop is not deployed (it would be useless without a root).
+TLEND_AIRDROP_ID=""
+if [ -n "${TLEND_AIRDROP_MERKLE_ROOT:-}" ]; then
+  echo ""
+  echo "▶ Deploying TlendAirdropContract…"
+  TLEND_AIRDROP_ID=$(deploy_contract tlend_airdrop \
+    --admin "$ADMIN_ADDRESS" \
+    --token "$TLEND_TOKEN_ID" \
+    --merkle_root "$TLEND_AIRDROP_MERKLE_ROOT")
+  echo "  ✔ TLEND_AIRDROP_CONTRACT_ID = $TLEND_AIRDROP_ID"
+else
+  echo ""
+  echo "ℹ Skipping TlendAirdropContract (set TLEND_AIRDROP_MERKLE_ROOT to deploy it)."
+fi
+
+echo ""
+echo "✔ All contracts deployed and initialised"
+
+# ── Step 3: Wire contracts together ───────────────────────────────────────────
+# Admin-authorised links between already-initialised contracts.
+
+# Escrow takes custody of lender funds and only accepts allowlisted tokens
+# (Issue #417). Allow the native XLM Stellar Asset Contract.
+echo ""
+XLM_SAC_ID=$(stellar contract id asset --asset native --network "$NETWORK")
+echo "▶ Allowing native XLM ($XLM_SAC_ID) for escrow holds…"
 stellar contract invoke \
-  --id "$MULTISIG_ID" \
+  --id "$ESCROW_ID" \
   --source "$ADMIN_KEY" \
   --network "$NETWORK" \
-  -- initialize \
-  --signers "$SIGNERS_JSON" \
-  --threshold "$MULTISIG_THRESHOLD"
+  -- set_allowed_token \
+  --caller "$ADMIN_ADDRESS" \
+  --token "$XLM_SAC_ID" \
+  --allowed true
+
+# Lending reads every borrower's tier and credit limit from the reputation
+# contract (Issue #335); loan requests are rejected until this link exists.
+echo "▶ Linking LendingContract → BorrowerReputationContract…"
+stellar contract invoke \
+  --id "$LENDING_ID" \
+  --source "$ADMIN_KEY" \
+  --network "$NETWORK" \
+  -- set_reputation_contract \
+  --admin "$ADMIN_ADDRESS" \
+  --reputation "$REPUTATION_ID"
 
 echo "▶ Linking MultiSigAdmin → Lending, Default Management, Reputation…"
 stellar contract invoke --id "$LENDING_ID" --source "$ADMIN_KEY" --network "$NETWORK" \
@@ -263,42 +244,24 @@ else
   echo "    the MultiSigAdmin contract's propose/approve/execute (see lib/contracts/multisig-admin.ts)."
 fi
 
-# ── TLEND governance token + distribution (issue #107) ───────────────────────
-# Decimals/name/symbol are fixed at init. TLEND_TOTAL_SUPPLY is minted to the
-# admin, who then funds individual vesting schedules (via `create_vesting_schedule`)
-# and the airdrop pool (via `fund`) out of that balance as needed.
+# TLEND_TOTAL_SUPPLY is minted to the admin, who then funds individual vesting
+# schedules (via `create_vesting_schedule`) and the airdrop pool (via `fund`)
+# out of that balance as needed.
 TLEND_TOTAL_SUPPLY="${TLEND_TOTAL_SUPPLY:-1000000000000}" # 100M TLEND @ 7 decimals
 
 echo ""
-echo "▶ Initialising TlendTokenContract (TLEND, 7 decimals)…"
-stellar contract invoke --id "$TLEND_TOKEN_ID" --source "$ADMIN_KEY" --network "$NETWORK" \
-  -- initialize --admin "$ADMIN_ADDRESS" --decimals 7 --name "TrustLend" --symbol "TLEND"
+echo "▶ Minting initial TLEND supply…"
 stellar contract invoke --id "$TLEND_TOKEN_ID" --source "$ADMIN_KEY" --network "$NETWORK" \
   -- mint --to "$ADMIN_ADDRESS" --amount "$TLEND_TOTAL_SUPPLY"
 echo "  ✔ Minted $TLEND_TOTAL_SUPPLY raw units of TLEND to $ADMIN_ADDRESS"
-
-echo "▶ Initialising TlendVestingContract…"
-stellar contract invoke --id "$TLEND_VESTING_ID" --source "$ADMIN_KEY" --network "$NETWORK" \
-  -- initialize --admin "$ADMIN_ADDRESS" --token "$TLEND_TOKEN_ID"
 echo "  ℹ Create schedules later with \`create_vesting_schedule\` (admin, beneficiary,"
 echo "    category, total_amount, terms) — each call escrows tokens from the admin."
-
-# Airdrop needs a Merkle root of eligible (address, amount) leaves before it can
-# be initialised — generate one off-chain and pass it in:
-#   export TLEND_AIRDROP_MERKLE_ROOT=<64-char hex sha256 root>
-if [ -n "${TLEND_AIRDROP_MERKLE_ROOT:-}" ]; then
-  echo "▶ Initialising TlendAirdropContract…"
-  stellar contract invoke --id "$TLEND_AIRDROP_ID" --source "$ADMIN_KEY" --network "$NETWORK" \
-    -- initialize --admin "$ADMIN_ADDRESS" --token "$TLEND_TOKEN_ID" --merkle_root "$TLEND_AIRDROP_MERKLE_ROOT"
-  echo "  ✔ Airdrop root set — fund the pool with the \`fund\` invocation before claims open"
-else
-  echo "ℹ Skipping TlendAirdropContract initialisation (set TLEND_AIRDROP_MERKLE_ROOT to enable)."
-  echo "    Initialise later with: stellar contract invoke --id $TLEND_AIRDROP_ID ... -- initialize \\"
-  echo "      --admin $ADMIN_ADDRESS --token $TLEND_TOKEN_ID --merkle_root <root>"
+if [ -n "$TLEND_AIRDROP_ID" ]; then
+  echo "  ℹ Fund the airdrop pool with the \`fund\` invocation before claims open."
 fi
 
 echo ""
-echo "✔ All contracts initialised"
+echo "✔ All contracts wired"
 
 # ── Step 4: Generate TypeScript bindings ──────────────────────────────────────
 
@@ -348,10 +311,12 @@ stellar contract bindings typescript \
   --id "$TLEND_VESTING_ID" \
   --output-dir "$BINDINGS_OUT/tlend_vesting"
 
-stellar contract bindings typescript \
-  --network "$NETWORK" \
-  --id "$TLEND_AIRDROP_ID" \
-  --output-dir "$BINDINGS_OUT/tlend_airdrop"
+if [ -n "$TLEND_AIRDROP_ID" ]; then
+  stellar contract bindings typescript \
+    --network "$NETWORK" \
+    --id "$TLEND_AIRDROP_ID" \
+    --output-dir "$BINDINGS_OUT/tlend_airdrop"
+fi
 
 echo "  ✔ Bindings written to lib/contracts/generated/"
 

@@ -153,7 +153,7 @@ export function LoanApplicationForm({
                 fontFamily: "monospace",
               }}
             >
-              {shortAddress ?? "Ready to authorize with Freighter extension"}
+              {shortAddress ?? "Ready to authorize with Varial extension"}
             </p>
           </div>
         </div>
@@ -450,8 +450,8 @@ export function LoanApplicationForm({
         style={{ width: "100%", marginTop: "0.5rem" }}
       >
         {loading
-          ? statusMessage || "Authorizing with Freighter..."
-          : "Sign & Submit Loan with Freighter"}
+          ? statusMessage || "Authorizing with Varial..."
+          : "Sign & Submit Loan with Varial"}
       </button>
     </form>
   );
@@ -539,7 +539,7 @@ export function RepaymentForm({
             }}
           >
             <span style={{ fontSize: "0.8rem", color: "var(--fg)" }}>
-              ⚡ <strong>Freighter On-Chain Repayment:</strong> Sign settlement transaction with adjusted interest.
+              ⚡ <strong>Varial On-Chain Repayment:</strong> Sign settlement transaction with adjusted interest.
             </span>
             <a
               href={`/dashboard/borrower/repay?loanId=${loan.id}`}
@@ -551,7 +551,7 @@ export function RepaymentForm({
                 whiteSpace: "nowrap",
               }}
             >
-              Open Freighter Payoff Interface →
+              Open Varial Payoff Interface →
             </a>
           </div>
         </div>
@@ -707,7 +707,7 @@ export function BorrowerForms({
     const onchainRequired = isOnchainLifecycleRequired();
     setStatusMessage(onchainRequired ? "1/3 Checking eligibility..." : "1/3 Submitting loan request...");
     try {
-      // 1. Ensure borrower wallet is connected (defaults to Freighter)
+      // 1. Ensure borrower wallet is connected (defaults to Varial)
       let activeWallet = walletAddress;
       try {
         const wallet = await getConnectedWallet(walletProvider);
@@ -859,7 +859,7 @@ export function BorrowerForms({
         open={showWalletModal}
         selectedProvider={walletProvider}
         title="Connect Borrower Wallet"
-        description="Choose Freighter or another Stellar wallet to authorize and sign borrowing transactions."
+        description="Choose Varial or another Stellar wallet to authorize and sign borrowing transactions."
         onSelect={handleSelectWallet}
         onClose={() => setShowWalletModal(false)}
       />

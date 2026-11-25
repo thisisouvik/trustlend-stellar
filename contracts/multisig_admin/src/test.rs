@@ -3,7 +3,7 @@
 extern crate std;
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, Address, Env};
+use soroban_sdk::{testutils::Address as _, token, Address, Env};
 
 use borrower_reputation::{BorrowerReputationContract, BorrowerReputationContractClient};
 use default_management::DefaultManagementContract;
@@ -28,20 +28,18 @@ fn setup<'a>() -> World<'a> {
     let carol = Address::generate(&env);
     let signers = [alice.clone(), bob.clone(), carol.clone()];
 
-    let msig_id = env.register(MultiSigAdminContract, ());
-    let msig = MultiSigAdminContractClient::new(&env, &msig_id);
     let mut signer_vec = Vec::new(&env);
     for s in &signers {
         signer_vec.push_back(s.clone());
     }
-    msig.initialize(&signer_vec, &THRESHOLD_2_OF_3);
+    let msig_id = env.register(MultiSigAdminContract, (signer_vec.clone(), &THRESHOLD_2_OF_3));
+    let msig = MultiSigAdminContractClient::new(&env, &msig_id);
 
     // The lending contract's single admin bootstraps the link to the
     // multisig, then permanently loses direct access to the gated functions.
     let plain_admin = Address::generate(&env);
-    let lending_id = env.register(LendingContract, ());
+    let lending_id = env.register(LendingContract, (&plain_admin,));
     let lending = LendingContractClient::new(&env, &lending_id);
-    lending.initialize(&plain_admin);
     lending.set_multisig_admin(&plain_admin, &msig_id);
 
     World { env, signers, msig, lending, lending_id }
@@ -58,13 +56,33 @@ fn test_initialize_sets_signers_and_threshold() {
     assert!(!w.msig.is_signer(&Address::generate(&w.env)));
 }
 
+/// Issue #352: initialization runs in the Soroban constructor, atomically with
+/// deployment. There is no `initialize` entrypoint left to front-run, and the
+/// constructor cannot be re-invoked on the live contract to seize admin rights.
 #[test]
-#[should_panic(expected = "already initialised")]
-fn test_cannot_reinitialize() {
+fn test_constructor_initializes_and_cannot_be_reinvoked() {
+    use soroban_sdk::{IntoVal, Symbol};
     let w = setup();
-    let mut v = Vec::new(&w.env);
-    v.push_back(w.signers[0].clone());
-    w.msig.initialize(&v, &1);
+    let env = w.env.clone();
+    let threshold = w.msig.get_threshold();
+    let signers = w.msig.get_signers();
+    let attacker = Address::generate(&env);
+    let args: soroban_sdk::Vec<soroban_sdk::Val> = soroban_sdk::vec![
+        &env,
+        soroban_sdk::vec![&env, attacker.clone()].into_val(&env),
+        1u32.into_val(&env),
+    ];
+    for name in ["initialize", "__constructor"] {
+        let res = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &w.msig.address,
+            &Symbol::new(&env, name),
+            args.clone(),
+        );
+        assert!(res.is_err(), "{name} must not be callable after deployment");
+    }
+    assert_eq!(w.msig.get_threshold(), threshold);
+    assert_eq!(w.msig.get_signers(), signers);
+    assert!(!w.msig.is_signer(&attacker));
 }
 
 #[test]
@@ -72,11 +90,9 @@ fn test_cannot_reinitialize() {
 fn test_initialize_rejects_zero_threshold() {
     let env = Env::default();
     env.mock_all_auths();
-    let msig_id = env.register(MultiSigAdminContract, ());
-    let msig = MultiSigAdminContractClient::new(&env, &msig_id);
     let mut v = Vec::new(&env);
     v.push_back(Address::generate(&env));
-    msig.initialize(&v, &0);
+    env.register(MultiSigAdminContract, (v.clone(), 0_u32));
 }
 
 #[test]
@@ -84,11 +100,9 @@ fn test_initialize_rejects_zero_threshold() {
 fn test_initialize_rejects_threshold_above_signer_count() {
     let env = Env::default();
     env.mock_all_auths();
-    let msig_id = env.register(MultiSigAdminContract, ());
-    let msig = MultiSigAdminContractClient::new(&env, &msig_id);
     let mut v = Vec::new(&env);
     v.push_back(Address::generate(&env));
-    msig.initialize(&v, &2);
+    env.register(MultiSigAdminContract, (v.clone(), 2_u32));
 }
 
 #[test]
@@ -96,13 +110,11 @@ fn test_initialize_rejects_threshold_above_signer_count() {
 fn test_initialize_rejects_duplicate_signers() {
     let env = Env::default();
     env.mock_all_auths();
-    let msig_id = env.register(MultiSigAdminContract, ());
-    let msig = MultiSigAdminContractClient::new(&env, &msig_id);
     let dup = Address::generate(&env);
     let mut v = Vec::new(&env);
     v.push_back(dup.clone());
     v.push_back(dup);
-    msig.initialize(&v, &1);
+    env.register(MultiSigAdminContract, (v.clone(), 1_u32));
 }
 
 // ─── Core sequence: propose → approve (N times, distinct wallets) → execute ──────
@@ -189,9 +201,8 @@ fn test_setting_oracle_via_multisig() {
     let bob = w.signers[1].clone();
 
     let rep_admin = Address::generate(&w.env);
-    let rep_id = w.env.register(BorrowerReputationContract, ());
+    let rep_id = w.env.register(BorrowerReputationContract, (&rep_admin,));
     let rep = BorrowerReputationContractClient::new(&w.env, &rep_id);
-    rep.initialize(&rep_admin);
     rep.set_multisig_admin(&rep_admin, &w.msig.address);
 
     let oracle_addr = Address::generate(&w.env);
@@ -205,16 +216,34 @@ fn test_setting_oracle_via_multisig() {
 }
 
 #[test]
+fn test_setting_oracle_via_multisig_on_lending() {
+    let w = setup();
+    let alice = w.signers[0].clone();
+    let bob = w.signers[1].clone();
+
+    let oracle_addr = Address::generate(&w.env);
+    let id = w
+        .msig
+        .propose(&alice, &AdminAction::SetOracle(w.lending_id.clone(), oracle_addr.clone()));
+    w.msig.approve(&bob, &id);
+    w.msig.execute(&id);
+
+    assert_eq!(w.lending.get_price_oracle(), oracle_addr);
+    assert_eq!(w.lending.get_oracle(), oracle_addr);
+}
+
+#[test]
 fn test_insurance_fund_add_and_payout_via_multisig() {
     let w = setup();
     let alice = w.signers[0].clone();
     let bob = w.signers[1].clone();
 
     let dm_admin = Address::generate(&w.env);
-    let dm_id = w.env.register(DefaultManagementContract, ());
+    let insurance_token = w.env.register_stellar_asset_contract_v2(Address::generate(&w.env)).address();
+    let dm_id = w.env.register(DefaultManagementContract, (&dm_admin, &insurance_token));
     let dm = default_management::DefaultManagementContractClient::new(&w.env, &dm_id);
-    dm.initialize(&dm_admin, &0);
     dm.set_multisig_admin(&dm_admin, &w.msig.address);
+    token::StellarAssetClient::new(&w.env, &insurance_token).mint(&w.msig.address, &1_000_0000000);
 
     // Fund the pool.
     let add_id = w
@@ -226,6 +255,8 @@ fn test_insurance_fund_add_and_payout_via_multisig() {
 
     // Pay a lender out of the pool ("withdrawing protocol fees").
     let lender = Address::generate(&w.env);
+    let token_client = token::Client::new(&w.env, &insurance_token);
+    assert_eq!(token_client.balance(&dm_id), 1_000_0000000);
     let payout_id = w.msig.propose(
         &alice,
         &AdminAction::TriggerInsurancePayout(dm_id.clone(), 42, lender.clone(), 300_0000000),
@@ -234,6 +265,8 @@ fn test_insurance_fund_add_and_payout_via_multisig() {
     w.msig.execute(&payout_id);
 
     assert_eq!(dm.get_insurance_balance(), 700_0000000);
+    assert_eq!(token_client.balance(&lender), 300_0000000);
+    assert_eq!(token_client.balance(&dm_id), 700_0000000);
     assert_eq!(dm.get_insurance_event_count(), 1);
     let event = dm.get_insurance_event(&1);
     assert_eq!(event.loan_id, 42);

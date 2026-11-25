@@ -19,6 +19,7 @@ from authorised admin wallets via a new `MultiSigAdminContract`.
 | Lending | `set_governance` | Linking the DAO — rare, high-impact config |
 | Reputation | `set_oracle` | Authorising who can write credit-score data |
 | Default Mgmt | `add_to_insurance` / `trigger_insurance_payout` | "Withdrawing protocol fees" — literal fund movement |
+| Referral Rewards | `withdraw_unspent` | Protecting reward pool from single-admin drainage (Issue #425) |
 
 **Deliberately NOT gated:** `activate_loan`, `record_payment`, `mark_defaulted`,
 `confirm_disbursement`, `record_default`, `add_reputation_event`,

@@ -44,7 +44,7 @@ export async function signInWithStellar(
   preferredProvider?: StellarWalletProvider,
   role?: UserRole
 ): Promise<SiwsResult> {
-  // 1. Connect the wallet (Freighter by default).
+  // 1. Connect the wallet (Varial by default).
   const wallet = await getConnectedWallet(preferredProvider);
   const address = wallet.address;
 

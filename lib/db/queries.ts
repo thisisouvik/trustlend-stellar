@@ -9,6 +9,8 @@
 import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import type { Db } from "@/lib/db/client";
 import {
+  cronAlerts,
+  cronExecutionLogs,
   ledgerTransactions,
   loanFundings,
   loanRepayments,
@@ -18,12 +20,16 @@ import {
   reputationSnapshots,
 } from "@/lib/db/schema";
 import {
+  cronAlertToRow,
+  cronExecutionLogToRow,
   ledgerToRow,
   loanToRow,
   profileToRow,
   repaymentToRow,
   reputationEventToRow,
   snapshotToRow,
+  type CronAlertRow,
+  type CronExecutionLogRow,
   type LedgerRow,
   type LoanRow,
   type ProfileRow,
@@ -172,4 +178,52 @@ export async function getMarketplaceLoans(db: Db | null): Promise<MarketplaceLoa
     trust_score: r.trust_score ?? 250,
     onchain_loan_id: r.onchain_loan_id ?? null,
   }));
+}
+
+export async function getRecentCronExecutionLogs(
+  db: Db | null,
+  jobName?: string,
+  limit = 20,
+): Promise<CronExecutionLogRow[]> {
+  if (!db) return [];
+  const query = db.select().from(cronExecutionLogs);
+  const rows = jobName
+    ? await query
+        .where(eq(cronExecutionLogs.jobName, jobName))
+        .orderBy(desc(cronExecutionLogs.startedAt))
+        .limit(limit)
+    : await query.orderBy(desc(cronExecutionLogs.startedAt)).limit(limit);
+  return rows.map(cronExecutionLogToRow);
+}
+
+export async function getCronExecutionLogById(
+  db: Db | null,
+  id: string,
+): Promise<CronExecutionLogRow | null> {
+  if (!db) return null;
+  const [row] = await db
+    .select()
+    .from(cronExecutionLogs)
+    .where(eq(cronExecutionLogs.id, id))
+    .limit(1);
+  return row ? cronExecutionLogToRow(row) : null;
+}
+
+export async function getCronAlerts(
+  db: Db | null,
+  jobName?: string,
+  unresolvedOnly = false,
+  limit = 50,
+): Promise<CronAlertRow[]> {
+  if (!db) return [];
+  const conditions = [];
+  if (jobName) conditions.push(eq(cronAlerts.jobName, jobName));
+  if (unresolvedOnly) conditions.push(eq(cronAlerts.resolved, false));
+  const rows = await db
+    .select()
+    .from(cronAlerts)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(cronAlerts.createdAt))
+    .limit(limit);
+  return rows.map(cronAlertToRow);
 }

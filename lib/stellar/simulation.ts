@@ -2,12 +2,12 @@ import {
   TransactionBuilder,
   BASE_FEE,
   Contract,
-  Account,
   xdr,
   Address,
   nativeToScVal,
+  rpc,
+  StrKey,
 } from "@stellar/stellar-sdk";
-
 
 export const SOROBAN_RPC_URL =
   process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ??
@@ -16,12 +16,6 @@ export const SOROBAN_RPC_URL =
 export const NETWORK_PASSPHRASE =
   process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE ??
   "Test SDF Network ; September 2015";
-
-export const HORIZON_URL =
-  process.env.NEXT_PUBLIC_STELLAR_HORIZON_URL ??
-  "https://horizon-testnet.stellar.org";
-
-// ─── Simulation result type ────────────────────────────────────────────────
 
 export interface SimulationResources {
   instructions: number;
@@ -42,8 +36,6 @@ export interface SimulationResult {
   latestLedger: number;
 }
 
-// ─── Encoding helpers (mirror soroban.ts) ──────────────────────────────────
-
 function addressToScVal(address: string): xdr.ScVal {
   return new Address(address).toScVal();
 }
@@ -56,93 +48,44 @@ function u32ToScVal(value: number): xdr.ScVal {
   return nativeToScVal(value, { type: "u32" });
 }
 
-
-
 function stringToScVal(value: string): xdr.ScVal {
   return nativeToScVal(value, { type: "string" });
 }
 
-
-
 export function encodeArg(arg: unknown): xdr.ScVal {
-  if (typeof arg === "string" && arg.startsWith("G") && arg.length === 56) {
+  if (typeof arg === "string" && StrKey.isValidEd25519PublicKey(arg)) {
     return addressToScVal(arg);
   }
-  if (typeof arg === "bigint") {
-    return i128ToScVal(arg);
-  }
-  if (typeof arg === "number" && Number.isInteger(arg)) {
-    return u32ToScVal(arg);
-  }
-  if (typeof arg === "number") {
-    return nativeToScVal(arg);
-  }
-  if (arg instanceof xdr.ScVal) {
-    return arg;
-  }
-  if (typeof arg === "boolean") {
-    return nativeToScVal(arg);
-  }
-  if (typeof arg === "string") {
-    return stringToScVal(arg);
-  }
+  if (typeof arg === "bigint") return i128ToScVal(arg);
+  if (typeof arg === "number" && Number.isInteger(arg)) return u32ToScVal(arg);
+  if (typeof arg === "number") return nativeToScVal(arg);
+  if (arg instanceof xdr.ScVal) return arg;
+  if (typeof arg === "boolean") return nativeToScVal(arg);
+  if (typeof arg === "string") return stringToScVal(arg);
   return nativeToScVal(arg);
 }
 
-// ─── Raw JSON-RPC call ────────────────────────────────────────────────────
-
-async function sorobanRpc<T = Record<string, unknown>>(
-  method: string,
-  params: Record<string, unknown>,
-): Promise<T> {
-  const res = await fetch(SOROBAN_RPC_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+function createRpcServer(): rpc.Server {
+  return new rpc.Server(SOROBAN_RPC_URL, {
+    allowHttp: SOROBAN_RPC_URL.startsWith("http://"),
   });
-  if (!res.ok) {
-    throw new Error(`Soroban RPC error (${method}): ${res.statusText}`);
-  }
-  const json = (await res.json()) as { result?: T; error?: unknown };
-  if (json.error) {
-    throw new Error(
-      `Soroban RPC error (${method}): ${JSON.stringify(json.error)}`,
-    );
-  }
-  return json.result as T;
 }
-
-// ─── Horizon sequence fetch ───────────────────────────────────────────────
-
-async function getAccountSequence(address: string): Promise<string> {
-  const res = await fetch(`${HORIZON_URL}/accounts/${address}`);
-  if (!res.ok) {
-    if (res.status === 404) {
-      throw new Error(
-        `Account ${address} not found on Stellar network. Fund it at https://friendbot.stellar.org?addr=${address}.`,
-      );
-    }
-    throw new Error(`Horizon account fetch failed: ${res.statusText}`);
-  }
-  const data = (await res.json()) as { sequence: string };
-  return data.sequence;
-}
-
-// ─── Stroops → XLM ────────────────────────────────────────────────────────
 
 const STROOPS_PER_XLM = 10_000_000;
+const emptyResources = (): SimulationResources => ({
+  instructions: 0,
+  readBytes: 0,
+  writeBytes: 0,
+  ledgerFootprintEntries: 0,
+});
 
 function stroopsToXlm(stroops: number): string {
   return (stroops / STROOPS_PER_XLM).toFixed(7);
 }
 
-// ─── Main simulation function ─────────────────────────────────────────────
-
 /**
- * Simulate a Soroban contract call and return parsed resource consumption
- * without requiring a wallet signature.
- *
- * Use this to show users a "Simulation Preview" before they sign.
+ * Simulates a Soroban invocation through the SDK RPC client and returns a
+ * user-facing resource and fee preview. No raw JSON-RPC response is unpacked.
  */
 export async function simulatePreview(
   contractId: string,
@@ -150,97 +93,73 @@ export async function simulatePreview(
   args: unknown[],
   callerAddress: string,
 ): Promise<SimulationResult> {
-  const baseResult: Omit<SimulationResult, "success" | "error" | "resources"> =
-    {
-      method,
-      contractId,
-      feeStroops: 0,
-      feeXlm: "0",
-      latestLedger: 0,
-    };
+  const baseResult = {
+    method,
+    contractId,
+    feeStroops: 0,
+    feeXlm: "0",
+    latestLedger: 0,
+  };
+  const server = createRpcServer();
 
-  let sequence: string;
+  let account;
   try {
-    sequence = await getAccountSequence(callerAddress);
-  } catch (err) {
+    if (!StrKey.isValidEd25519PublicKey(callerAddress)) {
+      throw new Error("Invalid Stellar account address.");
+    }
+    account = await server.getAccount(callerAddress);
+  } catch (error) {
     return {
       ...baseResult,
       success: false,
-      error: (err as Error).message,
-      resources: { instructions: 0, readBytes: 0, writeBytes: 0, ledgerFootprintEntries: 0 },
+      error: error instanceof Error ? error.message : String(error),
+      resources: emptyResources(),
     };
   }
-
-  const account = new Account(callerAddress, sequence);
-  const contract = new Contract(contractId);
-  const scValArgs = args.map(encodeArg);
 
   const tx = new TransactionBuilder(account, {
     fee: BASE_FEE,
     networkPassphrase: NETWORK_PASSPHRASE,
   })
-    .addOperation(contract.call(method, ...scValArgs))
+    .addOperation(new Contract(contractId).call(method, ...args.map(encodeArg)))
     .setTimeout(30)
     .build();
 
-  let simData: {
-    error?: string;
-    transactionData?: string;
-    minResourceFee?: string;
-    results?: Array<{ auth: string[]; xdr: string }>;
-    latestLedger?: number;
-  };
-
+  let simulation: rpc.Api.SimulateTransactionResponse;
   try {
-    simData = await sorobanRpc("simulateTransaction", {
-      transaction: tx.toXDR(),
-    });
-  } catch (err) {
+    simulation = await server.simulateTransaction(tx);
+  } catch (error) {
     return {
       ...baseResult,
       success: false,
-      error: `RPC call failed: ${(err as Error).message}`,
-      resources: { instructions: 0, readBytes: 0, writeBytes: 0, ledgerFootprintEntries: 0 },
+      error: "RPC call failed: " + (error instanceof Error ? error.message : String(error)),
+      resources: emptyResources(),
     };
   }
 
-  if (simData.error) {
+  if (rpc.Api.isSimulationError(simulation)) {
     return {
       ...baseResult,
       success: false,
-      error: simData.error,
-      resources: { instructions: 0, readBytes: 0, writeBytes: 0, ledgerFootprintEntries: 0 },
-      latestLedger: simData.latestLedger ?? 0,
+      error: simulation.error,
+      resources: emptyResources(),
+      latestLedger: simulation.latestLedger,
     };
   }
-
-  if (!simData.results?.length || !simData.transactionData) {
+  if (!simulation.result) {
     return {
       ...baseResult,
       success: false,
-      error: "Simulation returned no results — contract may not exist on this network.",
-      resources: { instructions: 0, readBytes: 0, writeBytes: 0, ledgerFootprintEntries: 0 },
-      latestLedger: simData.latestLedger ?? 0,
+      error: "Simulation returned no contract result.",
+      resources: emptyResources(),
+      latestLedger: simulation.latestLedger,
     };
   }
 
-  const minResourceFee = Number(simData.minResourceFee ?? 0);
-  const baseFee = Number(BASE_FEE);
-  const totalFeeStroops = baseFee + minResourceFee;
-
-  let resources: SimulationResources = {
-    instructions: 0,
-    readBytes: 0,
-    writeBytes: 0,
-    ledgerFootprintEntries: 0,
-  };
-
+  const totalFeeStroops = Number(BASE_FEE) + Number(simulation.minResourceFee);
+  let resources = emptyResources();
   try {
-    const txData = xdr.SorobanTransactionData.fromXDR(
-      simData.transactionData,
-      "base64",
-    );
-    const sorobanResources = txData.resources();
+    const sorobanResources = simulation.transactionData.build().resources();
     resources = {
       instructions: sorobanResources.instructions(),
       readBytes: sorobanResources.diskReadBytes(),
@@ -248,18 +167,15 @@ export async function simulatePreview(
       ledgerFootprintEntries: sorobanResources.footprint().readWrite().length,
     };
   } catch {
-    // If XDR parsing fails, proceed with zeroed resources
+    // A fee preview remains useful even if a provider returns incomplete data.
   }
 
   let returnValue: unknown;
   try {
     const { scValToNative } = await import("@stellar/stellar-sdk");
-    const retvalXdr = simData.results[0].xdr;
-    if (retvalXdr) {
-      returnValue = scValToNative(xdr.ScVal.fromXDR(retvalXdr, "base64"));
-    }
+    returnValue = scValToNative(simulation.result.retval);
   } catch {
-    // Ignore decoding errors on the return value
+    // Contract return-value decoding is non-essential for the preview.
   }
 
   return {
@@ -269,6 +185,6 @@ export async function simulatePreview(
     feeXlm: stroopsToXlm(totalFeeStroops),
     resources,
     returnValue,
-    latestLedger: simData.latestLedger ?? 0,
+    latestLedger: simulation.latestLedger,
   };
 }

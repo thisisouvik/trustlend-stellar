@@ -2,6 +2,7 @@
  * lib/contracts/lending.ts
  *
  * TypeScript client for the LendingContract.
+ * Contract reads and writes are routed through the shared Stellar SDK RPC executor.
  */
 
 import {
@@ -60,6 +61,9 @@ export async function depositCollateral(
 
 /**
  * Withdraw collateral from the borrower's vault position.
+ *
+ * Collateral locked by a Pending, Approved or Active loan cannot be withdrawn
+ * (Issue #416); cancel an unfunded request with `cancelLoanRequest` first.
  */
 export async function withdrawCollateral(
   borrowerAddress: string,
@@ -74,6 +78,19 @@ export async function withdrawCollateral(
       addressToScVal(assetAddress),
       i128ToScVal(amountStroops),
     ],
+    callerAddress: borrowerAddress,
+  });
+}
+
+/**
+ * Borrower cancels their own Pending loan request, releasing the collateral
+ * locked for it (Issue #416).
+ */
+export async function cancelLoanRequest(borrowerAddress: string, loanId: number) {
+  return callContract({
+    contractId: CONTRACT_ID,
+    method: "cancel_loan_request",
+    args: [addressToScVal(borrowerAddress), u32ToScVal(loanId)],
     callerAddress: borrowerAddress,
   });
 }
@@ -415,7 +432,12 @@ export interface CreateLoanRequestParams {
    * `LoanRequestInput` wire format is unchanged.
    */
   maxLoanAmountStroops: bigint;
-  /** At least one whitelisted asset; the contract checks borrowing power. */
+  /**
+   * At least one whitelisted asset. This is only a declaration (Issue #415):
+   * borrowing power comes from collateral already deposited with
+   * `depositCollateral`, and each declared amount must not exceed the
+   * borrower's deposited vault balance for that asset.
+   */
   collateralEntries: { asset: string; amount: bigint }[];
   rateModel?: InterestRateModel;
   /**

@@ -87,7 +87,7 @@ export const borrowingSteps: GuideStep[] = [
       "Sign in as a Borrower, then connect a Stellar wallet. The wallet is the address that will receive your loan and sign every on-chain action, so it must be connected before you can request funds.",
     details: [
       "Sign in with your Stellar wallet and choose the Borrower role.",
-      "Connect a supported Stellar wallet (Freighter, Albedo or xBull).",
+      "Connect a supported Stellar wallet (Varial, Albedo or xBull).",
       "Loans cannot be funded to an account with no wallet — the marketplace shows a 'No wallet' badge to lenders until you connect one.",
     ],
     href: "/dashboard/borrower/profile",

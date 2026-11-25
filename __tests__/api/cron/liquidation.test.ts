@@ -69,7 +69,11 @@ describe("POST /api/cron/liquidation", () => {
     expect(mockLoadConfig).toHaveBeenCalledOnce();
     expect(mockGetAdminKeypair).toHaveBeenCalledOnce();
     expect(mockRunLiquidationKeeper).toHaveBeenCalledOnce();
-    expect(mockRunLiquidationKeeper).toHaveBeenCalledWith(BASE_CFG, {});
+    expect(mockRunLiquidationKeeper).toHaveBeenCalledWith(
+      BASE_CFG,
+      {},
+      expect.objectContaining({ signal: expect.any(Object) }),
+    );
   });
 
   it("rejects a request with a wrong bearer token (401)", async () => {

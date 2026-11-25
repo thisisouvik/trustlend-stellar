@@ -4,7 +4,7 @@ use super::*;
 use soroban_sdk::{testutils::Address as _, token, vec, Address, Env};
 
 use lending::{
-    CollateralEntry, InterestRateModel, LendingContract, LendingContractClient, LoanRequestInput,
+    AssetCollateralConfig, CollateralEntry, InterestRateModel, LendingContract, LendingContractClient, LoanRequestInput,
 };
 
 fn setup_test() -> (
@@ -27,16 +27,17 @@ fn setup_test() -> (
         .register_stellar_asset_contract_v2(token_admin)
         .address();
 
-    let treasury_id = env.register(TreasuryContract, ());
-    let client = TreasuryContractClient::new(&env, &treasury_id);
-
-    client.initialize(
-        &admin,
-        &insurance_fund,
-        &dao_treasury,
-        &DEFAULT_INSURANCE_SHARE_BPS,
-        &DEFAULT_DAO_SHARE_BPS,
+    let treasury_id = env.register(
+        TreasuryContract,
+        (
+            &admin,
+            &insurance_fund,
+            &dao_treasury,
+            &DEFAULT_INSURANCE_SHARE_BPS,
+            &DEFAULT_DAO_SHARE_BPS,
+        ),
     );
+    let client = TreasuryContractClient::new(&env, &treasury_id);
 
     (
         env,
@@ -157,20 +158,36 @@ fn setup_lending_with_fees(
     fee_token: &Address,
     fund: bool,
 ) -> (Address, i128) {
-    let lending_id = env.register(LendingContract, ());
+    let lending_id = env.register(LendingContract, (admin,));
     let lending = LendingContractClient::new(env, &lending_id);
-    lending.initialize(admin);
     lending.set_multisig_admin(admin, admin);
 
     let borrower = Address::generate(env);
-    let collateral_asset = Address::generate(env);
+    let collateral_asset = env
+        .register_stellar_asset_contract_v2(Address::generate(env))
+        .address();
     lending.whitelist_asset(admin, &collateral_asset);
+    lending.set_asset_collateral_config(
+        admin,
+        &collateral_asset,
+        &AssetCollateralConfig {
+            collateral_factor_bps: 7500,
+            has_price_oracle: true,
+            volatility_bps: 0,
+        },
+    );
+    lending.set_asset_oracle_prices(admin, &collateral_asset, &vec![env, 10_000_000]);
+
+    // Loan requests are backed only by collateral deposited into the
+    // borrower's on-chain vault (lending Issue #415).
+    let vault_deposit: i128 = 100_000_0000000;
+    mint_tokens(env, &collateral_asset, &borrower, vault_deposit);
+    lending.deposit_collateral(&borrower, &collateral_asset, &vault_deposit);
 
     // Lending reads the borrower's credit limit from the reputation contract.
-    let reputation_id = env.register(borrower_reputation::BorrowerReputationContract, ());
+    let reputation_id = env.register(borrower_reputation::BorrowerReputationContract, (admin,));
     let reputation =
         borrower_reputation::BorrowerReputationContractClient::new(env, &reputation_id);
-    reputation.initialize(admin);
     reputation.init_borrower(&borrower);
     lending.set_reputation_contract(admin, &reputation_id);
 
@@ -376,4 +393,32 @@ fn test_set_lending_contract_admin_only() {
         .is_err());
     client.set_lending_contract(&admin, &lending);
     assert_eq!(client.get_lending_contract(), Some(lending));
+}
+
+/// Issue #352: initialization runs in the Soroban constructor, atomically with
+/// deployment. There is no `initialize` entrypoint left to front-run, and the
+/// constructor cannot be re-invoked on the live contract to seize admin rights.
+#[test]
+fn test_constructor_initializes_and_cannot_be_reinvoked() {
+    use soroban_sdk::{IntoVal, Symbol};
+    let (env, admin, insurance_fund, dao_treasury, _token, client) = setup_test();
+    assert_eq!(client.get_admin(), admin);
+    let attacker = Address::generate(&env);
+    let args: soroban_sdk::Vec<soroban_sdk::Val> = soroban_sdk::vec![
+        &env,
+        attacker.into_val(&env),
+        insurance_fund.into_val(&env),
+        dao_treasury.into_val(&env),
+        5_000u32.into_val(&env),
+        5_000u32.into_val(&env),
+    ];
+    for name in ["initialize", "__constructor"] {
+        let res = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &client.address,
+            &Symbol::new(&env, name),
+            args.clone(),
+        );
+        assert!(res.is_err(), "{name} must not be callable after deployment");
+    }
+    assert_eq!(client.get_admin(), admin);
 }

@@ -25,7 +25,10 @@ export type ContractSpec = {
 /**
  * Deploy order matters: contracts with no dependencies first, then the ones
  * that need to be initialized with another contract's id (governance needs
- * lending + reputation; vesting and airdrop need the TLEND token).
+ * lending + reputation; vesting and airdrop need the TLEND token; referral,
+ * loyalty and the auto-compound vault need lending). Initialization runs in
+ * each contract's constructor at deploy time (Issue #352), so a dependency
+ * must already be deployed when its dependant is.
  */
 export const CONTRACTS: ContractSpec[] = [
   {

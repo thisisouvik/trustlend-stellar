@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { enforceRouteRateLimit } from "@/lib/rate-limit";
-import { sql } from "drizzle-orm";
-import { getDb } from "@/lib/db/client";
+import { getPooledDb } from "@/lib/db/client";
 import { normalizeReferralCode } from "@/lib/referrals/codes";
+import {
+  readReferralClaim,
+  referralClaimErrorStatus,
+  referralClaimStatement,
+} from "@/lib/referrals/claim";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
+import { isBoundedString } from "@/lib/http/request-validation";
 
 /**
  * POST /api/referrals/claim
@@ -28,13 +33,23 @@ export async function POST(request: NextRequest) {
     }
 
     const { user } = await requireAuthenticatedUser();
-    const db = getDb();
+    // The HTTP client cannot start interactive transactions. Referral claims
+    // use the pooled client so their SQL validation and insert share one
+    // transaction, including when different links are claimed concurrently.
+    const db = getPooledDb();
     if (!db) {
       return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
     }
 
     const body = await request.json().catch(() => ({}));
-    const code = normalizeReferralCode((body as { code?: unknown }).code);
+    const rawCode = (body as { code?: unknown }).code;
+    if (!isBoundedString(rawCode, 64)) {
+      return NextResponse.json(
+        { error: "A valid referral code is required" },
+        { status: 400 },
+      );
+    }
+    const code = normalizeReferralCode(rawCode);
 
     if (!code) {
       return NextResponse.json(
@@ -43,23 +58,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let row: { referral_id?: string; status?: string } | undefined;
+    let claim: ReturnType<typeof readReferralClaim>;
     try {
-      const result = await db.execute(
-        sql`select referral_id, referrer_id, status from public.record_referral(${user.id}::uuid, ${code}::text)`,
+      const result = await db.transaction((tx) =>
+        tx.execute(referralClaimStatement(user.id, code)),
       );
-      row = result.rows[0] as typeof row;
+      claim = readReferralClaim(result.rows);
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
+      const errorStatus = referralClaimErrorStatus(error);
       // Map the SQL guards onto meaningful status codes rather than a blanket
       // 500 — an unknown code is a client mistake, not a server fault.
-      if (message.includes("Unknown referral code")) {
+      if (errorStatus === 404) {
         return NextResponse.json(
           { error: "That referral code does not exist" },
           { status: 404 },
         );
       }
-      if (message.includes("Cannot refer yourself")) {
+      if (errorStatus === 409) {
         return NextResponse.json(
           { error: "You cannot use your own referral link" },
           { status: 409 },
@@ -74,8 +90,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(
       {
-        referralId: row?.referral_id ? String(row.referral_id) : null,
-        status: String(row?.status ?? "pending"),
+        referralId: claim.referralId,
+        status: claim.status,
         message:
           "Referral recorded. Your friend earns their bonus once your first loan is funded.",
       },

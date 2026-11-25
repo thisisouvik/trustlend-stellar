@@ -3,7 +3,7 @@
  *
  * Standard SEP-24 client for cross-border fiat on/off ramps via Stellar Anchors.
  * Implements the full flow with plain `fetch` + the project's existing wallet
- * signer (Freighter / Albedo), so no extra heavy SDK dependency is required:
+ * signer (Varial / Albedo), so no extra heavy SDK dependency is required:
  *
  *   1. discoverAnchor()        — read /.well-known/stellar.toml (SEP-1)
  *   2. authenticate()          — SEP-10 challenge → wallet-signed JWT

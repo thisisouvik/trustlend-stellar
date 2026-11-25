@@ -137,7 +137,7 @@ export default async function LenderHomePage() {
                 className="workspace-card-copy"
                 style={{ opacity: 0.65, fontSize: "0.875rem" }}
               >
-                Browse open borrower requests. Fund directly with Freighter or
+                Browse open borrower requests. Fund directly with Varial or
                 Albedo — XLM goes straight to the borrower&apos;s Stellar
                 wallet. Earn interest on repayment.
               </p>

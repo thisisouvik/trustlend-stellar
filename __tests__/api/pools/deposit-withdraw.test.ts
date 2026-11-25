@@ -149,7 +149,7 @@ describe("POST /api/pools/withdraw", () => {
     expect(mockPayout).toHaveBeenCalledWith(
       expect.objectContaining({ destination: LENDER, amountXlm: 40, memo: `TL-WDR:${POSITION_ID.slice(0, 12)}` }),
     );
-    expect(db.calls.some((c) => JSON.stringify(c.args).includes(HASH))).toBe(true);
+    expect(db.calls.some((c) => c.method === "set" && (c.args[0] as { metadata?: { txHash?: string } })?.metadata?.txHash === HASH)).toBe(true);
     expect(db.calls.filter((c) => c.method === "update").length).toBe(3);
     expect(mockSync).toHaveBeenCalledWith(db, POOL_ID);
   });

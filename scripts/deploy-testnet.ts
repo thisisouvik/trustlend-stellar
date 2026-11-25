@@ -8,6 +8,12 @@
  * initializes and wires them together, then writes the resulting contract IDs
  * straight into `.env.local` — no copy-paste step.
  *
+ * Initialization happens in each contract's Soroban constructor, whose
+ * arguments are passed to `stellar contract deploy ... -- <args>` (Issue #352).
+ * Deploy and initialize are therefore one atomic transaction: there is no
+ * window in which a freshly deployed contract sits uninitialized on-chain for
+ * someone else to front-run with their own admin address.
+ *
  * This supersedes contracts/scripts/deploy.sh and deploy.ps1 (two scripts that
  * had to be kept in sync by hand) with one cross-platform entry point that also
  * handles the prerequisites those scripts told you to do yourself: creating the
@@ -92,7 +98,9 @@ Options:
   --only <a,b,c>        Deploy only these contracts. Available:
                         ${CONTRACT_KEYS.join(", ")}
   --skip-build          Reuse the WASM already in contracts/target
-  --skip-init           Deploy without running initialize/wiring
+  --skip-init           Deploy without the post-deploy wiring (linking
+                        contracts, multisig hand-over, minting). Constructor
+                        arguments are always passed at deploy time.
   --skip-bindings       Do not regenerate TypeScript bindings
   --resume              Reuse contract IDs from a previous run of this network
                         instead of redeploying them
@@ -108,8 +116,8 @@ Environment overrides:
   MULTISIG_THRESHOLD          Approvals needed (default: 1)
   ORACLE_ADDRESS              Authorize a credit-score oracle during deploy
   TLEND_TOTAL_SUPPLY          Raw units minted to admin (default: 1000000000000)
-  TLEND_AIRDROP_MERKLE_ROOT   64-char hex root; airdrop init is skipped without it
-  USDC_TOKEN_ADDRESS          USDC SAC / token contract for the USDC pool (init skipped without it)
+  TLEND_AIRDROP_MERKLE_ROOT   64-char hex root; the airdrop is not deployed without it
+  USDC_TOKEN_ADDRESS          USDC SAC / token contract; the USDC pool is not deployed without it
   INSURANCE_FUND_ADDRESS      Treasury insurance destination (default: default-management contract)
   DAO_TREASURY_ADDRESS        Treasury DAO destination (default: admin address)
 
@@ -402,7 +410,14 @@ function buildContracts(): void {
   log.ok("Build complete");
 }
 
-function deployContract(spec: ContractSpec, options: Options): string {
+/**
+ * Deploy a contract and run its constructor in the same transaction.
+ *
+ * `constructorArgs` are the `__constructor` parameters in CLI form
+ * (`--admin G...`), appended after `--`. Every TrustLend contract initializes
+ * through its constructor, so a contract is never live without an admin.
+ */
+function deployContract(spec: ContractSpec, options: Options, constructorArgs: string[]): string {
   const wasmPath = path.join(WASM_DIR, spec.wasm);
 
   if (!DRY_RUN && !fs.existsSync(wasmPath)) {
@@ -425,6 +440,7 @@ function deployContract(spec: ContractSpec, options: Options): string {
       options.network,
       "--source",
       options.adminKey,
+      ...(constructorArgs.length > 0 ? ["--", ...constructorArgs] : []),
     ],
     { capture: true, cwd: CONTRACTS_DIR }
   );
@@ -466,29 +482,225 @@ function invoke(
   );
 }
 
-function initializeContracts(
+/** Native XLM's Stellar Asset Contract id on the target network. */
+function nativeAssetContractId(network: string): string {
+  const passphrase =
+    process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE ??
+    (network === "futurenet"
+      ? "Test SDF Future Network ; October 2022"
+      : network === "mainnet" || network === "public"
+        ? "Public Global Stellar Network ; September 2015"
+        : "Test SDF Network ; September 2015");
+  return Asset.native().contractId(passphrase);
+}
+
+/** Initial multisig signer set and threshold, validated before deploying. */
+function multisigConfig(adminAddress: string): { signers: string[]; threshold: string } {
+  const signers = (process.env.MULTISIG_SIGNERS ?? adminAddress)
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const threshold = process.env.MULTISIG_THRESHOLD ?? "1";
+
+  if (Number(threshold) < 1 || Number(threshold) > signers.length) {
+    die(
+      `MULTISIG_THRESHOLD=${threshold} is invalid for ${signers.length} signer(s).`,
+      "It must be between 1 and the number of entries in MULTISIG_SIGNERS."
+    );
+  }
+
+  return { signers, threshold };
+}
+
+/**
+ * The `__constructor` arguments for `key`, in `stellar contract deploy -- ...`
+ * form. Dependencies (e.g. governance needs lending + reputation) are deployed
+ * earlier in manifest order, so their ids are already in `ids`.
+ *
+ * Returns `null` when a required input is missing; that contract is then not
+ * deployed at all rather than being left on-chain uninitialized.
+ */
+function constructorArgsFor(
+  key: string,
   ids: Record<string, string>,
   adminAddress: string,
   options: Options
+): string[] | null {
+  const xlm = nativeAssetContractId(options.network);
+
+  const requires = (...deps: string[]): boolean => {
+    const missing = deps.filter((dep) => !ids[dep]);
+    if (missing.length === 0) return true;
+    log.warn(
+      `Not deploying ${key}: its constructor needs the ${missing.join(", ")} contract id(s). ` +
+        "Deploy them in the same run, or re-run with --resume so their ids are reused."
+    );
+    return false;
+  };
+
+  switch (key) {
+    case "reputation":
+    case "escrow":
+    case "lending":
+    case "liquidation_auction":
+    case "zk_credit_verifier":
+      return ["--admin", adminAddress];
+
+    case "default_management":
+      return ["--admin", adminAddress, "--insurance_token", xlm];
+
+    case "pooled_lending":
+      // Pool 0 with the interest-rate curve the app's defaults assume:
+      // 2% base, 10% slope to an 80% kink, 100% jump above it, 10% reserve factor.
+      return [
+        "--admin", adminAddress,
+        "--pool_id", "0",
+        "--config", JSON.stringify({
+          base_rate_bps: 200,
+          multiplier_per_slope_bps: 1000,
+          jump_multiplier_bps: 10000,
+          kink_bps: 8000,
+          reserve_factor_bps: 1000,
+        }),
+      ];
+
+    case "governance":
+      if (!ids.lending || !ids.reputation) {
+        die(
+          "GovernanceContract needs the lending and reputation contracts.",
+          "Deploy them in the same run, or re-run with --resume so their ids are reused."
+        );
+      }
+      // 3-day voting window, quorum 500, min proposer power 150 (Silver tier),
+      // fee cap 1000 bps (10%), 24h timelock delay (86400s). Voting power = reputation score.
+      return [
+        "--admin", adminAddress,
+        "--lending", ids.lending,
+        "--reputation", ids.reputation,
+        "--voting_period_secs", "259200",
+        "--quorum_votes", "500",
+        "--min_proposer_power", "150",
+        "--max_fee_bps", "1000",
+        "--timelock_delay_secs", "86400",
+      ];
+
+    case "multisig_admin": {
+      const { signers, threshold } = multisigConfig(adminAddress);
+      return ["--signers", JSON.stringify(signers), "--threshold", threshold];
+    }
+
+    case "tlend_token":
+      // Decimals/name/symbol are immutable token metadata.
+      return ["--admin", adminAddress, "--decimals", "7", "--name", "TrustLend", "--symbol", "TLEND"];
+
+    case "tlend_vesting":
+      if (!requires("tlend_token")) return null;
+      return ["--admin", adminAddress, "--token", ids.tlend_token];
+
+    case "tlend_airdrop": {
+      if (!requires("tlend_token")) return null;
+      const merkleRoot = process.env.TLEND_AIRDROP_MERKLE_ROOT;
+      if (!merkleRoot) {
+        log.info("Not deploying the airdrop — set TLEND_AIRDROP_MERKLE_ROOT to enable it");
+        return null;
+      }
+      return ["--admin", adminAddress, "--token", ids.tlend_token, "--merkle_root", merkleRoot];
+    }
+
+    case "referral_rewards":
+      if (!requires("lending")) return null;
+      // 10 XLM bonus at a 100 XLM reference loan, capped at 3x, min 10 XLM loans.
+      return [
+        "--admin", adminAddress,
+        "--reward_token", ids.tlend_token || xlm,
+        "--lending_contract", ids.lending,
+        "--config", JSON.stringify({
+          base_bonus: "100000000",
+          reference_loan_amount: "1000000000",
+          max_size_multiplier_bps: 30000,
+          min_qualifying_loan: "100000000",
+          max_referrals_per_referrer: 0,
+        }),
+      ];
+
+    case "borrower_loyalty":
+      if (!requires("lending")) return null;
+      // 5 XLM base reward at a 100 XLM reference loan; tier multipliers 1x-2x.
+      return [
+        "--admin", adminAddress,
+        "--reward_token", ids.tlend_token || xlm,
+        "--lending_contract", ids.lending,
+        "--config", JSON.stringify({
+          base_amount: "50000000",
+          reference_loan_amount: "1000000000",
+          max_duration_multiplier_bps: 20000,
+          tier_none_multiplier_bps: 10000,
+          tier_beginner_multiplier_bps: 11000,
+          tier_silver_multiplier_bps: 12500,
+          tier_gold_multiplier_bps: 15000,
+          tier_platinum_multiplier_bps: 20000,
+        }),
+      ];
+
+    case "treasury":
+      // 50/50 insurance / DAO split.
+      return [
+        "--admin", adminAddress,
+        "--insurance_fund", process.env.INSURANCE_FUND_ADDRESS ?? ids.default_management ?? adminAddress,
+        "--dao_treasury", process.env.DAO_TREASURY_ADDRESS ?? adminAddress,
+        "--insurance_share_bps", "5000",
+        "--dao_share_bps", "5000",
+      ];
+
+    case "auto_compound_vault":
+      if (!requires("lending")) return null;
+      // 1% harvest fee on native XLM.
+      return [
+        "--admin", adminAddress,
+        "--asset_token", xlm,
+        "--lending_contract", ids.lending,
+        "--harvest_fee_bps", "100",
+      ];
+
+    case "usdc_lending_pool": {
+      const usdc = process.env.USDC_TOKEN_ADDRESS;
+      if (!usdc) {
+        log.info("Not deploying the USDC pool — set USDC_TOKEN_ADDRESS to enable it");
+        return null;
+      }
+      // Up to 8% APY; depositors earn yield only once USDC is paid in via fund_yield.
+      return ["--admin", adminAddress, "--usdc_token", usdc, "--annual_yield_bps", "800"];
+    }
+
+    default:
+      die(
+        `No constructor arguments defined for contract "${key}".`,
+        "Add a case to constructorArgsFor in scripts/deploy-testnet.ts."
+      );
+  }
+}
+
+/**
+ * Link freshly deployed contracts together. Every contract was already
+ * initialized by its constructor at deploy time; this only performs the
+ * admin-authorized wiring that needs more than one contract id.
+ *
+ * `fresh` holds the keys deployed in this run. A step runs only when one of
+ * the contracts it touches is fresh, so `--resume` never repeats one-off
+ * actions (minting TLEND, multisig proposals) against existing contracts.
+ */
+function wireContracts(
+  ids: Record<string, string>,
+  fresh: Set<string>,
+  adminAddress: string,
+  options: Options
 ): void {
-  const has = (key: string) => Boolean(ids[key]);
+  const has = (...keys: string[]) => keys.every((key) => Boolean(ids[key]));
+  const isFresh = (...keys: string[]) => keys.some((key) => fresh.has(key));
 
-  log.step("Initializing contracts…");
+  log.step("Wiring contracts together…");
 
-  if (has("reputation")) {
-    invoke(ids.reputation, "initialize", ["--admin", adminAddress], options);
-    log.ok("BorrowerReputationContract initialized");
-  }
-
-  if (has("escrow")) {
-    invoke(ids.escrow, "initialize", ["--admin", adminAddress], options);
-    log.ok("EscrowContract initialized");
-  }
-
-  if (has("lending")) {
-    invoke(ids.lending, "initialize", ["--admin", adminAddress], options);
-    log.ok("LendingContract initialized");
-
+  if (has("lending") && isFresh("lending", "reputation")) {
     // Loan requests read each borrower's tier and credit limit from the
     // reputation contract (Issue #335) and are rejected until it is linked.
     if (has("reputation")) {
@@ -504,102 +716,39 @@ function initializeContracts(
     }
   }
 
-  if (has("default_management")) {
-    invoke(
-      ids.default_management,
-      "initialize",
-      ["--admin", adminAddress, "--initial_insurance_balance", "0"],
-      options
-    );
-    log.ok("DefaultManagementContract initialized (insurance balance 0)");
-  }
-
-  if (has("pooled_lending")) {
-    // Pool 0 with the interest-rate curve the app's defaults assume:
-    // 2% base, 10% slope to an 80% kink, 100% jump above it, 10% reserve factor.
-    const poolConfig = JSON.stringify({
-      base_rate_bps: 200,
-      multiplier_per_slope_bps: 1000,
-      jump_multiplier_bps: 10000,
-      kink_bps: 8000,
-      reserve_factor_bps: 1000,
-    });
-
-    invoke(
-      ids.pooled_lending,
-      "initialize",
-      ["--admin", adminAddress, "--pool_id", "0", "--config", poolConfig],
-      options
-    );
-    log.ok("PooledLendingContract initialized (pool 0)");
-  }
-
-  if (has("governance")) {
-    if (!has("lending") || !has("reputation")) {
-      die(
-        "GovernanceContract needs the lending and reputation contracts.",
-        "Deploy them in the same run, or re-run with --resume so their ids are reused."
-      );
-    }
-
-    // 3-day voting window, quorum 500, min proposer power 150 (Silver tier),
-    // fee cap 1000 bps (10%). Voting power = reputation score.
-    invoke(
-      ids.governance,
-      "initialize",
-      [
-        "--admin", adminAddress,
-        "--lending", ids.lending,
-        "--reputation", ids.reputation,
-        "--voting_period_secs", "259200",
-        "--quorum_votes", "500",
-        "--min_proposer_power", "150",
-        "--max_fee_bps", "1000",
-      ],
-      options
-    );
-    log.ok("GovernanceContract initialized");
-  }
-
   if (has("multisig_admin")) {
-    initializeMultisig(ids, adminAddress, options);
+    wireMultisig(ids, fresh, adminAddress, options);
   }
 
-  if (has("tlend_token")) {
-    initializeTlend(ids, adminAddress, options);
+  if (has("tlend_token") && isFresh("tlend_token")) {
+    // The token's metadata and admin were set by its constructor; mint the
+    // initial supply to the admin, who funds vesting and the airdrop from it.
+    const totalSupply = process.env.TLEND_TOTAL_SUPPLY ?? "1000000000000";
+    invoke(ids.tlend_token, "mint", ["--to", adminAddress, "--amount", totalSupply], options);
+    log.ok(`Minted ${totalSupply} raw units of TLEND to the admin`);
+
+    if (has("tlend_vesting")) log.info("Create vesting schedules later with create_vesting_schedule");
+    if (has("tlend_airdrop")) log.info("Fund the airdrop pool with `fund` before claims open");
   }
 
-  initializeSatellites(ids, adminAddress, options);
-}
-
-/** Native XLM's Stellar Asset Contract id on the target network. */
-function nativeAssetContractId(network: string): string {
-  const passphrase =
-    process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE ??
-    (network === "futurenet"
-      ? "Test SDF Future Network ; October 2022"
-      : network === "mainnet" || network === "public"
-        ? "Public Global Stellar Network ; September 2015"
-        : "Test SDF Network ; September 2015");
-  return Asset.native().contractId(passphrase);
+  wireSatellites(ids, fresh, adminAddress, options);
 }
 
 /**
- * Contracts the lending contract calls into, plus the standalone protocol
- * modules. Everything here is optional — a missing id is skipped — but when
- * present the contracts are initialised and linked so the app can use them
- * without any manual invoke calls (Phase 2.2).
+ * Links for the contracts the lending contract calls into, plus the
+ * standalone protocol modules (Phase 2.2). A missing id is skipped.
  */
-function initializeSatellites(
+function wireSatellites(
   ids: Record<string, string>,
+  fresh: Set<string>,
   adminAddress: string,
   options: Options
 ): void {
-  const has = (key: string) => Boolean(ids[key]);
+  const has = (...keys: string[]) => keys.every((key) => Boolean(ids[key]));
+  const isFresh = (...keys: string[]) => keys.some((key) => fresh.has(key));
   const xlm = nativeAssetContractId(options.network);
-  const rewardToken = ids.tlend_token || xlm;
 
-  if (has("lending") && has("multisig_admin")) {
+  if (has("lending", "multisig_admin") && isFresh("lending", "multisig_admin")) {
     // Loan requests need at least one whitelisted collateral asset; native
     // XLM is the default the borrower form uses. whitelist_asset is
     // multisig-gated, so it goes through propose + execute.
@@ -612,171 +761,55 @@ function initializeSatellites(
     );
   }
 
-  if (has("referral_rewards") && has("lending")) {
-    // 10 XLM bonus at a 100 XLM reference loan, capped at 3x, min 10 XLM loans.
-    const config = JSON.stringify({
-      base_bonus: "100000000",
-      reference_loan_amount: "1000000000",
-      max_size_multiplier_bps: 30000,
-      min_qualifying_loan: "100000000",
-      max_referrals_per_referrer: 0,
-    });
-    invoke(
-      ids.referral_rewards,
-      "initialize",
-      [
-        "--admin", adminAddress,
-        "--reward_token", rewardToken,
-        "--lending_contract", ids.lending,
-        "--config", config,
-      ],
-      options
-    );
+  if (has("referral_rewards", "lending") && isFresh("referral_rewards", "lending")) {
     invoke(
       ids.lending,
       "set_referral_contract",
       ["--admin", adminAddress, "--referral", ids.referral_rewards],
       options
     );
-    log.ok("ReferralRewardsContract initialized and linked to Lending");
+    log.ok("ReferralRewardsContract linked to Lending");
     log.info("Fund it with reward tokens before the first referral pays out");
   }
 
-  if (has("borrower_loyalty") && has("lending")) {
-    // 5 XLM base reward at a 100 XLM reference loan; tier multipliers 1x-2x.
-    const config = JSON.stringify({
-      base_amount: "50000000",
-      reference_loan_amount: "1000000000",
-      max_duration_multiplier_bps: 20000,
-      tier_none_multiplier_bps: 10000,
-      tier_beginner_multiplier_bps: 11000,
-      tier_silver_multiplier_bps: 12500,
-      tier_gold_multiplier_bps: 15000,
-      tier_platinum_multiplier_bps: 20000,
-    });
-    invoke(
-      ids.borrower_loyalty,
-      "initialize",
-      [
-        "--admin", adminAddress,
-        "--reward_token", rewardToken,
-        "--lending_contract", ids.lending,
-        "--config", config,
-      ],
-      options
-    );
+  if (has("borrower_loyalty", "lending") && isFresh("borrower_loyalty", "lending")) {
     invoke(
       ids.lending,
       "set_loyalty_contract",
       ["--admin", adminAddress, "--loyalty", ids.borrower_loyalty],
       options
     );
-    log.ok("BorrowerLoyaltyContract initialized and linked to Lending");
+    log.ok("BorrowerLoyaltyContract linked to Lending");
   }
 
-  if (has("treasury")) {
-    const insuranceFund = process.env.INSURANCE_FUND_ADDRESS ?? ids.default_management ?? adminAddress;
-    const daoTreasury = process.env.DAO_TREASURY_ADDRESS ?? adminAddress;
+  if (has("treasury", "lending") && isFresh("treasury", "lending")) {
+    // Platform fees are paid in XLM and can only be collected into this
+    // treasury, which only accepts them from this lending contract.
+    invoke(ids.lending, "set_treasury", ["--admin", adminAddress, "--treasury", ids.treasury], options);
+    invoke(ids.lending, "set_fee_token", ["--admin", adminAddress, "--fee_token", xlm], options);
     invoke(
       ids.treasury,
-      "initialize",
-      [
-        "--admin", adminAddress,
-        "--insurance_fund", insuranceFund,
-        "--dao_treasury", daoTreasury,
-        "--insurance_share_bps", "5000",
-        "--dao_share_bps", "5000",
-      ],
+      "set_lending_contract",
+      ["--caller", adminAddress, "--lending_contract", ids.lending],
       options
     );
-    log.ok("TreasuryContract initialized (50/50 insurance / DAO split)");
-
-    if (has("lending")) {
-      // Platform fees are paid in XLM and can only be collected into this
-      // treasury, which only accepts them from this lending contract.
-      invoke(ids.lending, "set_treasury", ["--admin", adminAddress, "--treasury", ids.treasury], options);
-      invoke(ids.lending, "set_fee_token", ["--admin", adminAddress, "--fee_token", xlm], options);
-      invoke(
-        ids.treasury,
-        "set_lending_contract",
-        ["--caller", adminAddress, "--lending_contract", ids.lending],
-        options
-      );
-      log.ok("Lending ↔ Treasury linked for protocol fee collection (XLM)");
-    }
-  }
-
-  if (has("auto_compound_vault") && has("lending")) {
-    invoke(
-      ids.auto_compound_vault,
-      "initialize",
-      [
-        "--admin", adminAddress,
-        "--asset_token", xlm,
-        "--lending_contract", ids.lending,
-        "--harvest_fee_bps", "100",
-      ],
-      options
-    );
-    log.ok("AutoCompoundVaultContract initialized (1% harvest fee)");
-  }
-
-  if (has("liquidation_auction")) {
-    invoke(ids.liquidation_auction, "initialize", ["--admin", adminAddress], options);
-    log.ok("LiquidationAuctionContract initialized");
-  }
-
-  if (has("zk_credit_verifier")) {
-    invoke(ids.zk_credit_verifier, "initialize", ["--admin", adminAddress], options);
-    log.ok("ZkCreditVerifierContract initialized");
-  }
-
-  if (has("usdc_lending_pool")) {
-    const usdc = process.env.USDC_TOKEN_ADDRESS;
-    if (usdc) {
-      invoke(
-        ids.usdc_lending_pool,
-        "initialize",
-        ["--admin", adminAddress, "--usdc_token", usdc, "--annual_yield_bps", "800"],
-        options
-      );
-      log.ok("UsdcLendingPoolContract initialized (up to 8% APY)");
-      log.info("Depositors earn yield only once USDC is paid in via fund_yield");
-    } else {
-      log.info("Skipping USDC pool initialization — set USDC_TOKEN_ADDRESS to enable it");
-    }
+    log.ok("Lending ↔ Treasury linked for protocol fee collection (XLM)");
   }
 }
 
-function initializeMultisig(
+function wireMultisig(
   ids: Record<string, string>,
+  fresh: Set<string>,
   adminAddress: string,
   options: Options
 ): void {
-  const signers = (process.env.MULTISIG_SIGNERS ?? adminAddress)
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-  const threshold = process.env.MULTISIG_THRESHOLD ?? "1";
-
-  if (Number(threshold) < 1 || Number(threshold) > signers.length) {
-    die(
-      `MULTISIG_THRESHOLD=${threshold} is invalid for ${signers.length} signer(s).`,
-      "It must be between 1 and the number of entries in MULTISIG_SIGNERS."
-    );
-  }
-
-  invoke(
-    ids.multisig_admin,
-    "initialize",
-    ["--signers", JSON.stringify(signers), "--threshold", threshold],
-    options
-  );
-  log.ok(`MultiSigAdminContract initialized (${threshold}-of-${signers.length})`);
+  const { threshold } = multisigConfig(adminAddress);
+  const isFresh = (...keys: string[]) => keys.some((key) => fresh.has(key));
 
   // Hand the gated admin operations over to the multisig.
-  for (const key of ["lending", "default_management", "reputation"]) {
-    if (!ids[key]) continue;
+  const linked: string[] = [];
+  for (const key of ["lending", "default_management", "reputation", "referral_rewards"]) {
+    if (!ids[key] || !isFresh("multisig_admin", key)) continue;
 
     invoke(
       ids[key],
@@ -784,18 +817,21 @@ function initializeMultisig(
       ["--admin", adminAddress, "--multisig", ids.multisig_admin],
       options
     );
+    linked.push(key);
   }
 
-  log.ok("Linked MultiSigAdmin → Lending, Default Management, Reputation");
-  log.info(
-    "whitelist_asset / set_flash_loan_fee_bps / set_governance / set_oracle / " +
-      "add_to_insurance / trigger_insurance_payout are now multisig-gated"
-  );
+  if (linked.length > 0) {
+    log.ok(`Linked MultiSigAdmin → ${linked.join(", ")}`);
+    log.info(
+      "whitelist_asset / set_flash_loan_fee_bps / set_governance / set_oracle / " +
+        "add_to_insurance / trigger_insurance_payout / withdraw_unspent are now multisig-gated"
+    );
+  }
 
   // set_governance is itself multisig-gated, so linking governance has to go
   // through propose + execute. At the default 1-of-1 threshold a proposal is
   // immediately executable.
-  if (ids.governance && ids.lending) {
+  if (ids.governance && ids.lending && isFresh("multisig_admin", "governance", "lending")) {
     proposeAndExecute(
       ids.multisig_admin,
       adminAddress,
@@ -813,7 +849,9 @@ function initializeMultisig(
   }
 
   const oracleAddress = process.env.ORACLE_ADDRESS;
-  if (oracleAddress && ids.reputation) {
+  if (!ids.reputation || !isFresh("multisig_admin", "reputation")) return;
+
+  if (oracleAddress) {
     proposeAndExecute(
       ids.multisig_admin,
       adminAddress,
@@ -821,7 +859,7 @@ function initializeMultisig(
       options,
       `SetOracle (${oracleAddress})`
     );
-  } else if (ids.reputation) {
+  } else {
     log.info("Skipping oracle registration — set ORACLE_ADDRESS to enable it");
   }
 }
@@ -850,66 +888,6 @@ function proposeAndExecute(
 
   invoke(multisigId, "execute", ["--proposal_id", id], options);
   log.ok(`${label} proposed and executed via multisig`);
-}
-
-function initializeTlend(
-  ids: Record<string, string>,
-  adminAddress: string,
-  options: Options
-): void {
-  const totalSupply = process.env.TLEND_TOTAL_SUPPLY ?? "1000000000000";
-
-  invoke(
-    ids.tlend_token,
-    "initialize",
-    [
-      "--admin", adminAddress,
-      "--decimals", "7",
-      "--name", "TrustLend",
-      "--symbol", "TLEND",
-    ],
-    options
-  );
-  invoke(
-    ids.tlend_token,
-    "mint",
-    ["--to", adminAddress, "--amount", totalSupply],
-    options
-  );
-  log.ok(`TlendTokenContract initialized (minted ${totalSupply} raw units)`);
-
-  if (ids.tlend_vesting) {
-    invoke(
-      ids.tlend_vesting,
-      "initialize",
-      ["--admin", adminAddress, "--token", ids.tlend_token],
-      options
-    );
-    log.ok("TlendVestingContract initialized");
-    log.info("Create schedules later with create_vesting_schedule");
-  }
-
-  if (ids.tlend_airdrop) {
-    const merkleRoot = process.env.TLEND_AIRDROP_MERKLE_ROOT;
-
-    if (merkleRoot) {
-      invoke(
-        ids.tlend_airdrop,
-        "initialize",
-        [
-          "--admin", adminAddress,
-          "--token", ids.tlend_token,
-          "--merkle_root", merkleRoot,
-        ],
-        options
-      );
-      log.ok("TlendAirdropContract initialized — fund the pool before claims open");
-    } else {
-      log.info(
-        "Skipping airdrop initialization — set TLEND_AIRDROP_MERKLE_ROOT to enable it"
-      );
-    }
-  }
 }
 
 function generateBindings(
@@ -1049,13 +1027,22 @@ async function main(): Promise<void> {
   }
 
   // ── Deploy ─────────────────────────────────────────────────────────────────
+  // Keys deployed in this run — post-deploy wiring is limited to these.
+  const fresh = new Set<string>();
+
   if (toDeploy.length > 0) {
     log.step(`Deploying ${toDeploy.length} contract(s) to ${options.network}…`);
 
     for (const spec of toDeploy) {
-      const id = deployContract(spec, options);
+      // Constructor arguments are resolved per contract, after its
+      // dependencies (earlier in manifest order) have ids.
+      const constructorArgs = constructorArgsFor(spec.key, ids, adminAddress, options);
+      if (constructorArgs === null) continue;
+
+      const id = deployContract(spec, options, constructorArgs);
       ids[spec.key] = id;
-      log.ok(`${spec.label} → ${id}`);
+      fresh.add(spec.key);
+      log.ok(`${spec.label} → ${id} (initialized by constructor)`);
 
       // Persist after every deploy so a later failure never strands a contract
       // that was paid for but not recorded. --resume picks it back up.
@@ -1068,13 +1055,14 @@ async function main(): Promise<void> {
     }
   }
 
-  // ── Initialize ─────────────────────────────────────────────────────────────
+  // ── Wire ───────────────────────────────────────────────────────────────────
+  // Initialization already happened atomically inside each deploy (constructor).
   if (options.skipInit) {
-    log.info("Skipping initialization (--skip-init)");
-  } else if (toDeploy.length > 0) {
-    initializeContracts(ids, adminAddress, options);
+    log.info("Skipping post-deploy wiring (--skip-init)");
+  } else if (fresh.size > 0) {
+    wireContracts(ids, fresh, adminAddress, options);
   } else {
-    log.info("Skipping initialization — no newly deployed contracts");
+    log.info("Skipping wiring — no newly deployed contracts");
   }
 
   // ── Bindings ───────────────────────────────────────────────────────────────

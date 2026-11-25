@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
       approveTxHash?: string;
     };
 
-    if (!loanId) {
+    if (!isBoundedString(loanId, 128)) {
       return NextResponse.json({ error: "loanId is required" }, { status: 400 });
     }
     if (!txHash || txHash.trim().length < 10) {
@@ -67,6 +67,9 @@ export async function POST(request: NextRequest) {
     }
 
     const normalizedTxHash = txHash.trim();
+    if (!isBoundedString(normalizedTxHash, 128) || !isBoundedString(lenderAddress, 128)) {
+      return NextResponse.json({ error: "Invalid funding request" }, { status: 400 });
+    }
 
     // ── Replay guard ─────────────────────────────────────────────────────────
     // Dedupe on the transaction hash, not on the loan: a loan may legitimately
@@ -346,7 +349,8 @@ export async function POST(request: NextRequest) {
 
       // ── Referral bonus (Issue #266) ──
       // The loan is now Active, which is what qualifies the borrower's
-      // referrer. The XLM payout itself is made on-chain by the lending
+      // referrer. That association was immutably claimed before qualification.
+      // The XLM payout itself is made on-chain by the lending
       // contract during activate_loan; this mirrors it for the dashboard.
       const referral = await qualifyReferralForLoan({
         db,

@@ -10,7 +10,12 @@ import {
   REFERRAL_CODE_LENGTH,
   REFERRAL_RANDOM_LENGTH,
   REFERRAL_CODE_SPACE,
+  REFERRAL_CLAIM_STORAGE_KEY,
 } from "@/lib/referrals/codes";
+
+it("uses one documented session key for deferred referral claims", () => {
+  expect(REFERRAL_CLAIM_STORAGE_KEY).toBe("trustlend.referralCode");
+});
 
 describe("generateReferralCode", () => {
   it("produces a structurally valid code", () => {

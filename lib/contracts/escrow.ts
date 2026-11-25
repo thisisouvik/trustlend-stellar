@@ -2,6 +2,7 @@
  * lib/contracts/escrow.ts
  *
  * TypeScript client for the EscrowContract.
+ * Contract reads and writes are routed through the shared Stellar SDK RPC executor.
  */
 
 import {
@@ -63,18 +64,22 @@ export async function getEscrowCount(callerAddress: string): Promise<number> {
 // ─── Write functions ──────────────────────────────────────────────────────────
 
 /**
- * Register an escrow hold after the lender has sent the XLM PAYMENT.
+ * Create an escrow hold. The contract pulls `amountStroops` of `tokenAddress`
+ * (an allowlisted SEP-41 token such as the native XLM contract) from the
+ * lender into custody in the same transaction (Issue #417).
  * Returns the new escrow ID.
  *
  * Step-by-step flow:
- * 1. Lender sends XLM to borrower's address via Freighter PAYMENT op.
- * 2. Frontend calls `createEscrowHold()` so the hold is recorded on-chain.
- * 3. After 3 minutes the admin calls `confirmDisbursement()`.
+ * 1. Lender signs `createEscrowHold()`; the funds move into the contract.
+ * 2. Within 3 minutes the lender may `revokeEscrowHold()` to get them back.
+ * 3. After 3 minutes the admin calls `confirmDisbursement()`, which pays
+ *    the borrower from custody.
  */
 export async function createEscrowHold(
   lenderAddress: string,
   borrowerAddress: string,
   loanId: number,
+  tokenAddress: string,
   amountStroops: bigint
 ): Promise<number> {
   const result = await callContract({
@@ -84,6 +89,7 @@ export async function createEscrowHold(
       addressToScVal(lenderAddress),
       addressToScVal(borrowerAddress),
       u32ToScVal(loanId),
+      addressToScVal(tokenAddress),
       i128ToScVal(amountStroops),
     ],
     callerAddress: lenderAddress,
@@ -92,8 +98,8 @@ export async function createEscrowHold(
 }
 
 /**
- * Lender revokes the escrow hold within the 3-minute window.
- * After this call the admin should refund the XLM via a separate PAYMENT op.
+ * Lender revokes the escrow hold within the 3-minute window. The contract
+ * refunds the held tokens to the lender in the same transaction.
  */
 export async function revokeEscrowHold(
   lenderAddress: string,
@@ -108,8 +114,8 @@ export async function revokeEscrowHold(
 }
 
 /**
- * Admin marks escrow as disbursed once the XLM payment to the borrower
- * has been confirmed on Horizon.
+ * Admin releases the held tokens to the borrower once the revocation window
+ * has closed. The transfer happens in the same transaction.
  */
 export async function confirmDisbursement(
   adminAddress: string,
@@ -132,6 +138,7 @@ function decodeHold(raw: unknown): EscrowHold {
     loanId: Number(r.loan_id),
     lender: r.lender as string,
     borrower: r.borrower as string,
+    token: r.token as string,
     amount: BigInt(r.amount as string | number),
     heldAt: BigInt(r.held_at as string | number),
     expiresAt: BigInt(r.expires_at as string | number),

@@ -4,6 +4,8 @@
 
 <h1 align="center">TrustLend</h1>
 
+> Soroban contract calls use Stellar RPC for account lookup, simulation, SDK transaction assembly, submission, and finality polling.
+
 <p align="center">
   Reputation-based micro-lending on Stellar.<br />
   Borrowers build an on-chain trust score instead of posting collateral; lenders earn transparent yield.
@@ -67,7 +69,7 @@ The protocol runs on a hybrid architecture: **trust-critical logic on Soroban sm
 flowchart LR
     subgraph Client
         WA["Web app<br/>Next.js 16 · React 19"]
-        WL["Stellar wallet<br/>Freighter · xBull · Albedo · WalletConnect"]
+        WL["Stellar wallet<br/>Varial · xBull · Albedo · WalletConnect"]
     end
 
     subgraph Backend["Backend (Next.js)"]
@@ -147,7 +149,8 @@ The full walkthrough — Rust/Soroban toolchain, building and deploying contract
 
 | Command | What it does |
 |---|---|
-| `npm run dev` / `npm run build` | Next.js dev server / production build |
+| `npm run dev` / `npm run build` | Loopback-only Next.js dev server / production build |
+| `npm run dev:lan` | Explicitly expose the dev server to the local network for device testing |
 | `npm test` · `npm run test:coverage` | Vitest unit tests (660+) |
 | `npm run test:e2e` | Playwright end-to-end tests |
 | `npm run lint` · `npx tsc --noEmit` | ESLint / type check |
@@ -201,7 +204,7 @@ Every client-submitted transaction hash is verified against Horizon / Soroban RP
 | Collateral price feeds | [docs/oracle-price-feeds.md](docs/oracle-price-feeds.md) |
 | APR / yield formulas | [docs/apr-formulas.md](docs/apr-formulas.md) |
 | Fiat on/off ramp (SEP-24) | [docs/sep24-fiat-ramp.md](docs/sep24-fiat-ramp.md) |
-| Referral program | [docs/referral-program.md](docs/referral-program.md) |
+| Referral program & one-time attribution guarantees | [docs/referral-program.md](docs/referral-program.md) |
 | Backups & disaster recovery | [docs/disaster-recovery.md](docs/disaster-recovery.md) |
 | Formal verification | [docs/formal-verification.md](docs/formal-verification.md) |
 | Contract design notes | [docs/contracts/](docs/contracts/) — flash loans, governance, multisig, credit oracle |

@@ -8,6 +8,7 @@ import { syncPoolOnchain } from "@/lib/pools/onchain";
 import { PlatformWalletError, payoutFromPlatformWallet } from "@/lib/stellar/platform-wallet";
 import { PAYMENT_MEMO } from "@/lib/stellar/verify-payment";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
+import { isBoundedString } from "@/lib/http/request-validation";
 
 /**
  * POST /api/pools/withdraw
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest) {
     }
     const { positionId, amount } = await request.json();
 
-    if (!positionId || !amount || amount <= 0 || !Number.isFinite(amount)) {
+    if (!isBoundedString(positionId, 128) || !amount || amount <= 0 || !Number.isFinite(amount)) {
       return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
     if (amount > 1_000_000) {

@@ -5,6 +5,7 @@ import { getDb } from "@/lib/db/client";
 import { metaString } from "@/lib/db/metadata";
 import { ledgerTransactions, loanRepayments, loans } from "@/lib/db/schema";
 import { enforceRouteRateLimit } from "@/lib/rate-limit";
+import { isBoundedString } from "@/lib/http/request-validation";
 
 const PAGE_SIZE = 20;
 
@@ -37,6 +38,12 @@ export async function GET(request: NextRequest) {
 
     const cursor = request.nextUrl.searchParams.get("cursor") || undefined;
     const direction = request.nextUrl.searchParams.get("direction") || "next";
+    if (cursor && !isBoundedString(cursor, 64)) {
+      return NextResponse.json({ error: "Invalid cursor" }, { status: 400 });
+    }
+    if (direction !== "next" && direction !== "prev") {
+      return NextResponse.json({ error: "Invalid direction" }, { status: 400 });
+    }
 
     // Loans with cursor-based pagination (one extra row to detect "more").
     const cursorDate = cursor ? new Date(cursor) : null;

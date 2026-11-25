@@ -11,6 +11,7 @@ crate-type = ["cdylib", "rlib"]
 testutils = ["soroban-sdk/testutils"]
 
 [dependencies]
+# Transitive dependency versions are locked at the workspace level.
 soroban-sdk = { workspace = true }
 
 [dev-dependencies]

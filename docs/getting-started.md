@@ -1,5 +1,7 @@
 # Getting Started with TrustLend
 
+> The app uses Stellar RPC for account sequence lookups, simulation, transaction assembly, submission, and polling. Configure `NEXT_PUBLIC_SOROBAN_RPC_URL` for the target network.
+
 Welcome, contributor! This guide walks you through setting up your local development environment for TrustLend — from installing the Soroban CLI and Node dependencies to running the full test suite.
 
 ---
@@ -26,7 +28,7 @@ Install these tools on your machine before cloning the repo.
 | **npm** | ^10 | Package manager |
 | **Rust** | stable (via `rustup`) | Soroban smart contract compilation |
 | **Soroban CLI** | latest | Contract deployment & interaction |
-| **Freighter Wallet** | latest (browser ext.) | Stellar wallet for testnet interactions |
+| **Varial Wallet** | latest (browser ext.) | Stellar wallet for testnet interactions (formerly Freighter) |
 
 ### Verify Installations
 
@@ -138,7 +140,8 @@ talks to it through [Drizzle ORM](https://orm.drizzle.team). The schema lives in
 
    This creates every table, trigger and SQL function the app needs (the
    `drizzle/0001_functions_and_triggers.sql` migration holds the row-locked
-   loan-funding and referral functions).
+   loan-funding and referral functions). Later migrations preserve the unique
+   referee association required for atomic referral claims.
 3. Optional: `npm run db:studio` opens a browser UI over the database.
 
 When you change `lib/db/schema.ts`, run `npm run db:generate` to produce the

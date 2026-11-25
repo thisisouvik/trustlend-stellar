@@ -215,6 +215,15 @@ pub struct PaymentRecord {
     pub paid_at: u64,
 }
 
+#[contracttype]
+#[derive(Clone)]
+pub struct FlashLoanState {
+    pub receiver: Address,
+    pub token: Address,
+    pub required: i128,
+    pub repaid: bool,
+}
+
 /// Ledger storage keys.
 #[contracttype]
 pub enum DataKey {
@@ -254,6 +263,10 @@ pub enum DataKey {
     UnpauseRound,
     /// Flash loan fee bps
     FlashLoanFeeBps,
+    /// Set while an external flash-loan receiver callback is executing.
+    ReentrancyLock,
+    /// Required exact repayment and receiver for the current flash loan.
+    FlashLoanState,
     /// Cooldown timestamp for rate switches
     RateSwitchCooldown(u32),
     /// Uncollected accrued platform fees for Treasury collection
@@ -341,11 +354,11 @@ pub struct LendingContract;
 impl LendingContract {
     // ── Admin ─────────────────────────────────────────────────────────────────
 
-    /// Soroban constructor: runs atomically as part of `stellar contract deploy`
-    /// (`-- <constructor args>`), so the contract is never live in an
-    /// uninitialised state that a third party could front-run to claim
-    /// admin rights (issue #352). There is no public `initialize`.
-    pub fn __constructor(env: Env, admin: Address) {
+    pub fn initialize(env: Env, admin: Address) {
+        Self::assert_not_reentrant(&env);
+        if env.storage().instance().has(&DataKey::Admin) {
+            panic!("Contract already initialised");
+        }
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::LoanCount, &0u32);
         // Whitelist XLM as default collateral asset (using dummy address for now)
@@ -357,6 +370,7 @@ impl LendingContract {
 
     /// Upgrade the contract's code while preserving its storage.
     pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) {
+        Self::assert_not_reentrant(&env);
         caller.require_auth();
         Self::assert_admin(&env, &caller);
         env.deployer().update_current_contract_wasm(new_wasm_hash);
@@ -366,6 +380,7 @@ impl LendingContract {
     /// The original single admin is automatically included.
     /// `threshold` must be >= 1 and <= admins.len().
     pub fn setup_multisig(env: Env, admin: Address, admins: Vec<Address>, threshold: u32) {
+        Self::assert_not_reentrant(&env);
         admin.require_auth();
         Self::assert_admin(&env, &admin);
 
@@ -402,6 +417,7 @@ impl LendingContract {
     /// Multi-sig pause: requires `threshold` unique admin signatures.
     /// Each admin calls this once; the contract tracks unique signers.
     pub fn pause(env: Env, caller: Address) {
+        Self::assert_not_reentrant(&env);
         caller.require_auth();
         Self::assert_multisig_admin(&env, &caller);
 
@@ -445,6 +461,7 @@ impl LendingContract {
 
     /// Multi-sig unpause: requires `threshold` unique admin signatures.
     pub fn unpause(env: Env, caller: Address) {
+        Self::assert_not_reentrant(&env);
         caller.require_auth();
         Self::assert_multisig_admin(&env, &caller);
 
@@ -515,6 +532,7 @@ impl LendingContract {
 
     /// One-time bootstrap linking the MultiSigAdmin contract (admin only).
     pub fn set_multisig_admin(env: Env, admin: Address, multisig: Address) {
+        Self::assert_not_reentrant(&env);
         admin.require_auth();
         Self::assert_admin(&env, &admin);
         if env.storage().instance().has(&DataKey::MultiSigAdmin) {
@@ -540,6 +558,7 @@ impl LendingContract {
 
     /// Set the Borrower Loyalty Rewards contract address (admin only).
     pub fn set_loyalty_contract(env: Env, admin: Address, loyalty: Address) {
+        Self::assert_not_reentrant(&env);
         admin.require_auth();
         Self::assert_admin(&env, &admin);
         env.storage()
@@ -558,6 +577,7 @@ impl LendingContract {
     /// Set the Referral Rewards contract address (admin only, Issue #266).
     /// Leaving it unset simply disables referral payouts.
     pub fn set_referral_contract(env: Env, admin: Address, referral: Address) {
+        Self::assert_not_reentrant(&env);
         admin.require_auth();
         Self::assert_admin(&env, &admin);
         env.storage()
@@ -577,6 +597,7 @@ impl LendingContract {
     /// Loan requests read each borrower's tier and credit limit from it, so
     /// `create_loan_request` is rejected until this is configured.
     pub fn set_reputation_contract(env: Env, admin: Address, reputation: Address) {
+        Self::assert_not_reentrant(&env);
         admin.require_auth();
         Self::assert_admin(&env, &admin);
         env.storage()
@@ -595,6 +616,7 @@ impl LendingContract {
     /// Whitelist a new collateral asset ("adding pools"). Multisig-gated —
     /// see `set_multisig_admin`.
     pub fn whitelist_asset(env: Env, caller: Address, asset: Address) {
+        Self::assert_not_reentrant(&env);
         caller.require_auth();
         Self::assert_multisig_admin(&env, &caller);
         env.storage()
@@ -625,6 +647,7 @@ impl LendingContract {
         recipient: Address,
         amount: i128,
     ) {
+        Self::assert_not_reentrant(&env);
         caller.require_auth();
         Self::assert_admin(&env, &caller);
 
@@ -664,6 +687,7 @@ impl LendingContract {
     /// Once set, the platform fee can ONLY be changed by this contract — i.e.
     /// by a successful on-chain vote.
     pub fn set_governance(env: Env, caller: Address, governance: Address) {
+        Self::assert_not_reentrant(&env);
         caller.require_auth();
         Self::assert_multisig_admin(&env, &caller);
         env.storage()
@@ -690,6 +714,7 @@ impl LendingContract {
     /// which invokes this after a proposal passes. This is the single on-chain
     /// path to changing the fee — there is intentionally no admin override.
     pub fn set_platform_fee_bps(env: Env, caller: Address, new_fee_bps: u32) {
+        Self::assert_not_reentrant(&env);
         caller.require_auth();
 
         let governance: Address = env
@@ -726,6 +751,7 @@ impl LendingContract {
     /// Link the TreasuryContract that receives platform fees (admin only,
     /// Issue #338). It is the only destination `collect_fees` pays.
     pub fn set_treasury(env: Env, admin: Address, treasury: Address) {
+        Self::assert_not_reentrant(&env);
         admin.require_auth();
         Self::assert_admin(&env, &admin);
         env.storage().instance().set(&DataKey::Treasury, &treasury);
@@ -740,6 +766,7 @@ impl LendingContract {
     /// Set the SEP-41 token platform fees are denominated in, e.g. the
     /// native XLM asset contract (admin only, Issue #338).
     pub fn set_fee_token(env: Env, admin: Address, fee_token: Address) {
+        Self::assert_not_reentrant(&env);
         admin.require_auth();
         Self::assert_admin(&env, &admin);
         env.storage().instance().set(&DataKey::FeeToken, &fee_token);
@@ -825,6 +852,7 @@ impl LendingContract {
     /// Update the flash-loan fee ("interest rate table"), multisig-gated.
     /// Capped at `MAX_FLASH_LOAN_FEE_BPS`.
     pub fn set_flash_loan_fee_bps(env: Env, caller: Address, new_fee_bps: u32) {
+        Self::assert_not_reentrant(&env);
         caller.require_auth();
         Self::assert_multisig_admin(&env, &caller);
         if new_fee_bps > MAX_FLASH_LOAN_FEE_BPS {
@@ -838,6 +866,7 @@ impl LendingContract {
     /// Uncollateralized, single-transaction flash loan against the pool's own
     /// balance of `token`.
     pub fn flash_loan(env: Env, receiver: Address, token: Address, amount: i128, params: Bytes) {
+        Self::assert_not_reentrant(&env);
         if amount <= 0 {
             panic!("Flash loan amount must be positive");
         }
@@ -855,9 +884,19 @@ impl LendingContract {
             .checked_mul(fee_bps as i128)
             .expect("Overflow computing flash loan fee")
             / 10_000;
-        let required_after = balance_before
+        let required = amount
             .checked_add(fee)
-            .expect("Overflow computing required post-loan balance");
+            .expect("Overflow computing required repayment");
+        env.storage().instance().set(&DataKey::ReentrancyLock, &true);
+        env.storage().instance().set(
+            &DataKey::FlashLoanState,
+            &FlashLoanState {
+                receiver: receiver.clone(),
+                token: token.clone(),
+                required,
+                repaid: false,
+            },
+        );
 
         // 2. Disburse the borrowed amount to the receiver.
         token_client.transfer(&pool, &receiver, &amount);
@@ -867,15 +906,53 @@ impl LendingContract {
         receiver_client.execute_operation(&token, &amount, &fee, &pool, &params);
 
         // 4. Enforce full repayment (principal + fee) — or roll back everything.
-        let balance_after = token_client.balance(&pool);
-        if balance_after < required_after {
-            panic!("Flash loan not repaid: insufficient funds returned");
+        let state: FlashLoanState = env
+            .storage()
+            .instance()
+            .get(&DataKey::FlashLoanState)
+            .expect("Flash loan repayment state missing");
+        if !state.repaid {
+            panic!("Flash loan not repaid through repayment handler");
         }
+        env.storage().instance().remove(&DataKey::FlashLoanState);
+        env.storage().instance().remove(&DataKey::ReentrancyLock);
 
         env.events().publish(
             (symbol_short!("flash"), symbol_short!("loan")),
             (receiver, token, amount, fee),
         );
+    }
+
+    /// Pull exact principal and fee from the active receiver during its callback.
+    /// The receiver must approve this contract to spend the amount first.
+    pub fn repay_flash_loan(env: Env, receiver: Address) {
+        receiver.require_auth();
+        let mut state: FlashLoanState = env
+            .storage()
+            .instance()
+            .get(&DataKey::FlashLoanState)
+            .expect("No flash loan is awaiting repayment");
+        if !env
+            .storage()
+            .instance()
+            .get::<_, bool>(&DataKey::ReentrancyLock)
+            .unwrap_or(false)
+            || state.receiver != receiver
+        {
+            panic!("Flash loan repayment caller is not the active receiver");
+        }
+        if state.repaid {
+            panic!("Flash loan already repaid");
+        }
+        let pool = env.current_contract_address();
+        token::Client::new(&env, &state.token).transfer_from(
+            &pool,
+            &receiver,
+            &pool,
+            &state.required,
+        );
+        state.repaid = true;
+        env.storage().instance().set(&DataKey::FlashLoanState, &state);
     }
 
     // ── Multi-asset collateral vault ──────────────────────────────────────────
@@ -886,6 +963,7 @@ impl LendingContract {
     /// The price oracle can post per-asset USD price feeds used for
     /// normalizing collateral values.
     pub fn set_price_oracle(env: Env, caller: Address, oracle: Address) {
+        Self::assert_not_reentrant(&env);
         caller.require_auth();
         Self::assert_multisig_admin(&env, &caller);
         env.storage().instance().set(&DataKey::PriceOracle, &oracle);
@@ -918,6 +996,7 @@ impl LendingContract {
     /// Each sample represents a provider quote. The price helper takes the
     /// median so a single manipulated provider cannot skew valuation.
     pub fn set_asset_oracle_prices(env: Env, caller: Address, asset: Address, prices: Vec<i128>) {
+        Self::assert_not_reentrant(&env);
         caller.require_auth();
         Self::assert_multisig_admin(&env, &caller);
 
@@ -948,6 +1027,7 @@ impl LendingContract {
 
     /// Store a TWAP fallback price for an asset.
     pub fn set_asset_twap_price(env: Env, caller: Address, asset: Address, price: i128) {
+        Self::assert_not_reentrant(&env);
         caller.require_auth();
         Self::assert_multisig_admin(&env, &caller);
 
@@ -991,6 +1071,7 @@ impl LendingContract {
         asset: Address,
         config: AssetCollateralConfig,
     ) {
+        Self::assert_not_reentrant(&env);
         caller.require_auth();
         Self::assert_multisig_admin(&env, &caller);
 
@@ -1049,6 +1130,7 @@ impl LendingContract {
     /// Tokens are pulled from the borrower into contract custody before the
     /// collateral position is updated.
     pub fn deposit_collateral(env: Env, borrower: Address, asset: Address, amount: i128) {
+        Self::assert_not_reentrant(&env);
         borrower.require_auth();
         Self::assert_not_paused(&env);
 
@@ -1142,6 +1224,7 @@ impl LendingContract {
     /// under-collateralized, including requests that have not activated yet.
     /// Collateral is released once a loan is repaid, defaulted or cancelled.
     pub fn withdraw_collateral(env: Env, borrower: Address, asset: Address, amount: i128) {
+        Self::assert_not_reentrant(&env);
         borrower.require_auth();
         Self::assert_not_paused(&env);
 
@@ -1333,6 +1416,7 @@ impl LendingContract {
             panic!("Invalid reputation tier");
         }
         if collateral_entries.is_empty() {
+        Self::assert_not_reentrant(&env);
             panic!("At least one collateral entry is required");
         }
 
@@ -1459,6 +1543,7 @@ impl LendingContract {
 
     /// Lender approves a pending loan.
     pub fn approve_loan(env: Env, lender: Address, loan_id: u32, escrow_id: u32) {
+        Self::assert_not_reentrant(&env);
         lender.require_auth();
         Self::assert_not_paused(&env);
 
@@ -1516,6 +1601,7 @@ impl LendingContract {
     /// Lender revokes an approved loan (within the 1-hour escrow window).
     /// The EscrowContract's `revoke_hold` must be called separately.
     pub fn revoke_approval(env: Env, lender: Address, loan_id: u32) {
+        Self::assert_not_reentrant(&env);
         lender.require_auth();
 
         let mut loan = Self::get_loan(env.clone(), loan_id);
@@ -1539,6 +1625,7 @@ impl LendingContract {
 
     /// Admin/backend activates the loan once escrow disbursement is confirmed.
     pub fn activate_loan(env: Env, caller: Address, loan_id: u32) {
+        Self::assert_not_reentrant(&env);
         caller.require_auth();
         Self::assert_admin(&env, &caller);
         Self::assert_not_paused(&env);
@@ -1662,6 +1749,7 @@ impl LendingContract {
     /// Now includes grace period check (Issue #157) - borrowers get 12 hours
     /// to top up collateral before liquidation can proceed.
     pub fn mark_defaulted(env: Env, caller: Address, loan_id: u32) {
+        Self::assert_not_reentrant(&env);
         caller.require_auth();
         Self::assert_admin(&env, &caller);
         Self::assert_not_paused(&env);
@@ -1734,6 +1822,7 @@ impl LendingContract {
     /// Borrower switches their loan between Fixed and Floating rate models.
     /// Charges a 0.5% fee on remaining debt and enforces a 24h cooldown.
     pub fn switch_rate_model(env: Env, borrower: Address, loan_id: u32) {
+        Self::assert_not_reentrant(&env);
         borrower.require_auth();
 
         let mut loan = Self::get_loan(env.clone(), loan_id);
@@ -1793,6 +1882,7 @@ impl LendingContract {
     /// Admin updates the floating rate for a loan (called on state-changing interactions).
     /// Only applies to Floating-rate loans. Recalculates remaining interest.
     pub fn update_floating_rate(env: Env, caller: Address, loan_id: u32, new_rate_bps: u32) {
+        Self::assert_not_reentrant(&env);
         caller.require_auth();
         Self::assert_admin(&env, &caller);
 
@@ -2431,6 +2521,12 @@ impl LendingContract {
             .unwrap_or(false);
         if is_paused {
             panic!("Contract is paused");
+        }
+    }
+
+    fn assert_not_reentrant(env: &Env) {
+        if env.storage().instance().get::<_, bool>(&DataKey::ReentrancyLock).unwrap_or(false) {
+            panic!("Reentrancy lock is active");
         }
     }
 }

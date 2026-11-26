@@ -10,6 +10,7 @@ import { qualifyReferralForLoan } from "@/lib/referrals/qualify";
 import { PAYMENT_MEMO, verifyPaymentTransaction } from "@/lib/stellar/verify-payment";
 import { activateFundedLoanOnchain } from "@/lib/loans/onchain";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
+import { isBoundedString } from "@/lib/http/request-validation";
 import { isOnchainLifecycleRequired, readOnchainLoanId, readUserBorrowingPower, readUserCollateral, readUserHealthFactor, xlmToStroops } from "@/lib/stellar/onchain-lifecycle";
 
 /**
@@ -121,6 +122,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Loan not found" }, { status: 404 });
     }
 
+    if (!loan.borrower_wallet) {
+      return NextResponse.json(
+        { error: "The borrower has no wallet connected, so this loan cannot be funded yet" },
+        { status: 409 }
+      );
+    }
+
     // Recheck custody at funding time: collateral can have been withdrawn
     // after the application was accepted. Fail closed for on-chain loans.
     if (isOnchainLifecycleRequired()) {
@@ -193,12 +201,6 @@ export async function POST(request: NextRequest) {
     const now = new Date().toISOString();
 
     // ── Verify the payment on-chain before crediting anything ────────────────
-    if (!loan.borrower_wallet) {
-      return NextResponse.json(
-        { error: "The borrower has no wallet connected, so this loan cannot be funded yet" },
-        { status: 409 }
-      );
-    }
 
     // The payment must come from the wallet this account signed in with (or
     // the wallet saved on the lender's profile), not from an address the

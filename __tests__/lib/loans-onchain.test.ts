@@ -17,6 +17,9 @@ const mocks = vi.hoisted(() => ({
   readLoan: vi.fn(),
   activate: vi.fn(),
   recordPayment: vi.fn(),
+  readCollateral: vi.fn(),
+  readBorrowingPower: vi.fn(),
+  readHealthFactor: vi.fn(),
 }));
 
 vi.mock("@/lib/stellar/onchain-lifecycle", async () => {
@@ -29,6 +32,9 @@ vi.mock("@/lib/stellar/onchain-lifecycle", async () => {
     readOnchainLoan: (...args: unknown[]) => mocks.readLoan(...args),
     activateLoanOnchain: (...args: unknown[]) => mocks.activate(...args),
     recordPaymentOnchain: (...args: unknown[]) => mocks.recordPayment(...args),
+    readUserCollateral: (...args: unknown[]) => mocks.readCollateral(...args),
+    readUserBorrowingPower: (...args: unknown[]) => mocks.readBorrowingPower(...args),
+    readUserHealthFactor: (...args: unknown[]) => mocks.readHealthFactor(...args),
   };
 });
 
@@ -62,6 +68,9 @@ describe("activateFundedLoanOnchain", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.required.mockReturnValue(true);
+    mocks.readCollateral.mockResolvedValue([{ asset: "CDXLM", amountStroops: 200_0000000n }]);
+    mocks.readBorrowingPower.mockResolvedValue(150_0000000n);
+    mocks.readHealthFactor.mockResolvedValue(15_000);
   });
 
   it("is a no-op when the lifecycle is off or the loan has no on-chain id", async () => {
@@ -147,6 +156,9 @@ describe("recordRepaymentOnchain", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.required.mockReturnValue(true);
+    mocks.readCollateral.mockResolvedValue([{ asset: "CDXLM", amountStroops: 200_0000000n }]);
+    mocks.readBorrowingPower.mockResolvedValue(150_0000000n);
+    mocks.readHealthFactor.mockResolvedValue(15_000);
   });
 
   it("caps the recorded amount at the contract's remaining balance and appends the hash", async () => {
@@ -190,6 +202,9 @@ describe("verifyOnchainLoanRequest", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.required.mockReturnValue(true);
+    mocks.readCollateral.mockResolvedValue([{ asset: "CDXLM", amountStroops: 200_0000000n }]);
+    mocks.readBorrowingPower.mockResolvedValue(150_0000000n);
+    mocks.readHealthFactor.mockResolvedValue(15_000);
   });
 
   it("passes through with empty metadata when the lifecycle is off", async () => {

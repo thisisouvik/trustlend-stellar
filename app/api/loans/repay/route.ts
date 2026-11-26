@@ -44,6 +44,7 @@ export async function POST(request: NextRequest) {
     if (!txHash || txHash.trim().length < 10) {
       return NextResponse.json({ error: "A confirmed Stellar transaction hash is required for on-chain repayment" }, { status: 400 });
     }
+    const normalizedTxHash = txHash.trim().toLowerCase();
 
     const db = getDb();
     if (!db) {
@@ -90,7 +91,7 @@ export async function POST(request: NextRequest) {
       .where(
         and(
           eq(ledgerTransactions.refType, "loan_repay"),
-          sql`lower(${ledgerTransactions.metadata}->>'txHash') = lower(${txHash})`,
+          sql`lower(${ledgerTransactions.metadata}->>'txHash') = ${normalizedTxHash}`,
         ),
       )
       .limit(1);
@@ -133,7 +134,7 @@ export async function POST(request: NextRequest) {
     }
 
     const verification = await verifyPaymentTransaction({
-      txHash,
+      txHash: normalizedTxHash,
       expectedSource: String(borrowerAddress),
       expectedMemo: PAYMENT_MEMO.repay(loanId),
       // Each lender's share is checked in aggregate: the whole amount must
@@ -155,29 +156,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Total due calculation matches preflight
-    const principal    = Number(loan.principal_amount ?? 0);
-    const durationDays = Number(loan.duration_days ?? 30);
-    const aprBps       = Number(loan.apr_bps ?? 0);
-    const totalInterest= principal * (aprBps / 10000) * (durationDays / 365);
-    // The platform fee is admin-configurable (issue #324) but locked per loan:
-    // `resolveLoanFeeBps` prefers the rate stamped at origination, so raising
-    // the fee never increases what an outstanding loan owes. Only loans created
-    // before that stamp existed fall through to the live setting.
-    const activeFeeSetting = await getPlatformFeeBps(db);
-    const resolvedFee  = resolveLoanFeeBps({
-      principal,
-      loanMetadata: loan.metadata,
-      activeSetting: activeFeeSetting,
-    });
-    const platformFee  = resolvedFee.feeAmount;
-    const totalDue     = principal + totalInterest + platformFee;
-
     // Lock and reread the authoritative row after Horizon verification.
     // Different valid payment transactions racing for the same loan therefore
     // cannot both apply against the same repaid balance.
     let repayment: typeof loanRepayments.$inferSelect;
-    let newRepaidAmount = 0;
     let newStatus = "active";
     try {
       const result = await txDb.transaction(async (tx) => {
@@ -192,28 +174,34 @@ export async function POST(request: NextRequest) {
         if (lockedLoan.status === "repaid" || lockedLoan.status === "defaulted") throw new Error("Loan is no longer repayable");
         const lockedPrincipal = Number(lockedLoan.principalAmount);
         const lockedInterest = lockedPrincipal * (Number(lockedLoan.aprBps ?? 0) / 10000) * (Number(lockedLoan.durationDays ?? 30) / 365);
+        // The platform fee is admin-configurable (issue #324) but locked per loan:
+        // `resolveLoanFeeBps` prefers the rate stamped at origination.
         const lockedFeeSetting = await getPlatformFeeBps(tx as unknown as typeof db);
-        const lockedFee = resolveLoanFeeBps({ principal: lockedPrincipal, loanMetadata: loan.metadata, activeSetting: lockedFeeSetting }).feeAmount;
+        const resolvedFee = resolveLoanFeeBps({
+          principal: lockedPrincipal,
+          loanMetadata: loan.metadata,
+          activeSetting: lockedFeeSetting,
+        });
+        const lockedFee = resolvedFee.feeAmount;
         const due = lockedPrincipal + lockedInterest + lockedFee;
         const updatedRepaid = Number(lockedLoan.repaidAmount ?? 0) + amount;
         if (updatedRepaid > due + 0.0001) throw new Error("Repayment exceeds the remaining loan balance");
         const status = updatedRepaid >= due - 0.0001 ? "repaid" : "active";
-        const [repayRow] = await tx.insert(loanRepayments).values({ loanId, payerId: user.id, amount: String(amount), txRef: txHash }).returning();
+        const [repayRow] = await tx.insert(loanRepayments).values({ loanId, payerId: user.id, amount: String(amount), txRef: normalizedTxHash }).returning();
         await tx.update(loans).set({ repaidAmount: String(updatedRepaid), status: status as typeof loans.$inferInsert.status }).where(eq(loans.id, loanId));
         await tx.insert(ledgerTransactions).values({
           userId: user.id, category: "loan_repay", amount: String(amount), currency: "XLM", status: "confirmed",
           refType: "loan_repay", refId: repayRow.id,
-          metadata: { txHash, borrowerAddress: verification.source, verifiedLedger: verification.ledger, lenderAddress, lenderUserId,
+          metadata: { txHash: normalizedTxHash, borrowerAddress: verification.source, verifiedLedger: verification.ledger, lenderAddress, lenderUserId,
             lenderPayouts: lenderPayouts.map((entry) => ({ lenderUserId: entry.lenderId, address: entry.address, share: +entry.share.toFixed(7), payout: entry.payout })),
             loanId, repaymentId: repayRow.id, principalAmount: lockedPrincipal, repaidSoFar: updatedRepaid, repaidAt: new Date().toISOString(),
             platformFeeBps: resolvedFee.feeBps, platformFeeAmount: lockedFee, platformFeeSource: resolvedFee.source, platformFeeVersion: resolvedFee.version },
         });
         await tx.insert(reputationEvents).values({ userId: user.id, sourceType: "loan_repayment", sourceId: loanId,
           pointsDelta: status === "repaid" ? 20 : 5, reason: `On-chain repayment of ${amount.toFixed(2)} XLM` });
-        return { repayment: repayRow, repaid: updatedRepaid, status };
+        return { repayment: repayRow, status };
       });
       repayment = result.repayment;
-      newRepaidAmount = result.repaid;
       newStatus = result.status;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -258,7 +246,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    return NextResponse.json({ repayment, loanStatus: newStatus, txHash, onchain }, { status: 201 });
+    return NextResponse.json({ repayment, loanStatus: newStatus, txHash: normalizedTxHash, onchain }, { status: 201 });
   } catch (error) {
     if (isRedirectError(error)) throw error;
     console.error("Repayment error:", error);

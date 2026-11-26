@@ -29,6 +29,7 @@ export interface FakeDb {
   update: (...args: unknown[]) => FakeChain;
   delete: (...args: unknown[]) => FakeChain;
   execute: (...args: unknown[]) => Promise<{ rows: unknown[] }>;
+  transaction: <T>(callback: (tx: FakeDb) => Promise<T>) => Promise<T>;
 }
 
 export interface FakeChain extends PromiseLike<unknown> {
@@ -49,6 +50,7 @@ const CHAIN_METHODS = [
   "onConflictDoNothing",
   "onConflictDoUpdate",
   "groupBy",
+  "for",
 ];
 
 export function createFakeDb(): FakeDb {
@@ -71,6 +73,10 @@ export function createFakeDb(): FakeDb {
       db.calls.push({ method: "execute", args });
       const next = db.pending.shift();
       return { rows: Array.isArray(next) ? next : next === undefined ? [] : [next] };
+    },
+    transaction: async <T>(callback: (tx: FakeDb) => Promise<T>) => {
+      db.calls.push({ method: "transaction", args: [] });
+      return await callback(db);
     },
   };
 

@@ -29,7 +29,10 @@ const mockRecord = vi.fn();
 vi.mock("@/lib/loans/onchain", () => ({ recordRepaymentOnchain: (...args: unknown[]) => mockRecord(...args) }));
 
 const mockGetDb = vi.fn();
-vi.mock("@/lib/db/client", () => ({ getDb: () => mockGetDb() }));
+vi.mock("@/lib/db/client", () => ({
+  getDb: () => mockGetDb(),
+  getPooledDb: () => mockGetDb(),
+}));
 
 import { POST } from "@/app/api/loans/repay/route";
 
@@ -119,6 +122,8 @@ describe("POST /api/loans/repay — payment verification", () => {
     const db = createFakeDb();
     db.queue([loanRow]); // loan
     db.queue([]); // duplicate check
+    db.queue([loanRow]); // locked loan inside transaction
+    db.queue([]); // platform_settings lookup inside transaction
     db.queue([{ id: "rep-1" }]); // repayment insert
     db.queue([]); // loans update
     db.queue([]); // ledger insert

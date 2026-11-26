@@ -46,7 +46,7 @@ export interface CronExecutionContext {
   /** Checks if remaining time is insufficient; if so, triggers abort and returns true. */
   checkOrAbort: (itemEstimateMs?: number, label?: string) => boolean;
   /** Flushes incremental batch progress to DB and logs. */
-  reportProgress: (progress: Partial<CronBatchProgress>) => Promise<void>;
+  reportProgress: (progress: Partial<CronBatchProgress> | object) => Promise<void>;
 }
 
 export interface CronGuardOptions {

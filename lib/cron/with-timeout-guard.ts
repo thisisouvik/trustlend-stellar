@@ -20,7 +20,7 @@ import {
 import { CronTimeoutError, DeadManSwitch } from "./dead-man-switch";
 import type { CronExecutionContext, CronGuardOptions } from "./types";
 
-export function withCronTimeoutGuard<TResult extends Record<string, unknown>>(
+export function withCronTimeoutGuard<TResult extends object>(
   jobName: string,
   handler: (ctx: CronExecutionContext, request: NextRequest) => Promise<TResult>,
   options?: CronGuardOptions,
@@ -63,7 +63,7 @@ export function withCronTimeoutGuard<TResult extends Record<string, unknown>>(
       checkOrAbort: (itemEstimateMs, label) => deadMan.checkOrAbort(itemEstimateMs, label),
       reportProgress: async (progress) => {
         if (logId) {
-          await updateCronProgress(logId, progress).catch(() => {});
+          await updateCronProgress(logId, progress as Record<string, unknown>).catch(() => {});
         }
       },
     };
@@ -72,10 +72,11 @@ export function withCronTimeoutGuard<TResult extends Record<string, unknown>>(
       const result = await handler(ctx, request);
       deadMan.stop();
       const duration = Date.now() - start;
+      const resultRecord = result as Record<string, unknown>;
 
-      const isAborted = Boolean((result as Record<string, unknown>).aborted) || deadMan.isAborted();
+      const isAborted = Boolean(resultRecord.aborted) || deadMan.isAborted();
       const abortReason =
-        ((result as Record<string, unknown>).abortReason as string | undefined) ??
+        (resultRecord.abortReason as string | undefined) ??
         deadMan.getAbortReason();
 
       if (isAborted) {
@@ -85,10 +86,10 @@ export function withCronTimeoutGuard<TResult extends Record<string, unknown>>(
         );
         if (logId) {
           await abortCronExecution(logId, abortReason ?? "Execution deadline exceeded", {
-            processed: extractCount(result, ["processed", "scanned"]),
-            succeeded: extractCount(result, ["succeeded", "liquidated", "published", "updated"]),
-            failed: extractCount(result, ["failed", "errors"]),
-            metadata: result,
+            processed: extractCount(resultRecord, ["processed", "scanned"]),
+            succeeded: extractCount(resultRecord, ["succeeded", "liquidated", "published", "updated"]),
+            failed: extractCount(resultRecord, ["failed", "errors"]),
+            metadata: resultRecord,
           }).catch(() => {});
 
           await recordCronAlert(
@@ -118,10 +119,10 @@ export function withCronTimeoutGuard<TResult extends Record<string, unknown>>(
       console.log(`[${jobName}] Run completed successfully in ${duration}ms:`, result);
       if (logId) {
         await completeCronExecution(logId, {
-          processed: extractCount(result, ["processed", "scanned"]),
-          succeeded: extractCount(result, ["succeeded", "liquidated", "published", "updated"]),
-          failed: extractCount(result, ["failed", "errors"]),
-          metadata: result,
+          processed: extractCount(resultRecord, ["processed", "scanned"]),
+          succeeded: extractCount(resultRecord, ["succeeded", "liquidated", "published", "updated"]),
+          failed: extractCount(resultRecord, ["failed", "errors"]),
+          metadata: resultRecord,
         }).catch(() => {});
       }
 

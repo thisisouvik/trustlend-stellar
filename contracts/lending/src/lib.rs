@@ -1929,6 +1929,9 @@ impl LendingContract {
             panic!("Defaulted loan has no recorded lender");
         }
 
+        // Legacy positions must enter the aggregate before seizure removes them.
+        Self::ensure_user_collateral_backfilled(&env, &loan.borrower);
+
         let key = DataKey::UserCollateral(loan.borrower.clone());
         let entries: Vec<CollateralEntry> = env
             .storage()
@@ -1941,6 +1944,12 @@ impl LendingContract {
 
         let pool = env.current_contract_address();
         for entry in entries.iter() {
+            let remaining = Self::get_total_collateral_for_asset(&env, &entry.asset)
+                .checked_sub(entry.amount)
+                .expect("Underflow updating total collateral");
+            env.storage()
+                .instance()
+                .set(&DataKey::TotalCollateral(entry.asset.clone()), &remaining);
             let token_client = token::Client::new(&env, &entry.asset);
             token_client.transfer(&pool, &loan.lender, &entry.amount);
             env.events().publish(

@@ -158,7 +158,8 @@ fn setup_lending_with_fees(
     fee_token: &Address,
     fund: bool,
 ) -> (Address, i128) {
-    let lending_id = env.register(LendingContract, (admin,));
+    let lending_id = env.register(LendingContract, ());
+    LendingContractClient::new(env, &lending_id).initialize(admin);
     let lending = LendingContractClient::new(env, &lending_id);
     lending.set_multisig_admin(admin, admin);
 

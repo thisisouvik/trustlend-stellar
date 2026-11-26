@@ -18,8 +18,9 @@ fn setup() -> (Env, Address, Address, Address, Address) {
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
 
-    let contract_id = env.register(LendingContract, (&admin,));
+    let contract_id = env.register(LendingContract, ());
     let client = LendingContractClient::new(&env, &contract_id);
+    client.initialize(&admin);
     // Multisig-gated functions are exercised for real in `multisig_admin`'s
     // integration tests; here `admin` stands in as its own "multisig" so the
     // rest of this suite can focus on loan-lifecycle behaviour.
@@ -784,8 +785,9 @@ fn setup_with_multisig() -> (Env, Address, Address, Address, Address, Address, A
     let signer1 = Address::generate(&env);
     let signer2 = Address::generate(&env);
 
-    let contract_id = env.register(LendingContract, (&admin,));
+    let contract_id = env.register(LendingContract, ());
     let client = LendingContractClient::new(&env, &contract_id);
+    client.initialize(&admin);
 
     let admins = soroban_sdk::vec![&env, admin.clone(), signer1.clone(), signer2.clone()];
     client.setup_multisig(&admin, &admins, &2);
@@ -1081,8 +1083,9 @@ fn test_pause_without_multisig_rejected() {
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
-    let contract_id = env.register(LendingContract, (&admin,));
+    let contract_id = env.register(LendingContract, ());
     let client = LendingContractClient::new(&env, &contract_id);
+    client.initialize(&admin);
 
     client.pause(&admin);
 }
@@ -1533,8 +1536,9 @@ fn setup_flash_loan() -> (Env, Address, Address, Address, Address) {
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
 
-    let contract_id = env.register(LendingContract, (&admin,));
+    let contract_id = env.register(LendingContract, ());
     let client = LendingContractClient::new(&env, &contract_id);
+    client.initialize(&admin);
     client.set_multisig_admin(&admin, &admin);
 
     let collateral_asset = Address::generate(&env);
@@ -1796,8 +1800,9 @@ fn setup_multi_collateral() -> (Env, Address, Address, Address, Address, Address
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
 
-    let contract_id = env.register(LendingContract, (&admin,));
+    let contract_id = env.register(LendingContract, ());
     let client = LendingContractClient::new(&env, &contract_id);
+    client.initialize(&admin);
     client.set_multisig_admin(&admin, &admin);
 
     let asset_a_admin = Address::generate(&env);
@@ -2873,8 +2878,9 @@ fn test_repayment_calls_loyalty_contract() {
     let lender = Address::generate(&env);
     let collateral_asset = new_collateral_token(&env);
 
-    let contract_id = env.register(LendingContract, (&admin,));
+    let contract_id = env.register(LendingContract, ());
     let client = LendingContractClient::new(&env, &contract_id);
+    client.initialize(&admin);
     client.set_multisig_admin(&admin, &admin);
     client.whitelist_asset(&admin, &collateral_asset);
     client.set_asset_collateral_config(
@@ -2981,8 +2987,9 @@ fn test_late_repayment_no_reward() {
     let lender = Address::generate(&env);
     let collateral_asset = new_collateral_token(&env);
 
-    let contract_id = env.register(LendingContract, (&admin,));
+    let contract_id = env.register(LendingContract, ());
     let client = LendingContractClient::new(&env, &contract_id);
+    client.initialize(&admin);
     client.set_multisig_admin(&admin, &admin);
     client.whitelist_asset(&admin, &collateral_asset);
     client.set_asset_collateral_config(
@@ -3082,8 +3089,9 @@ fn setup_with_referral() -> (Env, Address, Address, Address, Address, Address, A
     let borrower = Address::generate(&env);
     let collateral_asset = new_collateral_token(&env);
 
-    let contract_id = env.register(LendingContract, (&admin,));
+    let contract_id = env.register(LendingContract, ());
     let client = LendingContractClient::new(&env, &contract_id);
+    client.initialize(&admin);
     client.set_multisig_admin(&admin, &admin);
     client.whitelist_asset(&admin, &collateral_asset);
     client.set_asset_collateral_config(
@@ -3302,8 +3310,9 @@ fn test_activation_succeeds_when_referral_pool_is_empty() {
     let referrer = Address::generate(&env);
     let collateral_asset = new_collateral_token(&env);
 
-    let contract_id = env.register(LendingContract, (&admin,));
+    let contract_id = env.register(LendingContract, ());
     let client = LendingContractClient::new(&env, &contract_id);
+    client.initialize(&admin);
     client.set_multisig_admin(&admin, &admin);
     client.whitelist_asset(&admin, &collateral_asset);
     client.set_asset_collateral_config(
@@ -3530,8 +3539,9 @@ fn test_set_reputation_contract() {
     let env = Env::default();
     env.mock_all_auths();
     let admin = Address::generate(&env);
-    let contract_id = env.register(LendingContract, (&admin,));
+    let contract_id = env.register(LendingContract, ());
     let client = LendingContractClient::new(&env, &contract_id);
+    client.initialize(&admin);
 
     assert_eq!(client.get_reputation_contract(), None);
     let reputation = Address::generate(&env);
@@ -3561,8 +3571,9 @@ fn test_create_loan_rejected_without_reputation_contract() {
     let admin = Address::generate(&env);
     let borrower = Address::generate(&env);
     let collateral_asset = Address::generate(&env);
-    let contract_id = env.register(LendingContract, (&admin,));
+    let contract_id = env.register(LendingContract, ());
     let client = LendingContractClient::new(&env, &contract_id);
+    client.initialize(&admin);
     client.set_multisig_admin(&admin, &admin);
     client.whitelist_asset(&admin, &collateral_asset);
 
@@ -4018,6 +4029,15 @@ fn test_sweep_cannot_take_uncollected_fees() {
 
 #[test]
 fn test_settle_defaulted_loan_seizes_vault_collateral() {
+    assert_default_settlement_updates_total(false);
+}
+
+#[test]
+fn test_settle_defaulted_loan_backfills_legacy_collateral_before_seizure() {
+    assert_default_settlement_updates_total(true);
+}
+
+fn assert_default_settlement_updates_total(legacy: bool) {
     let (env, contract_id, admin, borrower, collateral_asset) = setup();
     let client = LendingContractClient::new(&env, &contract_id);
     let lender = Address::generate(&env);
@@ -4045,13 +4065,22 @@ fn test_settle_defaulted_loan_seizes_vault_collateral() {
     };
     env.as_contract(&contract_id, || {
         env.storage().persistent().set(&DataKey::Loan(77), &loan);
+        if legacy {
+            env.storage().instance().remove(&DataKey::TotalCollateral(collateral_asset.clone()));
+            env.storage().instance().remove(&DataKey::CollateralMigrationComplete);
+            env.storage().persistent().remove(&DataKey::CollateralBackfilled(borrower.clone()));
+        }
     });
 
     client.settle_defaulted_loan(&admin, &77);
 
-    assert_eq!(token::Client::new(&env, &collateral_asset).balance(&lender), collateral_amount);
+    assert_eq!(
+        token::Client::new(&env, &collateral_asset).balance(&lender),
+        SETUP_VAULT_DEPOSIT + collateral_amount
+    );
     assert_eq!(token::Client::new(&env, &collateral_asset).balance(&contract_id), 0);
     assert!(client.get_user_collateral_entries(&borrower).is_empty());
+    assert_eq!(client.get_total_collateral(&collateral_asset), 0);
 }
 
 // ─── Collateral conservation & fee collection guard tests (Issue #457) ────────

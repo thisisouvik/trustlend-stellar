@@ -1400,9 +1400,6 @@ mod good_receiver {
     use super::*;
     use soroban_sdk::{contract, contractimpl};
 
-    #[contractclient(name = "LendingRepayClient")]
-    pub trait LendingRepayment { fn repay_flash_loan(env: Env, receiver: Address); }
-
     #[contract]
     pub struct GoodReceiver;
 
@@ -1422,7 +1419,6 @@ mod good_receiver {
                 .checked_add(fee)
                 .expect("Overflow computing repayment");
             token_client.approve(&caller, &pool, &repayment, &(env.ledger().sequence() + 100));
-            LendingRepayClient::new(&env, &pool).repay_flash_loan(&caller);
         }
     }
 }
@@ -1430,9 +1426,6 @@ mod good_receiver {
 mod generous_receiver {
     use super::*;
     use soroban_sdk::{contract, contractimpl};
-
-    #[contractclient(name = "LendingRepayClient")]
-    pub trait LendingRepayment { fn repay_flash_loan(env: Env, receiver: Address); }
 
     #[contract]
     pub struct GenerousReceiver;
@@ -1455,7 +1448,6 @@ mod generous_receiver {
                 .checked_add(100)
                 .expect("Overflow adding surplus");
             token_client.approve(&caller, &pool, &repayment, &(env.ledger().sequence() + 100));
-            LendingRepayClient::new(&env, &pool).repay_flash_loan(&caller);
         }
     }
 }
@@ -1509,6 +1501,7 @@ mod reentrant_collateral_receiver {
     use super::*;
     use soroban_sdk::{contract, contractimpl};
 
+    #[allow(dead_code)]
     #[contractclient(name = "LendingDepositClient")]
     pub trait LendingCollateral { fn deposit_collateral(env: Env, borrower: Address, asset: Address, amount: i128); }
 
@@ -1654,13 +1647,25 @@ fn test_flash_loan_reverts_on_partial_repayment() {
 }
 
 #[test]
-#[should_panic(expected = "Reentrancy lock is active")]
+#[should_panic(expected = "Contract re-entry is not allowed")]
 fn test_flash_loan_blocks_collateral_deposit_during_receiver_callback() {
     let (env, contract_id, admin, _borrower, token_address) = setup_flash_loan();
     let client = LendingContractClient::new(&env, &contract_id);
     client.whitelist_asset(&admin, &token_address);
     let receiver = env.register(reentrant_collateral_receiver::ReentrantCollateralReceiver, ());
     client.flash_loan(&receiver, &token_address, &1_000_0000000, &Bytes::new(&env));
+}
+
+#[test]
+#[should_panic(expected = "Reentrancy lock is active")]
+fn test_reentrancy_lock_blocks_deposit_collateral() {
+    let (env, contract_id, admin, borrower, token_address) = setup_flash_loan();
+    let client = LendingContractClient::new(&env, &contract_id);
+    client.whitelist_asset(&admin, &token_address);
+    env.as_contract(&contract_id, || {
+        env.storage().instance().set(&DataKey::ReentrancyLock, &true);
+    });
+    client.deposit_collateral(&borrower, &token_address, &1_000_0000000);
 }
 
 #[test]
@@ -4012,8 +4017,9 @@ fn test_sweep_cannot_take_uncollected_fees() {
 
 #[test]
 fn test_settle_defaulted_loan_seizes_vault_collateral() {
-    let (env, contract_id, admin, borrower, collateral_asset) = setup();
+    let (env, contract_id, admin, _default_borrower, collateral_asset) = setup();
     let client = LendingContractClient::new(&env, &contract_id);
+    let borrower = Address::generate(&env);
     let lender = Address::generate(&env);
     let collateral_amount = 25_000_000;
     mint_tokens(&env, &collateral_asset, &borrower, collateral_amount);
@@ -4044,6 +4050,134 @@ fn test_settle_defaulted_loan_seizes_vault_collateral() {
     client.settle_defaulted_loan(&admin, &77);
 
     assert_eq!(token::Client::new(&env, &collateral_asset).balance(&lender), collateral_amount);
-    assert_eq!(token::Client::new(&env, &collateral_asset).balance(&contract_id), 0);
+    assert_eq!(
+        token::Client::new(&env, &collateral_asset).balance(&contract_id),
+        SETUP_VAULT_DEPOSIT
+    );
     assert!(client.get_user_collateral_entries(&borrower).is_empty());
+}
+
+#[test]
+fn test_constructor_initializes_and_cannot_be_reinvoked() {
+    use soroban_sdk::{IntoVal, Symbol};
+    let (env, contract_id, admin, _borrower, _collateral) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+    assert_eq!(client.get_admin(), admin);
+
+    let attacker = Address::generate(&env);
+    let args: soroban_sdk::Vec<soroban_sdk::Val> = soroban_sdk::vec![&env, attacker.into_val(&env)];
+    for name in ["initialize", "__constructor"] {
+        let res = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &contract_id,
+            &Symbol::new(&env, name),
+            args.clone(),
+        );
+        assert!(res.is_err(), "{name} must not be callable after deployment");
+    }
+    assert_eq!(client.get_admin(), admin);
+}
+
+#[test]
+#[should_panic(expected = "Defaulted loan has already been settled")]
+fn test_settle_defaulted_loan_cannot_be_replayed_against_future_deposits() {
+    let (env, contract_id, admin, borrower, collateral_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+    let lender = Address::generate(&env);
+    let collateral_amount = 25_000_000;
+    mint_tokens(&env, &collateral_asset, &borrower, collateral_amount * 2);
+    client.deposit_collateral(&borrower, &collateral_asset, &collateral_amount);
+
+    let loan = LoanRecord {
+        id: 78,
+        borrower: borrower.clone(),
+        lender,
+        amount: 10_000_000,
+        duration_days: 30,
+        interest_rate_bps: 1000,
+        total_due: 10_100_000,
+        remaining_due: 10_100_000,
+        created_at: 0,
+        due_at: 0,
+        status: LoanStatus::Defaulted,
+        escrow_id: 0,
+        platform_fee: 0,
+        rate_model: InterestRateModel::Fixed,
+        base_rate_bps: 1000,
+        last_rate_update: 0,
+    };
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().set(&DataKey::Loan(78), &loan);
+    });
+
+    client.settle_defaulted_loan(&admin, &78);
+    // Borrower later deposits fresh collateral for future borrowing — settling loan 78 again must revert.
+    client.deposit_collateral(&borrower, &collateral_asset, &collateral_amount);
+    client.settle_defaulted_loan(&admin, &78);
+}
+
+#[test]
+fn test_settle_defaulted_loan_preserves_other_active_loan_collateral() {
+    let (env, contract_id, admin, _default_borrower, collateral_asset) = setup();
+    let client = LendingContractClient::new(&env, &contract_id);
+    let borrower = Address::generate(&env);
+    let lender_a = Address::generate(&env);
+    let lender_b = Address::generate(&env);
+
+    // 200 XLM vault backing two 100 XLM loans equally.
+    let vault_amount = 200_000_000;
+    mint_tokens(&env, &collateral_asset, &borrower, vault_amount);
+    client.deposit_collateral(&borrower, &collateral_asset, &vault_amount);
+
+    let defaulted_loan = LoanRecord {
+        id: 79,
+        borrower: borrower.clone(),
+        lender: lender_a.clone(),
+        amount: 100_000_000,
+        duration_days: 30,
+        interest_rate_bps: 1000,
+        total_due: 100_000_000,
+        remaining_due: 100_000_000,
+        created_at: 0,
+        due_at: 0,
+        status: LoanStatus::Defaulted,
+        escrow_id: 0,
+        platform_fee: 0,
+        rate_model: InterestRateModel::Fixed,
+        base_rate_bps: 1000,
+        last_rate_update: 0,
+    };
+    let active_loan = LoanRecord {
+        id: 80,
+        borrower: borrower.clone(),
+        lender: lender_b,
+        amount: 100_000_000,
+        duration_days: 30,
+        interest_rate_bps: 1000,
+        total_due: 100_000_000,
+        remaining_due: 100_000_000,
+        created_at: 0,
+        due_at: 0,
+        status: LoanStatus::Active,
+        escrow_id: 0,
+        platform_fee: 0,
+        rate_model: InterestRateModel::Fixed,
+        base_rate_bps: 1000,
+        last_rate_update: 0,
+    };
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().set(&DataKey::Loan(79), &defaulted_loan);
+        env.storage().persistent().set(&DataKey::Loan(80), &active_loan);
+        env.storage()
+            .persistent()
+            .set(&DataKey::ActiveLoans(borrower.clone()), &soroban_sdk::vec![&env, 80u32]);
+    });
+
+    client.settle_defaulted_loan(&admin, &79);
+
+    let token_client = token::Client::new(&env, &collateral_asset);
+    assert_eq!(token_client.balance(&lender_a), 100_000_000);
+    assert_eq!(token_client.balance(&contract_id), SETUP_VAULT_DEPOSIT + 100_000_000);
+    let remaining = client.get_user_collateral_entries(&borrower);
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining.get(0).unwrap().amount, 100_000_000);
 }

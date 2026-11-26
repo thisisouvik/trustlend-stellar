@@ -215,15 +215,6 @@ pub struct PaymentRecord {
     pub paid_at: u64,
 }
 
-#[contracttype]
-#[derive(Clone)]
-pub struct FlashLoanState {
-    pub receiver: Address,
-    pub token: Address,
-    pub required: i128,
-    pub repaid: bool,
-}
-
 /// Ledger storage keys.
 #[contracttype]
 pub enum DataKey {
@@ -265,8 +256,6 @@ pub enum DataKey {
     FlashLoanFeeBps,
     /// Set while an external flash-loan receiver callback is executing.
     ReentrancyLock,
-    /// Required exact repayment and receiver for the current flash loan.
-    FlashLoanState,
     /// Cooldown timestamp for rate switches
     RateSwitchCooldown(u32),
     /// Uncollected accrued platform fees for Treasury collection
@@ -299,6 +288,8 @@ pub enum DataKey {
     Treasury,
     /// SEP-41 token platform fees are denominated in (Issue #338)
     FeeToken,
+    /// Tracks whether a defaulted loan has already been settled
+    LoanSettled(u32),
 }
 
 /// Default platform fee = 1 % of interest (100 bps) until governance changes it.
@@ -354,11 +345,11 @@ pub struct LendingContract;
 impl LendingContract {
     // ── Admin ─────────────────────────────────────────────────────────────────
 
-    pub fn initialize(env: Env, admin: Address) {
-        Self::assert_not_reentrant(&env);
-        if env.storage().instance().has(&DataKey::Admin) {
-            panic!("Contract already initialised");
-        }
+    /// Soroban constructor: runs atomically as part of `stellar contract deploy`
+    /// (`-- <constructor args>`), so the contract is never live in an
+    /// uninitialised state that a third party could front-run to claim
+    /// admin rights (issue #352). There is no public `initialize`.
+    pub fn __constructor(env: Env, admin: Address) {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::LoanCount, &0u32);
         // Whitelist XLM as default collateral asset (using dummy address for now)
@@ -788,6 +779,7 @@ impl LendingContract {
     /// directly, the treasury is notified so its token balance stays in sync;
     /// when the treasury itself collects, it does that bookkeeping itself.
     pub fn collect_fees(env: Env, caller: Address, treasury_address: Address) -> i128 {
+        Self::assert_not_reentrant(&env);
         caller.require_auth();
         let treasury: Address = env
             .storage()
@@ -865,6 +857,11 @@ impl LendingContract {
 
     /// Uncollateralized, single-transaction flash loan against the pool's own
     /// balance of `token`.
+    ///
+    /// During `execute_operation`, Soroban enforces non-reentrancy at the host
+    /// level and `ReentrancyLock` guards all mutating entrypoints. Once the
+    /// callback returns, any unpaid principal + fee is pulled via SEP-41
+    /// `transfer_from` using the allowance granted by the receiver.
     pub fn flash_loan(env: Env, receiver: Address, token: Address, amount: i128, params: Bytes) {
         Self::assert_not_reentrant(&env);
         if amount <= 0 {
@@ -884,19 +881,11 @@ impl LendingContract {
             .checked_mul(fee_bps as i128)
             .expect("Overflow computing flash loan fee")
             / 10_000;
-        let required = amount
+        let required_after = balance_before
             .checked_add(fee)
-            .expect("Overflow computing required repayment");
+            .expect("Overflow computing required post-loan balance");
+
         env.storage().instance().set(&DataKey::ReentrancyLock, &true);
-        env.storage().instance().set(
-            &DataKey::FlashLoanState,
-            &FlashLoanState {
-                receiver: receiver.clone(),
-                token: token.clone(),
-                required,
-                repaid: false,
-            },
-        );
 
         // 2. Disburse the borrowed amount to the receiver.
         token_client.transfer(&pool, &receiver, &amount);
@@ -905,54 +894,29 @@ impl LendingContract {
         let receiver_client = FlashLoanReceiverClient::new(&env, &receiver);
         receiver_client.execute_operation(&token, &amount, &fee, &pool, &params);
 
-        // 4. Enforce full repayment (principal + fee) — or roll back everything.
-        let state: FlashLoanState = env
-            .storage()
-            .instance()
-            .get(&DataKey::FlashLoanState)
-            .expect("Flash loan repayment state missing");
-        if !state.repaid {
-            panic!("Flash loan not repaid through repayment handler");
-        }
-        env.storage().instance().remove(&DataKey::FlashLoanState);
         env.storage().instance().remove(&DataKey::ReentrancyLock);
+
+        // 4. Pull any remaining shortfall via allowance approved by the receiver,
+        // then enforce the full post-loan pool balance invariant.
+        let balance_after_callback = token_client.balance(&pool);
+        if balance_after_callback < required_after {
+            let shortfall = required_after
+                .checked_sub(balance_after_callback)
+                .expect("Underflow computing flash loan shortfall");
+            if token_client.allowance(&receiver, &pool) >= shortfall {
+                token_client.transfer_from(&pool, &receiver, &pool, &shortfall);
+            }
+        }
+
+        let balance_after = token_client.balance(&pool);
+        if balance_after < required_after {
+            panic!("Flash loan not repaid: insufficient funds returned");
+        }
 
         env.events().publish(
             (symbol_short!("flash"), symbol_short!("loan")),
             (receiver, token, amount, fee),
         );
-    }
-
-    /// Pull exact principal and fee from the active receiver during its callback.
-    /// The receiver must approve this contract to spend the amount first.
-    pub fn repay_flash_loan(env: Env, receiver: Address) {
-        receiver.require_auth();
-        let mut state: FlashLoanState = env
-            .storage()
-            .instance()
-            .get(&DataKey::FlashLoanState)
-            .expect("No flash loan is awaiting repayment");
-        if !env
-            .storage()
-            .instance()
-            .get::<_, bool>(&DataKey::ReentrancyLock)
-            .unwrap_or(false)
-            || state.receiver != receiver
-        {
-            panic!("Flash loan repayment caller is not the active receiver");
-        }
-        if state.repaid {
-            panic!("Flash loan already repaid");
-        }
-        let pool = env.current_contract_address();
-        token::Client::new(&env, &state.token).transfer_from(
-            &pool,
-            &receiver,
-            &pool,
-            &state.required,
-        );
-        state.repaid = true;
-        env.storage().instance().set(&DataKey::FlashLoanState, &state);
     }
 
     // ── Multi-asset collateral vault ──────────────────────────────────────────
@@ -1368,6 +1332,7 @@ impl LendingContract {
     /// refuses to release it until the loan is repaid, defaulted or cancelled
     /// via `cancel_loan_request`.
     pub fn create_loan_request(env: Env, borrower: Address, request: LoanRequestInput) -> u32 {
+        Self::assert_not_reentrant(&env);
         borrower.require_auth();
         Self::assert_not_paused(&env);
 
@@ -1416,7 +1381,6 @@ impl LendingContract {
             panic!("Invalid reputation tier");
         }
         if collateral_entries.is_empty() {
-        Self::assert_not_reentrant(&env);
             panic!("At least one collateral entry is required");
         }
 
@@ -1574,6 +1538,7 @@ impl LendingContract {
     /// returned to Pending by the lender (`revoke_approval`), so a lender's
     /// escrowed commitment is never orphaned by the borrower.
     pub fn cancel_loan_request(env: Env, borrower: Address, loan_id: u32) {
+        Self::assert_not_reentrant(&env);
         borrower.require_auth();
 
         let mut loan = Self::get_loan(env.clone(), loan_id);
@@ -1665,6 +1630,7 @@ impl LendingContract {
     /// Record a repayment (partial or full).
     /// Actual XLM moves via PAYMENT op; admin calls this after Horizon confirm.
     pub fn record_payment(env: Env, caller: Address, loan_id: u32, amount: i128) -> LoanStatus {
+        Self::assert_not_reentrant(&env);
         caller.require_auth();
         Self::assert_admin(&env, &caller);
 
@@ -1784,12 +1750,24 @@ impl LendingContract {
     /// Settle a defaulted loan by transferring the borrower's vault collateral
     /// to the recorded lender. This is an explicit admin action so default
     /// management can coordinate recovery after marking the loan defaulted.
+    ///
+    /// If the borrower still has other encumbered (Pending/Approved/Active)
+    /// loans backed by the same collateral vault, only a proportional share
+    /// corresponding to this defaulted loan is seized so other lenders'
+    /// collateral backing is preserved. Marked via `LoanSettled` so a settled
+    /// loan cannot be re-settled against future borrower deposits.
     pub fn settle_defaulted_loan(env: Env, caller: Address, loan_id: u32) {
+        Self::assert_not_reentrant(&env);
         caller.require_auth();
         Self::assert_admin(&env, &caller);
+        Self::assert_not_paused(&env);
+
         let loan = Self::get_loan(env.clone(), loan_id);
         if loan.status != LoanStatus::Defaulted {
             panic!("Only DEFAULTED loans can be settled");
+        }
+        if env.storage().persistent().has(&DataKey::LoanSettled(loan_id)) {
+            panic!("Defaulted loan has already been settled");
         }
         if loan.lender == env.current_contract_address() {
             panic!("Defaulted loan has no recorded lender");
@@ -1805,16 +1783,61 @@ impl LendingContract {
             panic!("No collateral available to settle defaulted loan");
         }
 
+        let encumbered = Self::get_total_encumbered_debt_of_borrower(&env, &loan.borrower);
         let pool = env.current_contract_address();
+        let mut remaining_entries = Vec::new(&env);
+
         for entry in entries.iter() {
-            let token_client = token::Client::new(&env, &entry.asset);
-            token_client.transfer(&pool, &loan.lender, &entry.amount);
-            env.events().publish(
-                (symbol_short!("loan"), symbol_short!("seized")),
-                (loan_id, loan.borrower.clone(), loan.lender.clone(), entry.asset, entry.amount),
-            );
+            let seize_amount = if encumbered <= 0 {
+                entry.amount
+            } else {
+                let total_claim = loan
+                    .remaining_due
+                    .checked_add(encumbered)
+                    .expect("Overflow computing total claim");
+                if total_claim <= 0 || loan.remaining_due <= 0 {
+                    0
+                } else {
+                    entry
+                        .amount
+                        .checked_mul(loan.remaining_due)
+                        .expect("Overflow computing seized collateral")
+                        / total_claim
+                }
+            };
+
+            if seize_amount > 0 {
+                let token_client = token::Client::new(&env, &entry.asset);
+                token_client.transfer(&pool, &loan.lender, &seize_amount);
+                env.events().publish(
+                    (symbol_short!("loan"), symbol_short!("seized")),
+                    (
+                        loan_id,
+                        loan.borrower.clone(),
+                        loan.lender.clone(),
+                        entry.asset.clone(),
+                        seize_amount,
+                    ),
+                );
+            }
+
+            let left = entry.amount - seize_amount;
+            if left > 0 {
+                remaining_entries.push_back(CollateralEntry {
+                    asset: entry.asset,
+                    amount: left,
+                });
+            }
         }
-        env.storage().persistent().remove(&key);
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::LoanSettled(loan_id), &true);
+        if remaining_entries.is_empty() {
+            env.storage().persistent().remove(&key);
+        } else {
+            env.storage().persistent().set(&key, &remaining_entries);
+        }
     }
 
     // ── Rate model switching ─────────────────────────────────────────────────

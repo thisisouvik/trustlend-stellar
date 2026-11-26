@@ -17,8 +17,9 @@
 //! once the threshold is met) → cross-contract call into the target action.
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, vec, Address, BytesN, Env, IntoVal, Symbol, Val,
-    Vec,
+    auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
+    contract, contractimpl, contracttype, symbol_short, vec, Address, BytesN, Env, IntoVal, Symbol,
+    Val, Vec,
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -321,6 +322,29 @@ impl MultiSigAdminContract {
                 env.invoke_contract::<()>(target, &Symbol::new(env, "set_oracle"), args);
             }
             AdminAction::AddToInsurance(target, amount) => {
+                let insurance_token = env.invoke_contract::<Address>(
+                    target,
+                    &Symbol::new(env, "get_insurance_token"),
+                    vec![env],
+                );
+                // Authorize DefaultManagementContract -> token.transfer(multisig, dm, amount)
+                // so Soroban enforces real contract custody during cross-contract deposit.
+                env.authorize_as_current_contract(vec![
+                    env,
+                    InvokerContractAuthEntry::Contract(SubContractInvocation {
+                        context: ContractContext {
+                            contract: insurance_token,
+                            fn_name: Symbol::new(env, "transfer"),
+                            args: vec![
+                                env,
+                                me.into_val(env),
+                                target.into_val(env),
+                                amount.into_val(env),
+                            ],
+                        },
+                        sub_invocations: vec![env],
+                    }),
+                ]);
                 let args: Vec<Val> = vec![env, me.into_val(env), amount.into_val(env)];
                 env.invoke_contract::<()>(target, &Symbol::new(env, "add_to_insurance"), args);
             }

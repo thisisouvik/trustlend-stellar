@@ -10,8 +10,12 @@ fn setup() -> (Env, Address, Address) {
     let admin = Address::generate(&env);
     let insurance_token = env.register_stellar_asset_contract_v2(Address::generate(&env)).address();
     let contract_id = env.register(DefaultManagementContract, (&admin, &insurance_token));
-    token::StellarAssetClient::new(&env, &insurance_token).mint(&admin, &100_000_000);
-    DefaultManagementContractClient::new(&env, &contract_id).add_to_insurance(&admin, &10_000_000);
+    token::StellarAssetClient::new(&env, &insurance_token).mint(&contract_id, &10_000_000);
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .persistent()
+            .set(&DataKey::InsuranceBalance, &10_000_000_i128);
+    });
 
     (env, contract_id, admin)
 }
@@ -29,11 +33,11 @@ fn setup_with_multisig() -> (Env, Address, Address, Address, Address) {
     let insurance_token = env.register_stellar_asset_contract_v2(Address::generate(&env)).address();
     let contract_id = env.register(DefaultManagementContract, (&admin, &insurance_token));
     let client = DefaultManagementContractClient::new(&env, &contract_id);
-    token::StellarAssetClient::new(&env, &insurance_token).mint(&admin, &100_000_000);
-    client.add_to_insurance(&admin, &10_000_000);
 
     let admins = soroban_sdk::vec![&env, admin.clone(), signer1.clone()];
     client.setup_multisig(&admin, &admins, &2);
+    token::StellarAssetClient::new(&env, &insurance_token).mint(&admin, &100_000_000);
+    client.add_to_insurance(&admin, &10_000_000);
 
     (env, contract_id, admin, signer1, borrower)
 }
@@ -97,8 +101,8 @@ fn test_insurance_payout() {
 #[test]
 #[should_panic(expected = "Insurance deposit must be positive")]
 fn test_insurance_deposit_rejects_zero_amount() {
-    let (_env, contract_id, admin) = setup();
-    DefaultManagementContractClient::new(&_env, &contract_id).add_to_insurance(&admin, &0);
+    let (env, contract_id, admin, _signer1, _borrower) = setup_with_multisig();
+    DefaultManagementContractClient::new(&env, &contract_id).add_to_insurance(&admin, &0);
 }
 
 #[test]
